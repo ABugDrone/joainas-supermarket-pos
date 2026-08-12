@@ -192,7 +192,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Issues**: [GitHub Issues](https://github.com/ABugDrone/Small-Business-Sales-and-Inventory-system-Desktop-APP/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/ABugDrone/Small-Business-Sales-and-Inventory-system-Desktop-APP/discussions)
-- **Email**: support@dronebug.tech
+- **Email**: dronebugtechnologies@gmail.com
 
 ## 🌟 Show Your Support
 
