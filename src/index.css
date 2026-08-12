@@ -1,0 +1,310 @@
+@import "tailwindcss";
+
+/* ================= DESIGN TOKENS ================= */
+:root {
+  /* Brand colors (from Joainas Mart logo) */
+  --brand-blue: #0052D4;
+  --brand-blue-light: #4364F7;
+  --brand-blue-pale: #6FB1FC;
+  --brand-orange: #FF512F;
+  --brand-orange-light: #F09819;
+
+  /* Default: Joainas Light theme */
+  --bg-app: #F1F5F9;
+  --bg-surface: #FFFFFF;
+  --bg-sidebar: #FFFFFF;
+  --bg-header: #FFFFFF;
+  --bg-hover: #F8FAFC;
+  --bg-input: #F8FAFC;
+  --border-color: #E2E8F0;
+  --border-strong: #CBD5E1;
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-muted: #475569;
+  --text-inverse: #FFFFFF;
+  --accent-color: #0052D4;
+  --accent-hover: #4364F7;
+  --accent-orange: #FF512F;
+  --accent-orange-hover: #F09819;
+  --success: #10B981;
+  --success-bg: #ECFDF5;
+  --warning: #F59E0B;
+  --warning-bg: #FFFBEB;
+  --error: #EF4444;
+  --error-bg: #FEF2F2;
+  --info: #06B6D4;
+  --info-bg: #ECFEFF;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Typography - use system Inter (ships with Win 11+) + graceful fallback */
+  --font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ================= THEME CSS VARIABLE MAPPING ================= */
+/* Map hardcoded old dark colors to new CSS variables */
+
+/* Old bg-[#0c0e12] → new app background */
+[class*="bg-[#0c0e12]"],
+.bg-\[\#0c0e12\] {
+  background-color: var(--bg-app) !important;
+}
+
+/* Old bg-[#161b22] → new surface */
+[class*="bg-[#161b22]"],
+.bg-\[\#161b22\] {
+  background-color: var(--bg-surface) !important;
+}
+
+/* Old bg-[#0d1117] → new header/sidebar */
+[class*="bg-[#0d1117]"],
+.bg-\[\#0d1117\] {
+  background-color: var(--bg-header) !important;
+}
+
+/* Old bg-[#21262d] → new hover */
+[class*="bg-[#21262d]"],
+.bg-\[\#21262d\] {
+  background-color: var(--bg-hover) !important;
+}
+
+/* Old border-[#30363d] → new border */
+[class*="border-[#30363d]"],
+.border-\[\#30363d\] {
+  border-color: var(--border-color) !important;
+}
+
+[class*="divide-[#30363d]"],
+.divide-\[\#30363d\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border-color) !important;
+}
+
+/* Old text-[#e2e8f0] → new primary text */
+[class*="text-[#e2e8f0]"],
+.text-\[\#e2e8f0\] {
+  color: var(--text-primary) !important;
+}
+
+/* Theme-aware text color overrides — force dark readable colors on light themes */
+html.light-theme .text-slate-100,
+html.light-theme .text-slate-200,
+html.light-theme .text-slate-300,
+html.light-theme .text-slate-400,
+html.light-theme .text-slate-500 {
+  color: #1E293B !important;
+}
+
+html.light-theme .text-gray-100,
+html.light-theme .text-gray-200,
+html.light-theme .text-gray-300,
+html.light-theme .text-gray-400,
+html.light-theme .text-gray-500 {
+  color: #1E293B !important;
+}
+
+html.light-theme .text-gray-600 {
+  color: #374151 !important;
+}
+
+/* Additional light theme text color overrides for better readability */
+html.light-theme .text-white {
+  color: #0F172A !important;
+}
+
+html.light-theme .text-cyan-300,
+html.light-theme .text-cyan-400 {
+  color: #0E7490 !important;
+}
+
+html.light-theme .text-emerald-300,
+html.light-theme .text-emerald-400 {
+  color: #047857 !important;
+}
+
+html.light-theme .text-orange-300,
+html.light-theme .text-orange-400 {
+  color: #C2410C !important;
+}
+
+html.light-theme .text-red-300,
+html.light-theme .text-red-400 {
+  color: #B91C1C !important;
+}
+
+html.light-theme .text-blue-300,
+html.light-theme .text-blue-400 {
+  color: #1D4ED8 !important;
+}
+
+html.dark-theme .text-slate-200,
+html.dark-theme .text-slate-300 {
+  color: #94A3B8 !important;
+}
+
+html.dark-theme .text-slate-400,
+html.dark-theme .text-slate-500 {
+  color: #CBD5E1 !important;
+}
+
+/* Input styling */
+html.light-theme input,
+html.light-theme select,
+html.light-theme textarea {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-color) !important;
+}
+
+html.dark-theme input,
+html.dark-theme select,
+html.dark-theme textarea {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Placeholder text — force PURE BLACK readable color in all light themes.
+   Covers every input type, browser prefix, and Tailwind placeholder utilities. */
+html.light-theme input::placeholder,
+html.light-theme textarea::placeholder,
+html.light-theme select::placeholder,
+html.light-theme input::-webkit-input-placeholder,
+html.light-theme textarea::-webkit-input-placeholder,
+html.light-theme select::-webkit-input-placeholder,
+html.light-theme input::-moz-placeholder,
+html.light-theme textarea::-moz-placeholder,
+html.light-theme select::-moz-placeholder,
+html.light-theme input:-ms-input-placeholder,
+html.light-theme textarea:-ms-input-placeholder,
+html.light-theme select:-ms-input-placeholder {
+  color: #000000 !important;
+  opacity: 1 !important;
+}
+
+/* Override ANY Tailwind placeholder utility classes in light themes */
+html.light-theme ::placeholder,
+html.light-theme ::-webkit-input-placeholder,
+html.light-theme ::-moz-placeholder,
+html.light-theme :-ms-input-placeholder {
+  color: #000000 !important;
+  opacity: 1 !important;
+}
+
+html.light-theme .placeholder-slate-100::placeholder,
+html.light-theme .placeholder-slate-200::placeholder,
+html.light-theme .placeholder-slate-300::placeholder,
+html.light-theme .placeholder-slate-400::placeholder,
+html.light-theme .placeholder-slate-500::placeholder,
+html.light-theme .placeholder-slate-600::placeholder,
+html.light-theme .placeholder-gray-100::placeholder,
+html.light-theme .placeholder-gray-200::placeholder,
+html.light-theme .placeholder-gray-300::placeholder,
+html.light-theme .placeholder-gray-400::placeholder,
+html.light-theme .placeholder-gray-500::placeholder,
+html.light-theme .placeholder-gray-600::placeholder,
+html.light-theme .placeholder-neutral-400::placeholder,
+html.light-theme .placeholder-zinc-400::placeholder,
+html.light-theme .placeholder-stone-400::placeholder,
+html.light-theme .placeholder-white::placeholder {
+  color: #000000 !important;
+  opacity: 1 !important;
+}
+
+/* Select dropdown options must render dark text on light dropdown lists */
+html.light-theme select option {
+  color: #000000 !important;
+  background-color: #ffffff !important;
+}
+
+/* Focus ring styling */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent-color) !important;
+  box-shadow: 0 0 0 3px rgba(0, 82, 212, 0.15);
+}
+
+/* ================= THERMAL PRINT STYLES ================= */
+@media print {
+  @page {
+    size: auto;
+    margin: 0mm;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Courier New', Courier, monospace !important;
+  }
+
+  /* Hide screen-only elements */
+  header,
+  nav,
+  button,
+  .no-print,
+  [role="dialog"] > div > div:not(#printable-thermal-receipt),
+  .backdrop-blur-sm,
+  .backdrop-blur-md,
+  aside {
+    display: none !important;
+  }
+
+  /* Target the thermal receipt element directly */
+  #printable-thermal-receipt {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 3mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  #printable-thermal-receipt table,
+  #printable-thermal-receipt tr,
+  #printable-thermal-receipt td {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}
+
+/* ================= UTILITY ANIMATIONS ================= */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slide-in-from-top-2 {
+  animation: slideInRight 0.3s ease-out;
+}

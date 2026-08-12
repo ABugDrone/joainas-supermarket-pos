@@ -1,0 +1,245 @@
+import React from 'react';
+import { Printer, X, Copy, Check, Volume2 } from 'lucide-react';
+import { SaleRecord, ThermalPrinterConfig } from '../types';
+import { formatNaira, playPOSBeep } from '../utils/storage';
+
+interface ThermalReceiptModalProps {
+  sale: SaleRecord | null;
+  config: ThermalPrinterConfig;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
+  sale,
+  config,
+  isOpen,
+  onClose,
+}) => {
+  const [copied, setCopied] = React.useState(false);
+
+  if (!isOpen || !sale) return null;
+
+  const handlePrint = () => {
+    playPOSBeep();
+    window.print();
+  };
+
+  const getEscPosText = () => {
+    let text = `================================\n`;
+    text += `       ${config.storeName}\n`;
+    text += `  ${config.tagline}\n`;
+    text += `================================\n`;
+    text += `Address: ${config.address}\n`;
+    text += `Tel: ${config.phone}\n`;
+    text += `--------------------------------\n`;
+    text += `Receipt No: ${sale.receiptNo}\n`;
+    text += `Date: ${sale.date}  Time: ${sale.time}\n`;
+    text += `Cashier: ${sale.cashier}\n`;
+    if (sale.customerName) {
+      text += `Customer: ${sale.customerName}\n`;
+      if (sale.customerPhone) text += `Phone: ${sale.customerPhone}\n`;
+    }
+    text += `Type: ${sale.priceType.toUpperCase()} SALE\n`;
+    text += `--------------------------------\n`;
+    text += `QTY  ITEM              PRICE     AMT\n`;
+    text += `--------------------------------\n`;
+
+    sale.items.forEach((item) => {
+      const name = item.product.name.substring(0, 16).padEnd(16, ' ');
+      const qty = item.quantity.toString().padStart(3, ' ');
+      const rate = item.rate.toLocaleString().padStart(7, ' ');
+      const amt = item.amount.toLocaleString().padStart(8, ' ');
+      text += `${qty} ${name} ${rate} ${amt}\n`;
+    });
+
+    text += `--------------------------------\n`;
+    text += `TOTAL:          ₦${sale.totalAmount.toLocaleString()}\n`;
+    text += `PAID (ADVANCE): ₦${sale.advancePayment.toLocaleString()}\n`;
+    text += `BALANCE DUE:    ₦${sale.balanceDue.toLocaleString()}\n`;
+    text += `PAYMENT METHOD: ${sale.paymentMethod}\n`;
+    text += `LOYALTY POINTS: +${sale.pointsEarned}\n`;
+    text += `--------------------------------\n`;
+    text += `${config.receiptFooterNote}\n`;
+    text += `Software by Dronebug Tech (+2347035716349)\n`;
+    text += `================================\n\n\n`;
+    return text;
+  };
+
+  const handleCopyText = () => {
+    navigator.clipboard.writeText(getEscPosText());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto animate-fadeIn">
+      <div className="relative w-full max-w-lg bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl shadow-2xl overflow-hidden my-8 animate-fadeIn">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between border-b border-[var(--border-color)] px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[var(--accent-color)]/10 text-[var(--accent-color)]">
+              <Printer className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-[var(--text-primary)]">Receipt Preview</h3>
+              <p className="text-sm text-[var(--text-muted)]">{sale.receiptNo}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Actions */}
+        <div className="grid grid-cols-2 gap-3 p-6 pb-0">
+          <button
+            onClick={handlePrint}
+            className="flex items-center justify-center gap-2 rounded-xl bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] py-3 px-4 text-sm font-semibold text-white shadow-sm transition"
+          >
+            <Printer className="w-4 h-4" />
+            Print Receipt
+          </button>
+          <button
+            onClick={handleCopyText}
+            className="flex items-center justify-center gap-2 rounded-xl bg-[var(--bg-app)] hover:bg-[var(--bg-hover)] py-3 px-4 text-sm font-medium text-[var(--text-secondary)] border border-[var(--border-color)] transition"
+          >
+            {copied ? <Check className="w-4 h-4 text-[var(--success)]" /> : <Copy className="w-4 h-4" />}
+            {copied ? 'Copied!' : 'Copy Text'}
+          </button>
+        </div>
+
+        {/* Receipt Paper */}
+        <div className="overflow-y-auto max-h-[55vh] bg-[var(--bg-app)] p-6 m-6 rounded-xl border border-[var(--border-color)] flex flex-col items-center shadow-inner">
+          <div className="w-full flex items-center justify-between text-xs text-[var(--text-muted)] mb-3 px-1">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[var(--success)]"></span>
+              {config.paperWidth} Paper Roll
+            </span>
+            <span>{sale.items.length} items</span>
+          </div>
+
+          {/* Receipt */}
+          <div
+            id="printable-thermal-receipt"
+            className={`bg-white text-black p-5 rounded-lg shadow-lg border border-gray-200 ${
+              config.paperWidth === '58mm' ? 'w-[240px]' : 'w-[330px]'
+            }`}
+            style={{ fontFamily: "'Courier New', Courier, monospace" }}
+          >
+            {/* Store Header */}
+            <div className="text-center mb-3 pb-3 border-b border-dashed border-gray-300">
+              {config.showLogo && (
+                <img src="/logo.png" alt="Logo" className="w-12 h-12 mx-auto mb-2 object-contain" />
+              )}
+              <div className="font-black text-sm tracking-tight text-black uppercase">{config.storeName}</div>
+              <div className="text-[10px] text-gray-600 font-bold mt-0.5">{config.tagline}</div>
+              <div className="text-[10px] text-gray-500 mt-1">{config.address}</div>
+              <div className="text-[10px] text-gray-500">Tel: {config.phone}</div>
+            </div>
+
+            {/* Transaction Info */}
+            <div className="border-t border-b border-dashed border-gray-300 py-2 my-2 text-[11px] space-y-0.5">
+              <div className="flex justify-between">
+                <span>Receipt:</span>
+                <span className="font-extrabold">{sale.receiptNo}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Date/Time:</span>
+                <span>{sale.date} {sale.time}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Cashier:</span>
+                <span className="font-semibold">{sale.cashier}</span>
+              </div>
+              {sale.customerName && (
+                <div className="flex justify-between">
+                  <span>Customer:</span>
+                  <span className="font-bold text-gray-900">{sale.customerName}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span>Sale Type:</span>
+                <span className="uppercase font-bold text-blue-800">{sale.priceType}</span>
+              </div>
+            </div>
+
+            {/* Items */}
+            <table className="w-full text-left my-2 border-collapse">
+              <thead>
+                <tr className="border-b-2 border-black text-[10px] font-black uppercase">
+                  <th className="py-1">Qty</th>
+                  <th className="py-1">Item</th>
+                  <th className="py-1 text-right">Rate</th>
+                  <th className="py-1 text-right">Amt</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {sale.items.map((item, idx) => (
+                  <tr key={idx} className="text-[11px]">
+                    <td className="py-1.5 font-bold align-top">{item.quantity}</td>
+                    <td className="py-1.5 pr-1 align-top break-words max-w-[110px] font-semibold text-gray-900">
+                      {item.product.name}
+                    </td>
+                    <td className="py-1.5 text-right align-top text-gray-700">{item.rate.toLocaleString()}</td>
+                    <td className="py-1.5 text-right font-black align-top text-black">
+                      {item.amount.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Totals */}
+            <div className="border-t-2 border-black pt-2 mt-2 space-y-1 text-[11px]">
+              <div className="flex justify-between text-base font-black text-black">
+                <span>TOTAL:</span>
+                <span>{formatNaira(sale.totalAmount)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-gray-800">
+                <span>Paid:</span>
+                <span>{formatNaira(sale.advancePayment)}</span>
+              </div>
+              {sale.balanceDue > 0 && (
+                <div className="flex justify-between font-black text-red-700">
+                  <span>Balance:</span>
+                  <span>{formatNaira(sale.balanceDue)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-[10px] text-gray-700 pt-1 border-t border-dashed border-gray-300">
+                <span>Method:</span>
+                <span className="font-extrabold uppercase">{sale.paymentMethod}</span>
+              </div>
+              {sale.pointsEarned > 0 && (
+                <div className="flex justify-between text-[10px] text-emerald-800 font-bold bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200">
+                  <span>Points Earned:</span>
+                  <span>+{sale.pointsEarned} pts</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="text-center text-[10px] text-gray-800 border-t border-dashed border-gray-300 pt-3 mt-3 space-y-1">
+              <p className="font-bold text-black">{config.receiptFooterNote}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-3 text-xs text-[var(--text-muted)] border-t border-[var(--border-color)]">
+          <span>Paper: <strong className="text-[var(--text-secondary)]">{config.paperWidth}</strong></span>
+          <button
+            onClick={playPOSBeep}
+            className="flex items-center gap-1 text-[var(--accent-color)] hover:underline font-medium"
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+            Test Beep
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};

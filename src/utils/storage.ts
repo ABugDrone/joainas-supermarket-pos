@@ -1,0 +1,399 @@
+import {
+  Product,
+  Customer,
+  SaleRecord,
+  Expenditure,
+  ThermalPrinterConfig,
+  User,
+  AuditLog,
+  UserRole,
+  Category,
+} from '../types';
+import { INITIAL_PRINTER_CONFIG } from '../data/initialData';
+import {
+  isTauriRuntime,
+  dbLoadProducts,
+  dbSaveProducts,
+  dbLoadCustomers,
+  dbSaveCustomers,
+  dbLoadSales,
+  dbSaveSales,
+  dbLoadExpenditures,
+  dbSaveExpenditures,
+  dbLoadPrinterConfig,
+  dbSavePrinterConfig,
+  dbLoadUsers,
+  dbSaveUsers,
+  dbLoadAuditLogs,
+  dbSaveAuditLogs,
+  dbLoadCategories,
+  dbSaveCategories,
+  dbGetSetting,
+  dbSetSetting,
+  dbDeleteSetting,
+} from './db';
+
+// ============================================================
+// IN-MEMORY CACHE — source of truth for the running session.
+// Persisted to the internal SQLite database (Tauri) or
+// localStorage (browser dev fallback).
+// ============================================================
+
+let initialized = false;
+
+let cacheProducts: Product[] = [];
+let cacheCustomers: Customer[] = [];
+let cacheSales: SaleRecord[] = [];
+let cacheExpenditures: Expenditure[] = [];
+let cacheUsers: User[] = [];
+let cacheAuditLogs: AuditLog[] = [];
+let cacheCategories: Category[] = [];
+let cachePrinterConfig: ThermalPrinterConfig | null = null;
+let cacheAdminSetupDone = false;
+let cacheActiveUser: User | null = null;
+
+// Serialized write queue — keeps DB writes in order.
+let writeQueue: Promise<void> = Promise.resolve();
+function enqueueWrite(task: () => Promise<void>): void {
+  writeQueue = writeQueue.then(task).catch((e) => console.error('SQLite write failed', e));
+}
+
+// Browser fallback keys (only used when running outside Tauri).
+const LKEYS = {
+  PRODUCTS: 'joainas_products_v1',
+  CUSTOMERS: 'joainas_customers_v1',
+  SALES: 'joainas_sales_v1',
+  EXPENDITURES: 'joainas_expenditures_v1',
+  PRINTER_CONFIG: 'joainas_printer_config_v1',
+  USERS: 'joainas_users_v1',
+  AUDIT_LOGS: 'joainas_audit_logs_v1',
+  CATEGORIES: 'joainas_categories_v1',
+  ADMIN_SETUP_DONE: 'joainas_admin_setup_done_v1',
+  ACTIVE_USER: 'joainas_active_user_v1',
+};
+
+function lsGet<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function lsSet(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.error(`Failed to save ${key} to localStorage`, e);
+  }
+}
+
+// ============================================================
+// BOOTSTRAP — call once before rendering the app.
+// Loads all persisted data from the internal SQLite DB.
+// ============================================================
+
+export async function initStorage(): Promise<void> {
+  if (initialized) return;
+  initialized = true;
+
+  if (isTauriRuntime()) {
+    const [
+      products,
+      customers,
+      sales,
+      expenditures,
+      users,
+      auditLogs,
+      categories,
+      printerConfig,
+      setupDone,
+      activeUser,
+    ] = await Promise.all([
+      dbLoadProducts(),
+      dbLoadCustomers(),
+      dbLoadSales(),
+      dbLoadExpenditures(),
+      dbLoadUsers(),
+      dbLoadAuditLogs(),
+      dbLoadCategories(),
+      dbLoadPrinterConfig(),
+      dbGetSetting('admin_setup_done'),
+      dbGetSetting('active_user'),
+    ]);
+
+    cacheProducts = products;
+    cacheCustomers = customers;
+    cacheSales = sales;
+    cacheExpenditures = expenditures;
+    cacheUsers = users;
+    cacheAuditLogs = auditLogs;
+    cacheCategories = categories;
+    cachePrinterConfig = printerConfig;
+    cacheAdminSetupDone = setupDone === 'true';
+    cacheActiveUser = activeUser ? JSON.parse(activeUser) : null;
+  } else {
+    cacheProducts = lsGet<Product[]>(LKEYS.PRODUCTS, []);
+    cacheCustomers = lsGet<Customer[]>(LKEYS.CUSTOMERS, []);
+    cacheSales = lsGet<SaleRecord[]>(LKEYS.SALES, []);
+    cacheExpenditures = lsGet<Expenditure[]>(LKEYS.EXPENDITURES, []);
+    cacheUsers = lsGet<User[]>(LKEYS.USERS, []);
+    cacheAuditLogs = lsGet<AuditLog[]>(LKEYS.AUDIT_LOGS, []);
+    cacheCategories = lsGet<Category[]>(LKEYS.CATEGORIES, []);
+    cachePrinterConfig = lsGet<ThermalPrinterConfig | null>(LKEYS.PRINTER_CONFIG, null);
+    cacheAdminSetupDone = lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false);
+    cacheActiveUser = lsGet<User | null>(LKEYS.ACTIVE_USER, null);
+  }
+}
+
+export const isStorageInitialized = (): boolean => initialized;
+
+// ============================================================
+// PRODUCTS
+// ============================================================
+
+export const loadProducts = (): Product[] => cacheProducts;
+
+export const saveProducts = (products: Product[]) => {
+  cacheProducts = products;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSaveProducts(products));
+  } else {
+    lsSet(LKEYS.PRODUCTS, products);
+  }
+};
+
+// ============================================================
+// CUSTOMERS
+// ============================================================
+
+export const loadCustomers = (): Customer[] => cacheCustomers;
+
+export const saveCustomers = (customers: Customer[]) => {
+  cacheCustomers = customers;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSaveCustomers(customers));
+  } else {
+    lsSet(LKEYS.CUSTOMERS, customers);
+  }
+};
+
+// ============================================================
+// SALES
+// ============================================================
+
+export const loadSales = (): SaleRecord[] => cacheSales;
+
+export const saveSales = (sales: SaleRecord[]) => {
+  cacheSales = sales;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSaveSales(sales));
+  } else {
+    lsSet(LKEYS.SALES, sales);
+  }
+};
+
+// ============================================================
+// EXPENDITURES
+// ============================================================
+
+export const loadExpenditures = (): Expenditure[] => cacheExpenditures;
+
+export const saveExpenditures = (expenditures: Expenditure[]) => {
+  cacheExpenditures = expenditures;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSaveExpenditures(expenditures));
+  } else {
+    lsSet(LKEYS.EXPENDITURES, expenditures);
+  }
+};
+
+// ============================================================
+// PRINTER CONFIG
+// ============================================================
+
+export const loadPrinterConfig = (): ThermalPrinterConfig =>
+  cachePrinterConfig || INITIAL_PRINTER_CONFIG;
+
+export const savePrinterConfig = (config: ThermalPrinterConfig) => {
+  cachePrinterConfig = config;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSavePrinterConfig(config));
+  } else {
+    lsSet(LKEYS.PRINTER_CONFIG, config);
+  }
+};
+
+// ============================================================
+// USERS
+// ============================================================
+
+export const loadUsers = (): User[] => cacheUsers;
+
+export const saveUsers = (users: User[]) => {
+  cacheUsers = users;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSaveUsers(users));
+  } else {
+    lsSet(LKEYS.USERS, users);
+  }
+};
+
+// ============================================================
+// AUDIT TRAIL
+// ============================================================
+
+export const loadAuditLogs = (): AuditLog[] => cacheAuditLogs;
+
+export const saveAuditLogs = (logs: AuditLog[]) => {
+  cacheAuditLogs = logs;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSaveAuditLogs(logs));
+  } else {
+    lsSet(LKEYS.AUDIT_LOGS, logs);
+  }
+};
+
+export const recordAuditLog = (
+  username: string,
+  userRole: UserRole,
+  action: string,
+  details: string
+): AuditLog => {
+  let now = new Date();
+  let dateStr = now.toISOString().split('T')[0];
+  let timeStr = now.toTimeString().split(' ')[0];
+
+  let newLog: AuditLog = {
+    id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    username: username || 'System',
+    userRole: userRole || 'Cashier',
+    action,
+    details,
+    timestamp: Date.now(),
+    date: dateStr,
+    time: timeStr,
+  };
+
+  cacheAuditLogs = [newLog, ...cacheAuditLogs];
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSaveAuditLogs(cacheAuditLogs));
+  } else {
+    lsSet(LKEYS.AUDIT_LOGS, cacheAuditLogs);
+  }
+  return newLog;
+};
+
+// ============================================================
+// FIRST-TIME ADMIN SETUP FLAG
+// ============================================================
+
+export const isAdminSetupCompleted = (): boolean => cacheAdminSetupDone;
+
+export const setAdminSetupCompleted = (done: boolean = true) => {
+  cacheAdminSetupDone = done;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSetSetting('admin_setup_done', String(done)));
+  } else {
+    lsSet(LKEYS.ADMIN_SETUP_DONE, done);
+  }
+};
+
+// ============================================================
+// ACTIVE USER SESSION
+// ============================================================
+
+export const getActiveUser = (): User | null => cacheActiveUser;
+
+export const setActiveUserStorage = (user: User | null) => {
+  cacheActiveUser = user;
+  if (isTauriRuntime()) {
+    if (user) {
+      enqueueWrite(() => dbSetSetting('active_user', JSON.stringify(user)));
+    } else {
+      enqueueWrite(() => dbDeleteSetting('active_user'));
+    }
+  } else {
+    if (user) {
+      lsSet(LKEYS.ACTIVE_USER, user);
+    } else {
+      localStorage.removeItem(LKEYS.ACTIVE_USER);
+    }
+  }
+};
+
+// ============================================================
+// CATEGORIES
+// ============================================================
+
+export const loadCategories = (): Category[] => cacheCategories;
+
+export const saveCategories = (categories: Category[]) => {
+  cacheCategories = categories;
+  if (isTauriRuntime()) {
+    enqueueWrite(() => dbSaveCategories(categories));
+  } else {
+    lsSet(LKEYS.CATEGORIES, categories);
+  }
+};
+
+// ============================================================
+// BACKUP FOLDER CONFIGURATION
+// ============================================================
+
+export const getBackupFolderPath = (): string | null => {
+  try {
+    return localStorage.getItem('joainas_backup_folder_path');
+  } catch (e) {
+    console.error('Failed to get backup folder path', e);
+    return null;
+  }
+};
+
+export const setBackupFolderPath = (path: string): void => {
+  try {
+    localStorage.setItem('joainas_backup_folder_path', path);
+  } catch (e) {
+    console.error('Failed to save backup folder path', e);
+  }
+};
+
+// ============================================================
+// MISC UTILITIES
+// ============================================================
+
+export const formatNaira = (amount: number): string => {
+  let num = Math.abs(amount);
+  let formatted = new Intl.NumberFormat('en-NG', {
+    style: 'currency',
+    currency: 'NGN',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(num).replace('NGN', '₦');
+
+  return amount < 0 ? `-${formatted}` : formatted;
+};
+
+// Play POS scanner beep sound using Web Audio API
+export const playPOSBeep = () => {
+  try {
+    let AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    let audioCtx = new AudioCtx();
+    let osc = audioCtx.createOscillator();
+    let gain = audioCtx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.12);
+  } catch (e) {
+    console.log('Audio context not allowed or unsupported', e);
+  }
+};
