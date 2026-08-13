@@ -20,6 +20,11 @@ import {
   saveCategories,
   getBackupFolderPath,
   setBackupFolderPath,
+  pickBackupFolder,
+  pickBackupSavePath,
+  writeBackupFile,
+  pickBackupFile,
+  readBackupFile,
 } from '../utils/storage';
 import { useToast } from './Toast';
 import {
@@ -217,7 +222,23 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const [showSqlViewer, setShowSqlViewer] = useState(false);
 
   // Backup folder configuration
-  const handleConfigureBackupFolder = () => {
+  const handleConfigureBackupFolder = async () => {
+    // Native folder picker lets the admin choose where backups live.
+    const picked = await pickBackupFolder();
+    if (picked) {
+      setBackupFolderPath(picked);
+      recordAuditLog(
+        currentUser,
+        currentUserRole,
+        'Updated Backup Folder Configuration',
+        `Changed backup folder path to: ${picked}`
+      );
+      setAuditLogs(loadAuditLogs());
+      showToast('Backup folder path updated successfully!', 'success');
+      return;
+    }
+
+    // Browser fallback: typed prompt.
     const newPath = prompt('Enter the backup folder path (include "BACKUP" in the path for easier restoration):', getBackupFolderPath() || 'C:\\Users\\Documents\\BACKUP');
     if (newPath && newPath.trim()) {
       setBackupFolderPath(newPath.trim());
@@ -377,7 +398,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   };
 
   // Export Complete System Backup (JSON)
-  const handleExportBackup = () => {
+  const handleExportBackup = async () => {
     try {
       const backupData = {
         app: 'JOAINAS MART POS SYSTEM',
@@ -395,10 +416,35 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       const backupFolderPath = getBackupFolderPath();
       const currentDate = new Date().toISOString().split('T')[0];
       const fileName = `joainas_mart_backup_${currentDate}.json`;
+      const dataStr = JSON.stringify(backupData, null, 2);
 
-      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
+      // Native save dialog: the admin picks exactly where the backup file
+      // is stored on disk (just like restore lets them pick the file).
+      let savedPath: string | null = null;
+      try {
+        savedPath = await pickBackupSavePath(fileName);
+      } catch (dialogError) {
+        console.error('Save dialog failed, falling back to download', dialogError);
+        savedPath = null;
+      }
+
+      if (savedPath) {
+        await writeBackupFile(savedPath, dataStr);
+        recordAuditLog(
+          currentUser,
+          currentUserRole,
+          'Exported Database Backup',
+          `Saved complete JSON system database backup to: ${savedPath}`
+        );
+        setAuditLogs(loadAuditLogs());
+        showToast(`System backup saved successfully to:\n${savedPath}`, 'success');
+        return;
+      }
+
+      // Browser fallback: standard download.
+      const dataUrl = 'data:text/json;charset=utf-8,' + encodeURIComponent(dataStr);
       const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute('href', dataUrl);
       downloadAnchor.setAttribute('download', fileName);
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
@@ -465,6 +511,48 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       }
     };
     reader.readAsText(file);
+  };
+
+  // Native restore picker — point directly at the folder/file where the
+  // backup was originally saved during export.
+  const handleNativeRestore = async () => {
+    try {
+      const path = await pickBackupFile();
+      if (!path) return; // user cancelled
+
+      const contents = await readBackupFile(path);
+      const parsed = JSON.parse(contents);
+      if (!parsed.products || !parsed.customers || !parsed.sales) {
+        showToast('Invalid backup file format! Missing required database tables.', 'error');
+        return;
+      }
+
+      if (parsed.products) saveProducts(parsed.products);
+      if (parsed.customers) saveCustomers(parsed.customers);
+      if (parsed.sales) saveSales(parsed.sales);
+      if (parsed.expenditures) saveExpenditures(parsed.expenditures);
+      if (parsed.printerConfig) savePrinterConfig(parsed.printerConfig);
+      if (parsed.users) {
+        saveUsers(parsed.users);
+        onUpdateUsers(parsed.users);
+      }
+      if (parsed.auditLogs) saveAuditLogs(parsed.auditLogs);
+
+      recordAuditLog(
+        currentUser,
+        currentUserRole,
+        'Restored System Backup',
+        `Restored database tables from backup file "${path}".`
+      );
+
+      showToast('Database backup restored successfully! Reloading system...', 'success');
+      setTimeout(() => {
+        window.location.reload();
+      }, 1200);
+    } catch (err) {
+      console.error('Failed to restore native backup', err);
+      showToast('Error reading backup JSON file!', 'error');
+    }
   };
 
   // Filtered Audit Logs
@@ -955,7 +1043,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                 </p>
               </div>
 
-              <label className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-lg border border-cyan-400/40 transition flex items-center justify-center gap-2 cursor-pointer">
+              <label className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-lg border border-cyan-400/40 transition flex items-center justify-center gap-2 cursor-pointer mb-2">
                 <Upload className="w-4 h-4" />
                 <span>Select & Restore JSON Backup</span>
                 <input
@@ -965,6 +1053,13 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                   className="hidden"
                 />
               </label>
+              <button
+                onClick={handleNativeRestore}
+                className="w-full py-3 bg-cyan-900/40 hover:bg-cyan-800/50 text-cyan-300 font-extrabold text-xs uppercase tracking-wider rounded-xl shadow border border-cyan-400/30 transition flex items-center justify-center gap-2"
+              >
+                <FileCode className="w-4 h-4" />
+                <span>Browse Disk & Restore (Native)</span>
+              </button>
             </div>
           </div>
 

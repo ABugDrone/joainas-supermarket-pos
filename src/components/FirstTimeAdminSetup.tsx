@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, User, Lock, Phone, KeyRound, ArrowRight, FolderOpen, HardDrive } from 'lucide-react';
 import { User as UserType } from '../types';
-import { saveUsers, loadUsers, setAdminSetupCompleted, recordAuditLog } from '../utils/storage';
+import { saveUsers, loadUsers, setAdminSetupCompleted, recordAuditLog, pickBackupFolder, setBackupFolderPath as persistBackupFolderPath } from '../utils/storage';
 import { useToast } from './Toast';
 
 interface FirstTimeAdminSetupProps {
@@ -37,16 +37,24 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
   };
 
   const handleSelectBackupFolder = async () => {
+    // Native folder picker in the Tauri desktop shell so the admin truly
+    // selects where backups are stored. Browser dev falls back to a default.
     try {
-      // In a real Tauri app, you would use the file system API
-      // For now, we'll set a default suggested path
-      const documentsPath = 'C:\\Users\\' + (username || 'admin') + '\\Documents\\BACKUP';
-      setBackupFolderPath(documentsPath);
-      showToast('Default backup folder selected: ' + documentsPath, 'success');
+      const picked = await pickBackupFolder();
+      if (picked) {
+        persistBackupFolderPath(picked); // persist
+        setBackupFolderPath(picked); // show in input
+        showToast('Backup folder selected: ' + picked, 'success');
+        return;
+      }
     } catch (error) {
-      showToast('Error selecting backup folder. Using default location.', 'warning');
-      setBackupFolderPath('C:\\Users\\Documents\\BACKUP');
+      console.error('Backup folder picker failed', error);
     }
+
+    const documentsPath = 'C:\\Users\\' + (username || 'admin') + '\\Documents\\BACKUP';
+    persistBackupFolderPath(documentsPath);
+    setBackupFolderPath(documentsPath);
+    showToast('Default backup folder selected: ' + documentsPath, 'success');
   };
 
   const handleCompleteSetup = () => {
@@ -72,9 +80,9 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
     let updatedUsers = [newAdmin, ...existingUsers.filter((u) => u.username !== username)];
     saveUsers(updatedUsers);
 
-    // Save backup folder path to localStorage
+    // Save backup folder path to persistent storage
     try {
-      localStorage.setItem('joainas_backup_folder_path', backupFolderPath);
+      persistBackupFolderPath(backupFolderPath);
     } catch (e) {
       console.error('Failed to save backup folder path', e);
     }

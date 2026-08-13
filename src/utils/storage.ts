@@ -360,6 +360,107 @@ export const setBackupFolderPath = (path: string): void => {
 };
 
 // ============================================================
+// NATIVE FILE DIALOGS (Tauri) — pick where backups are saved,
+// just like the restore flow lets you pick the file to import.
+// Falls back to null on browser so callers keep web behavior.
+// ============================================================
+
+async function loadDialogPlugin(): Promise<typeof import('@tauri-apps/plugin-dialog') | null> {
+  if (!isTauriRuntime()) return null;
+  try {
+    return await import('@tauri-apps/plugin-dialog');
+  } catch (e) {
+    console.error('Dialog plugin unavailable', e);
+    return null;
+  }
+}
+
+async function loadFsPlugin(): Promise<typeof import('@tauri-apps/plugin-fs') | null> {
+  if (!isTauriRuntime()) return null;
+  try {
+    return await import('@tauri-apps/plugin-fs');
+  } catch (e) {
+    console.error('FS plugin unavailable', e);
+    return null;
+  }
+}
+
+// Open a native folder picker. Returns the selected folder path or null.
+export async function pickBackupFolder(): Promise<string | null> {
+  const dialog = await loadDialogPlugin();
+  if (!dialog) return null;
+  try {
+    const selected = await dialog.open({
+      title: 'Select BACKUP Folder',
+      directory: true,
+      multiple: false,
+    });
+    return typeof selected === 'string' ? selected : null;
+  } catch (e) {
+    console.error('Failed to pick backup folder', e);
+    return null;
+  }
+}
+
+// Open a native save dialog for the backup file. Returns chosen path or null.
+export async function pickBackupSavePath(defaultFileName: string): Promise<string | null> {
+  const dialog = await loadDialogPlugin();
+  if (!dialog) return null;
+  try {
+    const selected = await dialog.save({
+      title: 'Save System Backup',
+      defaultPath: defaultFileName,
+      filters: [{ name: 'JSON Backup', extensions: ['json'] }],
+    });
+    return typeof selected === 'string' ? selected : null;
+  } catch (e) {
+    console.error('Failed to pick backup save path', e);
+    return null;
+  }
+}
+
+// Write the JSON backup payload to the chosen file path on disk.
+export async function writeBackupFile(path: string, contents: string): Promise<void> {
+  const fs = await loadFsPlugin();
+  if (!fs) return;
+  try {
+    await fs.writeTextFile(path, contents);
+  } catch (e) {
+    console.error('Failed to write backup file', e);
+    throw e;
+  }
+}
+
+// Open a native file picker to locate an existing backup file. Returns its path or null.
+export async function pickBackupFile(): Promise<string | null> {
+  const dialog = await loadDialogPlugin();
+  if (!dialog) return null;
+  try {
+    const selected = await dialog.open({
+      title: 'Select Backup File to Restore',
+      multiple: false,
+      filters: [{ name: 'JSON Backup', extensions: ['json'] }],
+    });
+    return typeof selected === 'string' ? selected : null;
+  } catch (e) {
+    console.error('Failed to pick backup file', e);
+    return null;
+  }
+}
+
+// Read the JSON contents of a backup file picked earlier (or its raw text).
+export async function readBackupFile(path: string): Promise<string> {
+  const fs = await loadFsPlugin();
+  if (!fs) throw new Error('FS plugin unavailable');
+  try {
+    return await fs.readTextFile(path);
+  } catch (e) {
+    console.error('Failed to read backup file', e);
+    throw e;
+  }
+}
+
+// ============================================================
 // MISC UTILITIES
 // ============================================================
 
