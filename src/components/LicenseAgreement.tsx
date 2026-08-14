@@ -116,7 +116,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
             </button>
           </div>
           <p className="mt-4 text-center text-[10px] text-[var(--text-muted)]">
-            Joainas POS v1.3.0 • Dronebug Technologies and Services
+            Joainas POS v1.3.1 • Dronebug Technologies and Services
           </p>
         </div>
       </div>

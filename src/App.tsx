@@ -25,6 +25,7 @@ import {
   saveUsers,
   recordAuditLog,
   isLicenseAccepted,
+  setLicenseAccepted,
   getDatabaseMigrationNote,
 } from './utils/storage';
 
@@ -52,11 +53,11 @@ function MainAppContent() {
     'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'admin'
   >('pos');
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [sales, setSales] = useState<SaleRecord[]>([]);
-  const [expenditures, setExpenditures] = useState<Expenditure[]>([]);
-  const [printerConfig, setPrinterConfig] = useState<ThermalPrinterConfig>(loadPrinterConfig());
+  const [products, setProducts] = useState<Product[]>(() => loadProducts());
+  const [customers, setCustomers] = useState<Customer[]>(() => loadCustomers());
+  const [sales, setSales] = useState<SaleRecord[]>(() => loadSales());
+  const [expenditures, setExpenditures] = useState<Expenditure[]>(() => loadExpenditures());
+  const [printerConfig, setPrinterConfig] = useState<ThermalPrinterConfig>(() => loadPrinterConfig());
   const [users, setUsers] = useState<User[]>(() => loadUsers());
 
   // Current logged in user — always starts as null. Per-process session:
@@ -70,13 +71,14 @@ function MainAppContent() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isDevModalOpen, setIsDevModalOpen] = useState(false);
 
-  // Initialize data on mount
+  // Initialize data on mount — now eagerly loaded via useState initializers.
+  // This effect only serves as a fallback for edge cases where cache might be
+  // empty on first render (e.g. browser dev mode).
   useEffect(() => {
-    setProducts(loadProducts());
-    setCustomers(loadCustomers());
-    setSales(loadSales());
-    setExpenditures(loadExpenditures());
-    setPrinterConfig(loadPrinterConfig());
+    if (products.length === 0) setProducts(loadProducts());
+    if (customers.length === 0) setCustomers(loadCustomers());
+    if (sales.length === 0) setSales(loadSales());
+    if (expenditures.length === 0) setExpenditures(loadExpenditures());
   }, []);
 
   // Show a one-time note if the live database was moved to Documents\Backup
@@ -241,6 +243,7 @@ function MainAppContent() {
       currentUserRole={currentUser.role}
       currentUserCapabilities={currentUser.capabilities || []}
       todaySalesTotal={todaySalesTotal}
+      products={products}
       onOpenLoginModal={() => setIsLoginModalOpen(true)}
       onLogout={handleLogout}
       onOpenDevModal={() => setIsDevModalOpen(true)}

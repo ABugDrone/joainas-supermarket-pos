@@ -1,5 +1,26 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.3.1 (2026-08-14)
+
+### 🔔 New Feature
+- **Low Stock Notification Bell**: A persistent bell icon in the header alerts staff when products are about to deplete
+  - Red badge shows the number of products at or below their reorder level
+  - Clicking the bell opens a dropdown listing every low-stock item (current stock vs reorder threshold) with a "Restock in Inventory" shortcut
+  - Reminder notification fires once on login and then **every 1 hour** (with a distinct alert sound) until the stock is replenished
+  - Reminders stop automatically once all products are back above their reorder level
+
+### 🐛 Fixed Bugs
+- **License Agreement Crash**: Fixed `setLicenseAccepted is not defined` ReferenceError that blocked the license screen from being accepted on v1.3.0
+- **Blank Screen After Login**: Data is now loaded eagerly from the store cache so modules render immediately instead of flashing blank
+- **Login Overlay Flash**: Removed the fragile gradient overlay on the full-screen login to prevent a lingering blank screen after sign-in
+- **Quick Access Buttons Removed**: Removed the "Quick Access" auto-login buttons from the login UI — all staff must now type their username and password (no more hardcoded credentials)
+
+### 📋 Technical Improvements
+- Version bumped to 1.3.1 across package.json, Cargo.toml, Cargo.lock, and tauri.conf.json
+- Added `playLowStockAlert` tone (distinct double-beep) in storage utilities
+
+---
+
 ## Version 1.3.0 (2026-08-14)
 
 ### 🔐 New Features

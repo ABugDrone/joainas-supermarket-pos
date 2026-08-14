@@ -13,10 +13,15 @@ import {
   Clock,
   Palette,
   FileSpreadsheet,
+  Bell,
+  BellRing,
+  AlertTriangle,
+  PackagePlus,
 } from 'lucide-react';
 import { HeaderLogo } from './HeaderLogo';
-import { formatNaira } from '../utils/storage';
-import { Capability, UserRole } from '../types';
+import { formatNaira, playLowStockAlert } from '../utils/storage';
+import { Capability, UserRole, Product } from '../types';
+import { useToast } from './Toast';
 import {
   getSavedTheme,
   applyThemeToDocument,
@@ -38,6 +43,7 @@ interface DesktopShellProps {
   currentUserRole: UserRole;
   currentUserCapabilities: Capability[];
   todaySalesTotal: number;
+  products: Product[];
   onOpenLoginModal: () => void;
   onLogout?: () => void;
   onOpenDevModal: () => void;
@@ -82,20 +88,70 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   currentUserRole,
   currentUserCapabilities,
   todaySalesTotal,
+  products,
   onOpenLoginModal,
   onLogout,
   onOpenDevModal,
   children,
 }) => {
+  const { showToast } = useToast();
   const [time, setTime] = React.useState<string>('');
   const [date, setDate] = React.useState<string>('');
   const [isOffline, setIsOffline] = React.useState<boolean>(!navigator.onLine);
+
+  // Low-stock alert state: bell badge + dropdown + hourly reminder.
+  const [isStockAlertOpen, setIsStockAlertOpen] = React.useState(false);
+  const lastStockAlertAtRef = React.useRef<number>(0);
 
   // Theme & Display State
   const [activeTheme, setActiveTheme] = React.useState<ThemeId>(() => getSavedTheme());
   const [activeFontSize, setActiveFontSize] = React.useState<FontSizeId>(() => getSavedFontSize());
   const [activeFontFamily, setActiveFontFamily] = React.useState<FontFamilyId>(() => getSavedFontFamily());
   const [isThemeModalOpen, setIsThemeModalOpen] = React.useState(false);
+
+  // Products that are at or below their reorder level.
+  const lowStockProducts = React.useMemo(
+    () => products.filter((p) => p.stockQty <= p.reorderLevel),
+    [products]
+  );
+
+  const hasInventoryCapability = currentUserCapabilities.includes('inventory');
+
+  // Notify the current user when products are about to deplete — once on
+  // mount, then repeated every 1 hour until the stock is replenished.
+  React.useEffect(() => {
+    if (lowStockProducts.length === 0) {
+      lastStockAlertAtRef.current = 0;
+      return;
+    }
+
+    const notify = () => {
+      const now = Date.now();
+      if (now - lastStockAlertAtRef.current < 60 * 60 * 1000) return;
+      lastStockAlertAtRef.current = now;
+
+      playLowStockAlert();
+
+      const top = lowStockProducts.slice(0, 3).map((p) => p.name).join(', ');
+      const more = lowStockProducts.length - 3;
+      showToast(
+        `Low stock alert: ${lowStockProducts.length} product(s) about to deplete (${top}${
+          more > 0 ? ` +${more} more` : ''
+        }). Please add stock.`,
+        'warning'
+      );
+    };
+
+    // Fire immediately so the user is aware as soon as stock runs low.
+    const initial = setTimeout(notify, 1200);
+    // Repeat the reminder every hour while stock stays low.
+    const hourly = setInterval(notify, 60 * 60 * 1000);
+
+    return () => {
+      clearTimeout(initial);
+      clearInterval(hourly);
+    };
+  }, [lowStockProducts.length, showToast]);
 
   // Capability-based filtering: admin sees all; everyone else only the
   // modules their granted capabilities allow.
@@ -280,6 +336,92 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
 
           {/* Right side of header */}
           <div className="flex items-center gap-3">
+            {/* Low stock notification bell */}
+            <div className="relative">
+              <button
+                onClick={() => setIsStockAlertOpen((v) => !v)}
+                className={`relative p-2 rounded-lg border transition ${
+                  lowStockProducts.length > 0
+                    ? 'bg-[var(--warning-bg)] border-[var(--warning)] text-[var(--warning)]'
+                    : 'bg-[var(--bg-app)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+                title={
+                  lowStockProducts.length > 0
+                    ? `${lowStockProducts.length} product(s) low on stock`
+                    : 'No low stock alerts'
+                }
+              >
+                {lowStockProducts.length > 0 ? (
+                  <BellRing className="w-4 h-4 animate-pulse" />
+                ) : (
+                  <Bell className="w-4 h-4" />
+                )}
+                {lowStockProducts.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--error)] text-white text-[10px] font-bold flex items-center justify-center shadow">
+                    {lowStockProducts.length}
+                  </span>
+                )}
+              </button>
+
+              {isStockAlertOpen && (
+                <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-xl shadow-2xl overflow-hidden z-50 animate-fadeIn">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-app)]">
+                    <span className="text-xs font-black uppercase tracking-wide text-[var(--text-primary)] flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-[var(--warning)]" />
+                      Low Stock Alerts
+                    </span>
+                    <button
+                      onClick={() => setIsStockAlertOpen(false)}
+                      className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto">
+                    {lowStockProducts.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-sm text-[var(--text-muted)]">
+                        All products are well stocked. 🎉
+                      </div>
+                    ) : (
+                      lowStockProducts.map((p) => (
+                        <div
+                          key={p.id}
+                          className="px-4 py-2.5 border-b border-[var(--border-color)] last:border-0 flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-[var(--text-primary)] truncate">
+                              {p.name}
+                            </div>
+                            <div className="text-[11px] text-[var(--text-muted)]">
+                              Left: <strong className="text-[var(--error)]">{p.stockQty}</strong> / Reorder at{' '}
+                              {p.reorderLevel}
+                            </div>
+                          </div>
+                          <span className="shrink-0 text-[10px] font-black uppercase px-2 py-1 rounded bg-[var(--error-bg)] text-[var(--error)]">
+                            Low
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {lowStockProducts.length > 0 && hasInventoryCapability && (
+                    <button
+                      onClick={() => {
+                        setIsStockAlertOpen(false);
+                        setActiveTab('inventory');
+                      }}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold transition"
+                    >
+                      <PackagePlus className="w-4 h-4" />
+                      Restock in Inventory
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Online/Offline indicator */}
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${
               isOffline
@@ -337,7 +479,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v1.3.0 • Dronebug Technologies
+            v1.3.1 • Dronebug Technologies
           </div>
         </footer>
       </div>

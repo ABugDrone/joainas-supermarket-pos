@@ -577,3 +577,32 @@ export const playPOSBeep = () => {
     console.log('Audio context not allowed or unsupported', e);
   }
 };
+
+// Play a distinct low-stock alert tone (double beep) so the user notices
+// the notification even without looking at the screen.
+export const playLowStockAlert = () => {
+  try {
+    let AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    let audioCtx = new AudioCtx();
+
+    const tone = (freq: number, startAt: number, duration: number) => {
+      let osc = audioCtx.createOscillator();
+      let gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime + startAt);
+      gain.gain.setValueAtTime(0.001, audioCtx.currentTime + startAt);
+      gain.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime + startAt + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + startAt + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(audioCtx.currentTime + startAt);
+      osc.stop(audioCtx.currentTime + startAt + duration);
+    };
+
+    // Two short descending beeps — clearly distinguishable from the scanner beep.
+    tone(880, 0, 0.18);
+    tone(660, 0.22, 0.28);
+  } catch (e) {
+    console.log('Audio context not allowed or unsupported', e);
+  }
+};

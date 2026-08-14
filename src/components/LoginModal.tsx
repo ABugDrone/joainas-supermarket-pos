@@ -104,7 +104,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   };
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 font-sans select-none ${fullScreen ? 'bg-gradient-to-br from-[var(--accent-color)]/10 to-[var(--accent-orange)]/10' : ''}`}>
+    <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 font-sans select-none ${
+      fullScreen ? 'bg-black' : 'bg-black/50 backdrop-blur-sm'
+    }`}>
       <div className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl shadow-2xl overflow-hidden animate-fadeIn">
         {/* Header with logo */}
         <div className="bg-gradient-to-r from-[var(--accent-color)] to-[var(--accent-hover)] px-8 py-8 text-center">
@@ -118,38 +120,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
         </div>
 
         <form onSubmit={handleSubmit} className="p-8 space-y-5">
-          {/* Quick Staff Selection */}
-          <div>
-            <label className="block text-sm font-semibold text-[var(--text-secondary)] mb-3">
-              Quick Access
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { name: 'admin', label: 'Admin' },
-                { name: 'cashier1', label: 'Cashier 1' },
-                { name: 'cashier2', label: 'Cashier 2' },
-                { name: 'manager', label: 'Manager' },
-              ].map((staff) => (
-                <button
-                  key={staff.name}
-                  type="button"
-                  onClick={() => {
-                    setUsername(staff.name);
-                    if (staff.name === 'admin') setPassword('admin123');
-                    else setPassword('1234');
-                  }}
-                  className={`py-3 px-4 rounded-xl font-semibold text-sm transition border ${
-                    username === staff.name
-                      ? 'bg-[var(--accent-color)] text-white border-[var(--accent-color)] shadow-md'
-                      : 'bg-[var(--bg-app)] text-[var(--text-secondary)] border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
-                  }`}
-                >
-                  {staff.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Username */}
           <div>
             <label className="block text-sm font-semibold text-[var(--text-secondary)] mb-1.5">
