@@ -1,13 +1,15 @@
 import React from 'react';
-import { FileText, Printer, TrendingUp, DollarSign, ShoppingBag, Search } from 'lucide-react';
-import { SaleRecord, UserRole } from '../types';
+import { FileText, Printer, TrendingUp, DollarSign, ShoppingBag, Search, Lock, LockOpen } from 'lucide-react';
+import { SaleRecord, UserRole, User } from '../types';
 import { formatNaira, recordAuditLog } from '../utils/storage';
+import { can } from '../utils/permissions';
 import { useToast } from './Toast';
 
 interface SalesRecordsProps {
   sales: SaleRecord[];
   currentUser: string;
   currentUserRole: UserRole;
+  currentUserCapabilities: User['capabilities'];
   onReprintReceipt: (sale: SaleRecord) => void;
 }
 
@@ -15,6 +17,7 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
   sales,
   currentUser,
   currentUserRole,
+  currentUserCapabilities,
   onReprintReceipt,
 }) => {
   const { showToast } = useToast();
@@ -27,8 +30,14 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
 
   const todayStr = new Date().toISOString().split('T')[0];
 
+  // A cashier (or any non-admin) may only see the sales they attended to.
+  // Admins and users with the admin capability can see every transaction.
+  const isViewerAdmin = can({ capabilities: currentUserCapabilities }, 'admin');
+
   const filteredSales = React.useMemo(() => {
     return sales.filter((sale) => {
+      if (!isViewerAdmin && sale.cashier !== currentUser) return false;
+
       if (filterMode === 'today' && sale.date !== todayStr) return false;
       if (filterMode === 'date' && sale.date !== singleDate) return false;
       if (filterMode === 'range') {
@@ -45,7 +54,7 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
 
       return true;
     });
-  }, [sales, filterMode, todayStr, singleDate, fromDate, toDate, searchQuery]);
+  }, [sales, isViewerAdmin, currentUser, filterMode, todayStr, singleDate, fromDate, toDate, searchQuery]);
 
   const totalRevenue = React.useMemo(() => {
     return filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -59,7 +68,14 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
     return filteredSales.reduce((sum, s) => sum + s.balanceDue, 0);
   }, [filteredSales]);
 
+  const canAccessSale = (sale: SaleRecord): boolean =>
+    isViewerAdmin || sale.cashier === currentUser;
+
   const handlePrintAction = (sale: SaleRecord) => {
+    if (!canAccessSale(sale)) {
+      showToast('This receipt belongs to another staff member. Only the cashier who served them (or the Admin) can reprint it.', 'error');
+      return;
+    }
     recordAuditLog(
       currentUser,
       currentUserRole,
@@ -80,7 +96,7 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
             Sales Report & Daily Transaction Logs
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Real-time track daily revenue, transaction receipts, wholesale/retail rate breakdown, and customer advances.
+            Real-time track daily revenue, transaction receipts, pricing breakdown, and customer advances.
           </p>
         </div>
 
@@ -292,13 +308,23 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                       {formatNaira(sale.totalAmount)}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <button
-                        onClick={() => handlePrintAction(sale)}
-                        className="inline-flex items-center gap-1 py-1 px-2.5 rounded-md bg-cyan-950 border border-cyan-800/50 text-cyan-400 font-bold hover:bg-cyan-900/60 transition"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        Print
-                      </button>
+                      {canAccessSale(sale) ? (
+                        <button
+                          onClick={() => handlePrintAction(sale)}
+                          className="inline-flex items-center gap-1 py-1 px-2.5 rounded-md bg-cyan-950 border border-cyan-800/50 text-cyan-400 font-bold hover:bg-cyan-900/60 transition"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          Print
+                        </button>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md bg-[#21262d] border border-[#30363d] text-slate-500 font-bold cursor-not-allowed"
+                          title="This sale was served by another staff member. Only the serving cashier or the Admin can reprint it."
+                        >
+                          <Lock className="w-3.5 h-3.5" />
+                          Locked
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))

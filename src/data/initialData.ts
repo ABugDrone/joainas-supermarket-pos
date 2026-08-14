@@ -199,6 +199,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   {
     id: 'cust-1',
     fullName: 'Joainas Supermarket VIP',
+    accountType: 'individual',
     phone: '100',
     address: 'Main Street, Yola',
     balance: 0,
@@ -209,6 +210,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   {
     id: 'cust-2',
     fullName: 'Alhaji Abubakar Musa',
+    accountType: 'individual',
     phone: '08031234567',
     address: 'Commercial Layout, Yola',
     balance: 15000, // owes 15,000
@@ -219,6 +221,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   {
     id: 'cust-3',
     fullName: 'Mrs. Blessing Okon',
+    accountType: 'individual',
     phone: '07039876543',
     address: 'Jimeta Bypass, Yola',
     balance: -25000, // advance credit of 25,000
@@ -229,6 +232,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   {
     id: 'cust-4',
     fullName: 'Royal Crown Catering Services',
+    accountType: 'company',
     phone: '08123456789',
     address: 'Airport Road, Yola',
     balance: 0,

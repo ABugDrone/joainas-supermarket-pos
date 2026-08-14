@@ -1,5 +1,45 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.3.0 (2026-08-14)
+
+### 🔐 New Features
+- **License Agreement**: New end-user license agreement screen shown on first launch
+  - Seven plain-English terms with a read-to-end checkbox
+  - Decline option closes the app cleanly
+- **Hardened Authentication**: Passwords are now securely hashed (bcrypt) instead of stored in plain text
+  - Existing plain-text passwords are auto-migrated to hashes on first login
+  - Per-process session: closing the app signs you out; every launch requires a fresh login
+  - First login is always by the admin created during initial setup
+- **Capability-Based Access Control**: Staff access is now controlled by fine-grained capabilities instead of broad roles
+  - Admin, Cashier, Inventory, Manager, and custom roles map to specific capabilities
+  - Admin module: checkbox grid + preset buttons when creating/editing users
+  - POS, Inventory, Customers, Sales, Reports, Expenses, Printer, and Admin modules are hidden or locked based on the signed-in user's capabilities
+- **Role-Scoped Visibility**:
+  - Sales Records: cashiers only see (and can reprint) their own transactions; admin sees all
+  - Customers: staff only see customers they registered or served; admin sees all (creator + served-by ownership)
+  - Locked records show a lock icon with an explanation
+- **Customer Account Types**: New customers can be registered as Individual, Company, NGO, or Government
+  - Company/organisation name field adapts to the account type
+  - Phone number is now optional (privacy friendly)
+- **Database Relocation**: The live database now lives in Documents\Backup (or a user-chosen folder)
+  - First launch automatically copies any legacy database into the new location
+  - Admin can relocate the database to any folder through the setup and admin flows
+  - A one-time note informs the user when the database has been moved
+- **Receipt Export**: Thermal receipts can now be saved as PNG or PDF via a native save dialog
+- **Improved Receipt Printing**: Print isolation now reliably prints only the receipt at the correct paper width (58mm / 80mm)
+- **Barcode Scanning**: POS barcode scan auto-adds the exact match to the bill and keeps focus for rapid scanning
+
+### 🧹 Removed
+- **Wholesale Pricing**: Wholesale/Retail toggle removed from POS, cart preview, and inventory
+  - All sales now use retail pricing; wholesale price data is retained in the database for future reference
+
+### 📋 Technical Improvements
+- Version bumped to 1.3.0 across package.json, Cargo.toml, Cargo.lock, and tauri.conf.json
+- Migration v3: users.capabilities column, customers account_type / assigned_cashier columns (phone now optional)
+- Permission helpers (can / isAdmin / hasAny / defaultCapabilitiesFor) centralize access checks
+
+---
+
 ## Version 1.2.0 (2026-08-12)
 
 ### 🎨 Fixed Issues

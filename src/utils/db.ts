@@ -17,23 +17,77 @@ export const isTauriRuntime = (): boolean =>
 
 let db: Database | null = null;
 
+let cachedDbUrl: string | null = null;
+let cachedDbInfo: { url: string; folder: string; migrated: boolean } | null = null;
+
+export async function getDbInfo(): Promise<{ url: string; folder: string; migrated: boolean } | null> {
+  if (!isTauriRuntime()) return null;
+  if (cachedDbInfo) return cachedDbInfo;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    cachedDbInfo = await invoke('get_db_info');
+    return cachedDbInfo;
+  } catch (e) {
+    console.error('Failed to read database location', e);
+    return null;
+  }
+}
+
+export async function getDbUrl(): Promise<string> {
+  if (!isTauriRuntime()) return 'sqlite:joainas_pos.db';
+  const info = await getDbInfo();
+  return info ? info.url : 'sqlite:joainas_pos.db';
+}
+
+export async function openDb(url: string): Promise<Database | null> {
+  const next = await Database.load(url);
+  try {
+    await next.execute('PRAGMA journal_mode = WAL');
+  } catch (e) {
+    console.error('Failed to enable WAL mode', e);
+  }
+  try {
+    await next.execute('PRAGMA foreign_keys = ON');
+  } catch (e) {
+    console.error('Failed to enable foreign keys', e);
+  }
+  return next;
+}
+
 export async function getDb(): Promise<Database | null> {
   if (!isTauriRuntime()) return null;
-  if (!db) {
-    db = await Database.load('sqlite:joainas_pos.db');
-    // Enable WAL journaling and foreign key enforcement on the internal database.
-    try {
-      await db.execute('PRAGMA journal_mode = WAL');
-    } catch (e) {
-      console.error('Failed to enable WAL mode', e);
-    }
-    try {
-      await db.execute('PRAGMA foreign_keys = ON');
-    } catch (e) {
-      console.error('Failed to enable foreign keys', e);
-    }
-  }
+  if (db) return db;
+  const url = await getDbUrl();
+  cachedDbUrl = url;
+  db = await openDb(url);
   return db;
+}
+
+// Move the live database to a new folder (native folder picker path) and
+// reconnect to the new location. Returns the new URL or null on failure.
+export async function relocateDatabaseTo(newDir: string): Promise<{ url: string; folder: string } | null> {
+  if (!isTauriRuntime()) return null;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    // Release the open pool so the file copy is safe (WAL gets checkpointed).
+    if (db) {
+      try {
+        await db.close();
+      } catch (e) {
+        console.error('Failed to close old DB pool', e);
+      }
+      db = null;
+    }
+    const url = await invoke<string>('relocate_database', { dir: newDir });
+    cachedDbInfo = null;
+    const freshInfo = await getDbInfo();
+    cachedDbUrl = url;
+    db = await openDb(url);
+    return { url, folder: freshInfo ? freshInfo.folder : newDir };
+  } catch (e) {
+    console.error('Failed to relocate database', e);
+    return null;
+  }
 }
 
 // ============================================================
@@ -47,6 +101,14 @@ export function mapUser(row: any): User {
     username: row.username,
     password: row.password_hash,
     role: row.role,
+    capabilities: (() => {
+      try {
+        const parsed = JSON.parse(row.capabilities || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })(),
     status: row.status,
     createdAt: row.created_at,
     lastLogin: row.last_login || undefined,
@@ -81,11 +143,13 @@ export function mapCustomer(row: any): Customer {
   return {
     id: row.id,
     fullName: row.full_name,
-    phone: row.phone,
+    accountType: row.account_type || 'individual',
+    phone: row.phone || undefined,
     address: row.address || '',
     balance: row.balance,
     points: row.points,
     advancePayment: row.advance_payment,
+    assignedCashier: row.assigned_cashier || undefined,
     createdAt: row.created_at,
   };
 }
@@ -194,9 +258,9 @@ export async function dbSaveUsers(users: User[]): Promise<void> {
   await d.execute('DELETE FROM users');
   for (const u of users) {
     await d.execute(
-      `INSERT INTO users (id, full_name, username, password_hash, role, status, created_at, last_login)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [u.id, u.fullName, u.username, u.password || '', u.role, u.status, u.createdAt, u.lastLogin || null]
+      `INSERT INTO users (id, full_name, username, password_hash, role, capabilities, status, created_at, last_login)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [u.id, u.fullName, u.username, u.password || '', u.role, JSON.stringify(u.capabilities || []), u.status, u.createdAt, u.lastLogin || null]
     );
   }
 }
@@ -266,9 +330,9 @@ export async function dbSaveCustomers(customers: Customer[]): Promise<void> {
   await d.execute('DELETE FROM customers');
   for (const c of customers) {
     await d.execute(
-      `INSERT INTO customers (id, full_name, phone, address, balance, points, advance_payment, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [c.id, c.fullName, c.phone, c.address, c.balance, c.points, c.advancePayment, c.createdAt]
+      `INSERT INTO customers (id, full_name, account_type, phone, address, balance, points, advance_payment, assigned_cashier, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [c.id, c.fullName, c.accountType || 'individual', c.phone || null, c.address, c.balance, c.points, c.advancePayment, c.assignedCashier || null, c.createdAt]
     );
   }
 }

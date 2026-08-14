@@ -81,7 +81,7 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
             <div className="sm:text-right">
               <div className="text-[var(--text-muted)] font-semibold uppercase text-xs tracking-wide">Transaction</div>
               <div className="font-bold text-[var(--accent-color)] mt-1 uppercase">
-                {priceType === 'wholesale' ? 'Wholesale' : 'Retail'} Pricing
+                Retail Pricing
               </div>
               <div className="text-[var(--text-muted)] mt-0.5">Payment: <strong className="text-[var(--success)]">{paymentMethod}</strong></div>
             </div>

@@ -20,11 +20,12 @@ import {
   loadPrinterConfig,
   savePrinterConfig,
   isAdminSetupCompleted,
-  getActiveUser,
   setActiveUserStorage,
   loadUsers,
   saveUsers,
   recordAuditLog,
+  isLicenseAccepted,
+  getDatabaseMigrationNote,
 } from './utils/storage';
 
 import { ToastProvider, useToast } from './components/Toast';
@@ -41,6 +42,8 @@ import { AdminModule } from './components/AdminModule';
 import { ThermalReceiptModal } from './components/ThermalReceiptModal';
 import { LoginModal } from './components/LoginModal';
 import { DeveloperModal } from './components/DeveloperModal';
+import { LicenseAgreement } from './components/LicenseAgreement';
+import { can } from './utils/permissions';
 
 function MainAppContent() {
   const { showToast } = useToast();
@@ -56,27 +59,10 @@ function MainAppContent() {
   const [printerConfig, setPrinterConfig] = useState<ThermalPrinterConfig>(loadPrinterConfig());
   const [users, setUsers] = useState<User[]>(() => loadUsers());
 
-  // Current logged in user details
-  const [currentUser, setCurrentUser] = useState<User>(() => {
-    let stored = getActiveUser();
-    if (stored) return stored;
-    let allUsers = loadUsers();
-    return allUsers[0] || {
-      id: 'admin-1',
-      username: 'admin',
-      fullName: 'System Administrator',
-      role: 'System Admin',
-      status: 'active',
-      createdAt: new Date().toISOString(),
-    };
-  });
-
-  // Keep active user persisted across reloads and tab closes
-  useEffect(() => {
-    if (currentUser) {
-      setActiveUserStorage(currentUser);
-    }
-  }, [currentUser]);
+  // Current logged in user — always starts as null. Per-process session:
+  // the app never auto-logs-in; a fresh login is required every launch
+  // and after every sign-out.
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   // Modals state
   const [activeReceiptSale, setActiveReceiptSale] = useState<SaleRecord | null>(null);
@@ -92,6 +78,20 @@ function MainAppContent() {
     setExpenditures(loadExpenditures());
     setPrinterConfig(loadPrinterConfig());
   }, []);
+
+  // Show a one-time note if the live database was moved to Documents\Backup
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const note = await getDatabaseMigrationNote();
+      if (!cancelled && note) {
+        showToast(note, 'info');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showToast]);
 
   // Sync back to storage on updates
   const handleCompleteSale = (newSale: SaleRecord) => {
@@ -206,15 +206,32 @@ function MainAppContent() {
   };
 
   const handleLogout = () => {
-    recordAuditLog(
-      currentUser.username,
-      currentUser.role,
-      'User Authentication Logout',
-      `Staff user "${currentUser.username}" (${currentUser.fullName}) logged out.`
-    );
-    showToast(`Logged out as "${currentUser.username}". Please authenticate to continue.`, 'info');
-    setIsLoginModalOpen(true);
+    if (currentUser) {
+      recordAuditLog(
+        currentUser.username,
+        currentUser.role,
+        'User Authentication Logout',
+        `Staff user "${currentUser.username}" (${currentUser.fullName}) logged out.`
+      );
+    }
+    // Clear the per-process session completely — returns to the login gate.
+    setActiveUserStorage(null);
+    setCurrentUser(null);
+    showToast('Signed out. Please authenticate to continue.', 'info');
   };
+
+  // Full-screen login gate: rendered instead of the POS shell whenever the
+  // per-process session has no signed-in user.
+  if (!currentUser) {
+    return (
+      <LoginModal
+        isOpen
+        onClose={() => {}}
+        onLoginSuccess={(user) => setCurrentUser(user)}
+        fullScreen
+      />
+    );
+  }
 
   return (
     <DesktopShell
@@ -222,12 +239,13 @@ function MainAppContent() {
       setActiveTab={setActiveTab}
       currentUser={currentUser.username}
       currentUserRole={currentUser.role}
+      currentUserCapabilities={currentUser.capabilities || []}
       todaySalesTotal={todaySalesTotal}
       onOpenLoginModal={() => setIsLoginModalOpen(true)}
       onLogout={handleLogout}
       onOpenDevModal={() => setIsDevModalOpen(true)}
     >
-      {activeTab === 'pos' && (
+      {activeTab === 'pos' && can(currentUser, 'sell') && (
         <POSModule
           products={products}
           customers={customers}
@@ -239,7 +257,7 @@ function MainAppContent() {
         />
       )}
 
-      {activeTab === 'inventory' && (
+      {activeTab === 'inventory' && can(currentUser, 'inventory') && (
         <InventoryModule
           products={products}
           currentUser={currentUser.username}
@@ -250,22 +268,24 @@ function MainAppContent() {
         />
       )}
 
-      {activeTab === 'customers' && (
+      {activeTab === 'customers' && can(currentUser, 'customers') && (
         <CustomerModule
           customers={customers}
           sales={sales}
           currentUser={currentUser.username}
           currentUserRole={currentUser.role}
+          currentUserCapabilities={currentUser.capabilities || []}
           onAddCustomer={handleAddCustomer}
           onUpdateCustomerBalance={handleUpdateCustomerBalance}
         />
       )}
 
-      {activeTab === 'sales' && (
+      {activeTab === 'sales' && can(currentUser, 'view_sales') && (
         <SalesRecords
           sales={sales}
           currentUser={currentUser.username}
           currentUserRole={currentUser.role}
+          currentUserCapabilities={currentUser.capabilities || []}
           onReprintReceipt={(sale) => {
             setActiveReceiptSale(sale);
             setIsReceiptModalOpen(true);
@@ -273,7 +293,7 @@ function MainAppContent() {
         />
       )}
 
-      {activeTab === 'financials' && (
+      {activeTab === 'financials' && can(currentUser, 'view_reports') && (
         <FinancialReports
           sales={sales}
           expenditures={expenditures}
@@ -283,7 +303,7 @@ function MainAppContent() {
         />
       )}
 
-      {activeTab === 'expenses' && (
+      {activeTab === 'expenses' && can(currentUser, 'expenses') && (
         <ExpenseModule
           expenditures={expenditures}
           currentUser={currentUser.username}
@@ -293,7 +313,7 @@ function MainAppContent() {
         />
       )}
 
-      {activeTab === 'printer' && (
+      {activeTab === 'printer' && can(currentUser, 'printer_settings') && (
         <div className="p-6">
           <ThermalPrinterSettings
             config={printerConfig}
@@ -304,7 +324,7 @@ function MainAppContent() {
         </div>
       )}
 
-      {activeTab === 'admin' && (
+      {activeTab === 'admin' && can(currentUser, 'admin') && (
         <AdminModule
           currentUser={currentUser.username}
           currentUserRole={currentUser.role}
@@ -337,6 +357,54 @@ function MainAppContent() {
 
 export default function App() {
   const [isSetupDone, setIsSetupDone] = useState<boolean>(() => isAdminSetupCompleted());
+  const [licenseAccepted, setLicenseAcceptedState] = useState<boolean>(() => isLicenseAccepted());
+  const [licenseAction, setLicenseAction] = useState<'agree' | 'decline' | null>(null);
+
+  const handleAgree = () => {
+    setLicenseAccepted(true);
+    setLicenseAcceptedState(true);
+  };
+
+  const handleDecline = () => {
+    setLicenseAction('decline');
+  };
+
+  if (!licenseAccepted && !licenseAction) {
+    return (
+      <ToastProvider>
+        <LicenseAgreement onAgree={handleAgree} onDecline={handleDecline} />
+      </ToastProvider>
+    );
+  }
+
+  if (licenseAction === 'decline') {
+    return (
+      <ToastProvider>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md bg-[#161b22] border border-[#30363d] rounded-2xl p-8 text-center text-slate-200">
+            <h3 className="text-lg font-bold text-white mb-2">Agreement Declined</h3>
+            <p className="text-sm text-slate-400 mb-6">
+              You must accept the license agreement to use Joainas POS. The app will now close.
+            </p>
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+                  import('@tauri-apps/api/core').then((m) =>
+                    m.invoke('plugin:app|exit').catch(() => window.close())
+                  );
+                } else {
+                  window.close();
+                }
+              }}
+              className="px-6 py-3 bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-xl text-sm"
+            >
+              Close App
+            </button>
+          </div>
+        </div>
+      </ToastProvider>
+    );
+  }
 
   if (!isSetupDone) {
     return (

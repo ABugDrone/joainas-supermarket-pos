@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { User, AuditLog, UserRole, Category } from '../types';
+import { User, AuditLog, UserRole, Capability, CAPABILITY_PRESETS, Category } from '../types';
+import { defaultCapabilitiesFor } from '../utils/permissions';
 import {
   saveUsers,
   loadUsers,
@@ -20,7 +21,7 @@ import {
   saveCategories,
   getBackupFolderPath,
   setBackupFolderPath,
-  pickBackupFolder,
+  relocateDatabaseFolder,
   pickBackupSavePath,
   writeBackupFile,
   pickBackupFile,
@@ -213,6 +214,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('Cashier');
+  const [newCapabilities, setNewCapabilities] = useState<Capability[]>(
+    () => defaultCapabilitiesFor('Cashier')
+  );
 
   // Audit filter state
   const [auditSearch, setAuditSearch] = useState('');
@@ -221,20 +225,20 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   // SQL code view toggle
   const [showSqlViewer, setShowSqlViewer] = useState(false);
 
-  // Backup folder configuration
+  // Backup folder configuration — the live database is relocated to the
+  // chosen folder so data always lives where the admin can reach it.
   const handleConfigureBackupFolder = async () => {
-    // Native folder picker lets the admin choose where backups live.
-    const picked = await pickBackupFolder();
-    if (picked) {
-      setBackupFolderPath(picked);
+    const relocated = await relocateDatabaseFolder();
+    if (relocated) {
+      setBackupFolderPath(relocated);
       recordAuditLog(
         currentUser,
         currentUserRole,
-        'Updated Backup Folder Configuration',
-        `Changed backup folder path to: ${picked}`
+        'Updated Database & Backup Folder Configuration',
+        `Moved database and backups to: ${relocated}`
       );
       setAuditLogs(loadAuditLogs());
-      showToast('Backup folder path updated successfully!', 'success');
+      showToast(`Database moved successfully to:\n${relocated}`, 'success');
       return;
     }
 
@@ -308,11 +312,16 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   };
 
   // Handle Add User
-  const handleAddUserSubmit = (e: React.FormEvent) => {
+  const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!newFullName.trim() || !newUsername.trim() || !newPassword.trim()) {
       showToast('Please fill in all staff details!', 'error');
+      return;
+    }
+
+    if (newCapabilities.length === 0) {
+      showToast('Please grant at least one access capability.', 'error');
       return;
     }
 
@@ -323,12 +332,16 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     }
 
     let nowStr = new Date().toISOString().split('T')[0];
+    const { hash } = await import('bcryptjs');
+    const hashedPassword = await hash(newPassword, 10);
+
     let newUser: User = {
       id: `usr-${Date.now()}`,
       fullName: newFullName.trim(),
       username: newUsername.trim(),
-      password: newPassword,
+      password: hashedPassword,
       role: newRole,
+      capabilities: newCapabilities,
       status: 'active',
       createdAt: nowStr,
     };
@@ -353,6 +366,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     setNewUsername('');
     setNewPassword('');
     setNewRole('Cashier');
+    setNewCapabilities(defaultCapabilitiesFor('Cashier'));
     setIsAddUserOpen(false);
   };
 
@@ -377,7 +391,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 
   // Delete user
   const handleDeleteUser = (user: User) => {
-    if (user.role === 'System Admin' && users.filter((u) => u.role === 'System Admin').length <= 1) {
+    const adminCount = users.filter((u) => (u.capabilities || []).includes('admin')).length;
+    const isAdminAccount = (user.capabilities || []).includes('admin') || user.role === 'System Admin';
+    if (isAdminAccount && adminCount <= 1) {
       showToast('Cannot delete the primary Master System Administrator!', 'error');
       return;
     }
@@ -402,7 +418,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     try {
       const backupData = {
         app: 'JOAINAS MART POS SYSTEM',
-        version: '1.2.0',
+        version: '1.3.0',
         timestamp: new Date().toISOString(),
         products: loadProducts(),
         customers: loadCustomers(),
@@ -705,6 +721,23 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                         >
                           {user.role}
                         </span>
+                        {(user.capabilities || []).length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5 max-w-[220px]">
+                            {(user.capabilities || []).slice(0, 4).map((cap) => (
+                              <span
+                                key={cap}
+                                className="px-1.5 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[9px] font-bold uppercase tracking-wide text-slate-400"
+                              >
+                                {cap.replace(/_/g, ' ')}
+                              </span>
+                            ))}
+                            {(user.capabilities || []).length > 4 && (
+                              <span className="px-1.5 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[9px] font-bold text-slate-500">
+                                +{(user.capabilities || []).length - 4} more
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4">
@@ -1227,7 +1260,11 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                 </label>
                 <select
                   value={newRole}
-                  onChange={(e) => setNewRole(e.target.value as UserRole)}
+                  onChange={(e) => {
+                    const role = e.target.value as UserRole;
+                    setNewRole(role);
+                    setNewCapabilities(defaultCapabilitiesFor(role));
+                  }}
                   className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white outline-none focus:border-purple-500 font-bold"
                 >
                   <option value="Cashier">Cashier (Sales POS Checkout)</option>
@@ -1236,6 +1273,69 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                   <option value="Accountant">Accountant (Financial Statements)</option>
                   <option value="System Admin">System Administrator (Full Access)</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                  Granted Capabilities (tick what this account can do):
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      ['sell', 'Sell (POS Checkout)'],
+                      ['inventory', 'Inventory & Stock'],
+                      ['view_sales', 'View Sales Records'],
+                      ['customers', 'Customers & Ledger'],
+                      ['view_reports', 'Financial Reports'],
+                      ['expenses', 'Expenses'],
+                      ['printer_settings', 'Printer Settings'],
+                      ['receipts', 'Receipts / Reprint'],
+                      ['admin', 'Full Admin Access'],
+                    ] as [Capability, string][]
+                  ).map(([cap, label]) => (
+                    <label
+                      key={cap}
+                      className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-[11px] font-semibold cursor-pointer transition ${
+                        newCapabilities.includes(cap)
+                          ? 'bg-purple-600/20 border-purple-500 text-purple-200'
+                          : 'bg-[#0d1117] border-[#30363d] text-slate-400'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={newCapabilities.includes(cap)}
+                        onChange={() => {
+                          setNewCapabilities((prev) =>
+                            prev.includes(cap)
+                              ? prev.filter((c) => c !== cap)
+                              : [...prev, cap]
+                          );
+                        }}
+                        className="w-3.5 h-3.5 accent-purple-500"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(Object.keys(CAPABILITY_PRESETS) as UserRole[]).map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setNewRole(preset);
+                        setNewCapabilities(defaultCapabilitiesFor(preset));
+                      }}
+                      className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide border transition ${
+                        newRole === preset
+                          ? 'bg-purple-600 text-white border-purple-500'
+                          : 'bg-[#0d1117] text-slate-400 border-[#30363d] hover:border-purple-500'
+                      }`}
+                    >
+                      {preset} preset
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>

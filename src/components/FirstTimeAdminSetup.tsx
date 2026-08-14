@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, User, Lock, Phone, KeyRound, ArrowRight, FolderOpen, HardDrive } from 'lucide-react';
 import { User as UserType } from '../types';
-import { saveUsers, loadUsers, setAdminSetupCompleted, recordAuditLog, pickBackupFolder, setBackupFolderPath as persistBackupFolderPath } from '../utils/storage';
+import { saveUsers, loadUsers, setAdminSetupCompleted, recordAuditLog, relocateDatabaseFolder, setBackupFolderPath as persistBackupFolderPath } from '../utils/storage';
 import { useToast } from './Toast';
 
 interface FirstTimeAdminSetupProps {
@@ -38,13 +38,13 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
 
   const handleSelectBackupFolder = async () => {
     // Native folder picker in the Tauri desktop shell so the admin truly
-    // selects where backups are stored. Browser dev falls back to a default.
+    // selects where the live database + backups are stored. The DB file is
+    // relocated there. Browser dev falls back to a default.
     try {
-      const picked = await pickBackupFolder();
-      if (picked) {
-        persistBackupFolderPath(picked); // persist
-        setBackupFolderPath(picked); // show in input
-        showToast('Backup folder selected: ' + picked, 'success');
+      const relocated = await relocateDatabaseFolder();
+      if (relocated) {
+        setBackupFolderPath(relocated); // show in input
+        showToast('Database + backup folder selected: ' + relocated, 'success');
         return;
       }
     } catch (error) {
@@ -57,7 +57,7 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
     showToast('Default backup folder selected: ' + documentsPath, 'success');
   };
 
-  const handleCompleteSetup = () => {
+  const handleCompleteSetup = async () => {
     if (!backupFolderPath) {
       showToast('Please select a backup folder to continue.', 'error');
       return;
@@ -65,12 +65,26 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
 
     let nowStr = new Date().toISOString().split('T')[0];
 
+    const { hash } = await import('bcryptjs');
+    const hashedPassword = await hash(password, 10);
+
     let newAdmin: UserType = {
       id: 'usr-admin-master',
       fullName: fullName.trim() || 'System Administrator',
       username: username.trim() || 'admin',
-      password: password,
+      password: hashedPassword,
       role: 'System Admin',
+      capabilities: [
+        'sell',
+        'inventory',
+        'view_sales',
+        'customers',
+        'view_reports',
+        'expenses',
+        'printer_settings',
+        'receipts',
+        'admin',
+      ],
       status: 'active',
       createdAt: nowStr,
       lastLogin: new Date().toLocaleString(),

@@ -1,24 +1,37 @@
 import React, { useState } from 'react';
 import { Lock, User as UserIcon } from 'lucide-react';
+import bcrypt from 'bcryptjs';
 import { User } from '../types';
 import { loadUsers, saveUsers, recordAuditLog, setActiveUserStorage } from '../utils/storage';
+import { defaultCapabilitiesFor } from '../utils/permissions';
 import { useToast } from './Toast';
 
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: User) => void;
+  fullScreen?: boolean;
 }
 
-export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
+// Detect bcrypt-style hashes ("$2a$", "$2b$", "$2y$") vs legacy plaintext.
+const isHashed = (value: string | undefined): boolean =>
+  !!value && /^\$2[aby]\$\d{2}\$/.test(value);
+
+export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLoginSuccess, fullScreen = false }) => {
   const { showToast } = useToast();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!password) {
+      showToast('Please enter your password.', 'error');
+      return;
+    }
 
     let users = loadUsers();
     let matched = users.find(
@@ -35,34 +48,63 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
       return;
     }
 
-    // Verify password if set
-    if (matched.password && matched.password !== password) {
-      showToast('Incorrect password. Please try again.', 'error');
-      return;
+    setIsVerifying(true);
+    try {
+      // Verify the stored credential, auto-migrating legacy plaintext rows
+      // to a bcrypt hash on their first successful login (seamless upgrade).
+      let passwordOk = false;
+      if (isHashed(matched.password)) {
+        passwordOk = await bcrypt.compare(password, matched.password as string);
+      } else if (matched.password) {
+        passwordOk = matched.password === password;
+      } else {
+        passwordOk = true;
+      }
+
+      if (!passwordOk) {
+        showToast('Incorrect password. Please try again.', 'error');
+        return;
+      }
+
+      // Upgrade plaintext accounts to a bcrypt hash once they log in.
+      if (matched.password && !isHashed(matched.password)) {
+        const hashed = await bcrypt.hash(password, 10);
+        matched = { ...matched, password: hashed };
+      }
+
+      // Ensure every account has a sensible capability set (migration safety).
+      if (!matched.capabilities || matched.capabilities.length === 0) {
+        matched = { ...matched, capabilities: defaultCapabilitiesFor(matched.role) };
+      }
+
+      // Record login time
+      let updatedUsers = users.map((u) =>
+        u.id === matched.id ? { ...u, ...matched, lastLogin: new Date().toLocaleString() } : u
+      );
+      saveUsers(updatedUsers);
+
+      setActiveUserStorage(matched);
+
+      recordAuditLog(
+        matched.username,
+        matched.role,
+        'User Authentication Login',
+        `Staff user "${matched.username}" (${matched.fullName}) logged in successfully as ${matched.role}.`
+      );
+
+      showToast(`Welcome back, ${matched.fullName}!`, 'success');
+      onLoginSuccess(matched);
+      if (!fullScreen) onClose();
+    } catch (error) {
+      console.error('Login verification failed', error);
+      showToast('Could not verify your credentials. Please try again.', 'error');
+    } finally {
+      setIsVerifying(false);
     }
-
-    // Record login time
-    let updatedUsers = users.map((u) =>
-      u.id === matched.id ? { ...u, lastLogin: new Date().toLocaleString() } : u
-    );
-    saveUsers(updatedUsers);
-
-    setActiveUserStorage(matched);
-
-    recordAuditLog(
-      matched.username,
-      matched.role,
-      'User Authentication Login',
-      `Staff user "${matched.username}" (${matched.fullName}) logged in successfully as ${matched.role}.`
-    );
-
-    showToast(`Welcome back, ${matched.fullName}!`, 'success');
-    onLoginSuccess(matched);
-    onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 font-sans select-none">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 font-sans select-none ${fullScreen ? 'bg-gradient-to-br from-[var(--accent-color)]/10 to-[var(--accent-orange)]/10' : ''}`}>
       <div className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl shadow-2xl overflow-hidden animate-fadeIn">
         {/* Header with logo */}
         <div className="bg-gradient-to-r from-[var(--accent-color)] to-[var(--accent-hover)] px-8 py-8 text-center">
@@ -146,18 +188,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
 
           {/* Actions */}
           <div className="grid grid-cols-2 gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="py-3 bg-[var(--bg-app)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] font-semibold rounded-xl text-sm transition border border-[var(--border-color)]"
-            >
-              Cancel
-            </button>
+            {!fullScreen && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="py-3 bg-[var(--bg-app)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] font-semibold rounded-xl text-sm transition border border-[var(--border-color)]"
+              >
+                Cancel
+              </button>
+            )}
             <button
               type="submit"
-              className="py-3 bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-xl text-sm transition shadow-md"
+              disabled={isVerifying}
+              className={`py-3 bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-xl text-sm transition shadow-md ${fullScreen ? 'col-span-2' : ''}`}
             >
-              Sign In
+              {isVerifying ? 'Verifying...' : 'Sign In'}
             </button>
           </div>
         </form>

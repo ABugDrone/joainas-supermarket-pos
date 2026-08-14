@@ -31,6 +31,8 @@ import {
   dbGetSetting,
   dbSetSetting,
   dbDeleteSetting,
+  getDbInfo,
+  relocateDatabaseTo,
 } from './db';
 
 // ============================================================
@@ -70,6 +72,7 @@ const LKEYS = {
   CATEGORIES: 'joainas_categories_v1',
   ADMIN_SETUP_DONE: 'joainas_admin_setup_done_v1',
   ACTIVE_USER: 'joainas_active_user_v1',
+  LICENSE_ACCEPTED: 'joainas_license_accepted_v1',
 };
 
 function lsGet<T>(key: string, fallback: T): T {
@@ -109,7 +112,6 @@ export async function initStorage(): Promise<void> {
       categories,
       printerConfig,
       setupDone,
-      activeUser,
     ] = await Promise.all([
       dbLoadProducts(),
       dbLoadCustomers(),
@@ -120,7 +122,6 @@ export async function initStorage(): Promise<void> {
       dbLoadCategories(),
       dbLoadPrinterConfig(),
       dbGetSetting('admin_setup_done'),
-      dbGetSetting('active_user'),
     ]);
 
     cacheProducts = products;
@@ -132,7 +133,9 @@ export async function initStorage(): Promise<void> {
     cacheCategories = categories;
     cachePrinterConfig = printerConfig;
     cacheAdminSetupDone = setupDone === 'true';
-    cacheActiveUser = activeUser ? JSON.parse(activeUser) : null;
+    // No persisted active-user session: signing out or closing the app
+    // always requires a fresh login (per-process session).
+    cacheActiveUser = null;
   } else {
     cacheProducts = lsGet<Product[]>(LKEYS.PRODUCTS, []);
     cacheCustomers = lsGet<Customer[]>(LKEYS.CUSTOMERS, []);
@@ -301,26 +304,30 @@ export const setAdminSetupCompleted = (done: boolean = true) => {
 };
 
 // ============================================================
+// LICENSE AGREEMENT
+// ============================================================
+
+export const isLicenseAccepted = (): boolean => {
+  if (isTauriRuntime()) {
+    return lsGet<boolean>(LKEYS.LICENSE_ACCEPTED, false);
+  }
+  return lsGet<boolean>(LKEYS.LICENSE_ACCEPTED, false);
+};
+
+export const setLicenseAccepted = (accepted: boolean = true) => {
+  lsSet(LKEYS.LICENSE_ACCEPTED, accepted);
+};
+
+// ============================================================
 // ACTIVE USER SESSION
 // ============================================================
 
 export const getActiveUser = (): User | null => cacheActiveUser;
 
+// Per-process session: the signed-in user is kept only in memory. Signing
+// out or closing the app clears it, so every launch requires a fresh login.
 export const setActiveUserStorage = (user: User | null) => {
   cacheActiveUser = user;
-  if (isTauriRuntime()) {
-    if (user) {
-      enqueueWrite(() => dbSetSetting('active_user', JSON.stringify(user)));
-    } else {
-      enqueueWrite(() => dbDeleteSetting('active_user'));
-    }
-  } else {
-    if (user) {
-      lsSet(LKEYS.ACTIVE_USER, user);
-    } else {
-      localStorage.removeItem(LKEYS.ACTIVE_USER);
-    }
-  }
 };
 
 // ============================================================
@@ -419,6 +426,23 @@ export async function pickBackupSavePath(defaultFileName: string): Promise<strin
   }
 }
 
+// Open a native save dialog for a receipt export (PNG/PDF). Returns chosen path or null.
+export async function pickReceiptSavePath(defaultFileName: string, extension: string): Promise<string | null> {
+  const dialog = await loadDialogPlugin();
+  if (!dialog) return null;
+  try {
+    const selected = await dialog.save({
+      title: 'Save Receipt Export',
+      defaultPath: defaultFileName,
+      filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
+    });
+    return typeof selected === 'string' ? selected : null;
+  } catch (e) {
+    console.error('Failed to pick receipt save path', e);
+    return null;
+  }
+}
+
 // Write the JSON backup payload to the chosen file path on disk.
 export async function writeBackupFile(path: string, contents: string): Promise<void> {
   const fs = await loadFsPlugin();
@@ -427,6 +451,18 @@ export async function writeBackupFile(path: string, contents: string): Promise<v
     await fs.writeTextFile(path, contents);
   } catch (e) {
     console.error('Failed to write backup file', e);
+    throw e;
+  }
+}
+
+// Write a binary file (e.g. a generated receipt PNG/PDF) to a chosen path.
+export async function writeBinaryFile(path: string, data: Uint8Array): Promise<void> {
+  const fs = await loadFsPlugin();
+  if (!fs) return;
+  try {
+    await fs.writeFile(path, data);
+  } catch (e) {
+    console.error('Failed to write binary file', e);
     throw e;
   }
 }
@@ -457,6 +493,49 @@ export async function readBackupFile(path: string): Promise<string> {
   } catch (e) {
     console.error('Failed to read backup file', e);
     throw e;
+  }
+}
+
+// ============================================================
+// LIVE DATABASE LOCATION
+// The database file itself lives in Documents\Backup by default,
+// or the folder the admin picks. This is a one-time note shown to
+// the admin if a legacy database was moved into place at startup.
+// ============================================================
+
+// Returns a human-friendly note if the live database was migrated to the
+// new Documents\Backup location on this startup, otherwise null.
+export async function getDatabaseMigrationNote(): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  try {
+    const info = await getDbInfo();
+    if (info && info.migrated) {
+      return `Your database was found in the old app-data folder and has been moved to ${info.folder} for easy access. All your data is safe.`;
+    }
+    return null;
+  } catch (e) {
+    console.error('Failed to check database migration note', e);
+    return null;
+  }
+}
+
+// Pick a new folder for the live database and relocate the DB file there.
+// Returns the new folder path on success, or null if cancelled/failed.
+export async function relocateDatabaseFolder(): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  const picked = await pickBackupFolder();
+  if (!picked) return null;
+  try {
+    const result = await relocateDatabaseTo(picked);
+    if (!result) {
+      console.error('Database relocation returned no result');
+      return null;
+    }
+    setBackupFolderPath(result.folder);
+    return result.folder;
+  } catch (e) {
+    console.error('Failed to relocate database folder', e);
+    return null;
   }
 }
 

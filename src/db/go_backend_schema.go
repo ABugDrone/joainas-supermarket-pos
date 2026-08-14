@@ -16,6 +16,7 @@ type User struct {
 	Username     string     `json:"username" db:"username"`
 	PasswordHash string     `json:"-" db:"password_hash"`
 	Role         string     `json:"role" db:"role"`
+	Capabilities string     `json:"capabilities" db:"capabilities"`
 	Status       string     `json:"status" db:"status"`
 	CreatedAt    time.Time  `json:"createdAt" db:"created_at"`
 	LastLogin    *time.Time `json:"lastLogin,omitempty" db:"last_login"`
@@ -49,11 +50,13 @@ type Product struct {
 type Customer struct {
 	ID             string    `json:"id" db:"id"`
 	FullName       string    `json:"fullName" db:"full_name"`
+	AccountType    string    `json:"accountType" db:"account_type"`
 	Phone          string    `json:"phone" db:"phone"`
 	Address        string    `json:"address" db:"address"`
 	Balance        float64   `json:"balance" db:"balance"`
 	Points         int       `json:"points" db:"points"`
 	AdvancePayment float64   `json:"advancePayment" db:"advance_payment"`
+	AssignedCashier string   `json:"assignedCashier" db:"assigned_cashier"`
 	CreatedAt      time.Time `json:"createdAt" db:"created_at"`
 }
 

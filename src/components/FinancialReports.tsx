@@ -213,7 +213,7 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
 
           <div className="space-y-2 text-xs font-medium text-slate-200 pl-2">
             <div className="flex justify-between py-1 border-b border-[#30363d]">
-              <span className="font-semibold">Gross Sales Revenue (Retail & Wholesale)</span>
+              <span className="font-semibold">Gross Sales Revenue</span>
               <span className="font-bold text-cyan-400">{formatNaira(statementData.grossRevenue)}</span>
             </div>
 

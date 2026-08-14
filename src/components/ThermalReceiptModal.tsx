@@ -1,7 +1,10 @@
 import React from 'react';
-import { Printer, X, Copy, Check, Volume2 } from 'lucide-react';
+import { Printer, X, Copy, Check, Volume2, Image as ImageIcon, FileDown } from 'lucide-react';
+import { toPng } from 'html-to-image';
+import { jsPDF } from 'jspdf';
 import { SaleRecord, ThermalPrinterConfig } from '../types';
-import { formatNaira, playPOSBeep } from '../utils/storage';
+import { formatNaira, playPOSBeep, pickReceiptSavePath, writeBinaryFile } from '../utils/storage';
+import { useToast } from './Toast';
 
 interface ThermalReceiptModalProps {
   sale: SaleRecord | null;
@@ -16,6 +19,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const { showToast } = useToast();
   const [copied, setCopied] = React.useState(false);
 
   if (!isOpen || !sale) return null;
@@ -23,6 +27,50 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   const handlePrint = () => {
     playPOSBeep();
     window.print();
+  };
+
+  const handleExportPng = async () => {
+    const node = document.getElementById('printable-thermal-receipt');
+    if (!node) return;
+    try {
+      const dataUrl = await toPng(node, { backgroundColor: '#ffffff', pixelRatio: 2 });
+      const byteString = atob(dataUrl.split(',')[1]);
+      const bytes = new Uint8Array(byteString.length);
+      for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
+      const fileName = `Receipt_${sale.receiptNo.replace(/[^\w-]/g, '_')}.png`;
+      const path = await pickReceiptSavePath(fileName, 'png');
+      if (!path) return;
+      await writeBinaryFile(path, bytes);
+      showToast(`Receipt saved as PNG.`, 'success');
+    } catch (e) {
+      console.error('PNG export failed', e);
+      showToast('Failed to export receipt as PNG.', 'error');
+    }
+  };
+
+  const handleExportPdf = async () => {
+    const node = document.getElementById('printable-thermal-receipt');
+    if (!node) return;
+    try {
+      const dataUrl = await toPng(node, { backgroundColor: '#ffffff', pixelRatio: 2 });
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+      const imgWidth = 190;
+      const imgHeight = (node.offsetHeight / node.offsetWidth) * imgWidth;
+      pdf.addImage(dataUrl, 'PNG', 10, 10, imgWidth, imgHeight);
+      const fileName = `Receipt_${sale.receiptNo.replace(/[^\w-]/g, '_')}.pdf`;
+      const path = await pickReceiptSavePath(fileName, 'pdf');
+      if (!path) return;
+      const pdfBytes = new Uint8Array(pdf.output('arraybuffer'));
+      await writeBinaryFile(path, pdfBytes);
+      showToast(`Receipt saved as PDF.`, 'success');
+    } catch (e) {
+      console.error('PDF export failed', e);
+      showToast('Failed to export receipt as PDF.', 'error');
+    }
   };
 
   const getEscPosText = () => {
@@ -110,6 +158,20 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             {copied ? <Check className="w-4 h-4 text-[var(--success)]" /> : <Copy className="w-4 h-4" />}
             {copied ? 'Copied!' : 'Copy Text'}
           </button>
+          <button
+            onClick={handleExportPng}
+            className="flex items-center justify-center gap-2 rounded-xl bg-[var(--bg-app)] hover:bg-[var(--bg-hover)] py-3 px-4 text-sm font-medium text-[var(--text-secondary)] border border-[var(--border-color)] transition"
+          >
+            <ImageIcon className="w-4 h-4" />
+            Save as PNG
+          </button>
+          <button
+            onClick={handleExportPdf}
+            className="flex items-center justify-center gap-2 rounded-xl bg-[var(--bg-app)] hover:bg-[var(--bg-hover)] py-3 px-4 text-sm font-medium text-[var(--text-secondary)] border border-[var(--border-color)] transition"
+          >
+            <FileDown className="w-4 h-4" />
+            Save as PDF
+          </button>
         </div>
 
         {/* Receipt Paper */}
@@ -125,6 +187,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
           {/* Receipt */}
           <div
             id="printable-thermal-receipt"
+            data-paper={config.paperWidth}
             className={`bg-white text-black p-5 rounded-lg shadow-lg border border-gray-200 ${
               config.paperWidth === '58mm' ? 'w-[240px]' : 'w-[330px]'
             }`}

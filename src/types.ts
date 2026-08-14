@@ -2,12 +2,54 @@ export type PriceType = 'retail' | 'wholesale';
 
 export type UserRole = 'System Admin' | 'Store Manager' | 'Cashier' | 'Inventory Staff' | 'Accountant';
 
+// Granular access capabilities granted per account. Admin can tick any
+// combination for each staff user; nav items and actions are gated by these.
+export type Capability =
+  | 'sell'
+  | 'inventory'
+  | 'view_sales'
+  | 'customers'
+  | 'view_reports'
+  | 'expenses'
+  | 'printer_settings'
+  | 'receipts'
+  | 'admin';
+
+// Preset bundles so the admin can quickly assign sensible role combinations.
+export const CAPABILITY_PRESETS: Record<string, Capability[]> = {
+  'System Admin': [
+    'sell',
+    'inventory',
+    'view_sales',
+    'customers',
+    'view_reports',
+    'expenses',
+    'printer_settings',
+    'receipts',
+    'admin',
+  ],
+  'Store Manager': [
+    'sell',
+    'inventory',
+    'view_sales',
+    'customers',
+    'view_reports',
+    'expenses',
+    'printer_settings',
+    'receipts',
+  ],
+  Cashier: ['sell', 'view_sales', 'customers', 'receipts', 'printer_settings'],
+  'Inventory Staff': ['inventory', 'customers', 'receipts'],
+  Accountant: ['view_sales', 'view_reports', 'expenses', 'receipts'],
+};
+
 export interface User {
   id: string;
   fullName: string;
   username: string;
   password?: string;
   role: UserRole;
+  capabilities: Capability[];
   status: 'active' | 'suspended';
   createdAt: string;
   lastLogin?: string;
@@ -52,14 +94,18 @@ export interface CartItem {
   amount: number;
 }
 
+export type CustomerAccountType = 'individual' | 'company' | 'ngo' | 'government';
+
 export interface Customer {
   id: string;
   fullName: string;
-  phone: string;
+  accountType: CustomerAccountType;
+  phone?: string;
   address: string;
   balance: number; // positive = customer owes store, negative = advance store credit
   points: number;
   advancePayment: number;
+  assignedCashier?: string; // staff who registered/serves this customer
   createdAt: string;
 }
 

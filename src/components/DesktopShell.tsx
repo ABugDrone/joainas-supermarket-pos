@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { HeaderLogo } from './HeaderLogo';
 import { formatNaira } from '../utils/storage';
-import { UserRole } from '../types';
+import { Capability, UserRole } from '../types';
 import {
   getSavedTheme,
   applyThemeToDocument,
@@ -36,6 +36,7 @@ interface DesktopShellProps {
   setActiveTab: (tab: 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'admin') => void;
   currentUser: string;
   currentUserRole: UserRole;
+  currentUserCapabilities: Capability[];
   todaySalesTotal: number;
   onOpenLoginModal: () => void;
   onLogout?: () => void;
@@ -43,8 +44,22 @@ interface DesktopShellProps {
   children: React.ReactNode;
 }
 
+type TabId = 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'admin';
+
+// The capability required to see each module. 'admin' capability implies all.
+const NAV_CAPABILITY: Record<TabId, Capability> = {
+  pos: 'sell',
+  inventory: 'inventory',
+  sales: 'view_sales',
+  customers: 'customers',
+  expenses: 'expenses',
+  financials: 'view_reports',
+  printer: 'printer_settings',
+  admin: 'admin',
+};
+
 const NAV_ITEMS: {
-  id: 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'admin';
+  id: TabId;
   icon: React.ElementType;
   label: string;
   shortcut: string;
@@ -65,6 +80,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   setActiveTab,
   currentUser,
   currentUserRole,
+  currentUserCapabilities,
   todaySalesTotal,
   onOpenLoginModal,
   onLogout,
@@ -80,6 +96,19 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   const [activeFontSize, setActiveFontSize] = React.useState<FontSizeId>(() => getSavedFontSize());
   const [activeFontFamily, setActiveFontFamily] = React.useState<FontFamilyId>(() => getSavedFontFamily());
   const [isThemeModalOpen, setIsThemeModalOpen] = React.useState(false);
+
+  // Capability-based filtering: admin sees all; everyone else only the
+  // modules their granted capabilities allow.
+  const visibleItems = NAV_ITEMS.filter((item) => {
+    if (currentUserCapabilities.includes('admin')) return true;
+    return currentUserCapabilities.includes(NAV_CAPABILITY[item.id]);
+  });
+
+  // If the current active tab is no longer visible (e.g. role change),
+  // fall back to the first visible module.
+  const safeActiveTab: TabId = visibleItems.some((i) => i.id === activeTab)
+    ? activeTab
+    : visibleItems[0]?.id || 'pos';
 
   React.useEffect(() => {
     applyThemeToDocument(activeTheme);
@@ -116,14 +145,14 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
     };
   }, []);
 
-  // Keyboard shortcut listener (F1 to F8)
+  // Keyboard shortcut listener (F1 to F8) — only for visible modules.
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const keyMap: Record<string, 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'admin'> = {
+      const keyMap: Record<string, TabId> = {
         F1: 'pos', F2: 'inventory', F3: 'sales', F4: 'customers',
         F5: 'expenses', F6: 'financials', F7: 'printer', F8: 'admin',
       };
-      if (keyMap[e.key]) {
+      if (keyMap[e.key] && visibleItems.some((i) => i.id === keyMap[e.key])) {
         e.preventDefault();
         setActiveTab(keyMap[e.key]);
       }
@@ -131,7 +160,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setActiveTab]);
+  }, [setActiveTab, visibleItems]);
 
   return (
     <div className="flex h-screen bg-[var(--bg-app)] text-[var(--text-primary)] font-sans select-none overflow-hidden">
@@ -160,8 +189,8 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
 
         {/* Navigation Items */}
         <nav className="flex flex-col gap-1 w-full px-2 lg:px-3 flex-1">
-          {NAV_ITEMS.map(({ id, icon: Icon, label, shortcut, activeColor }) => {
-            const isActive = activeTab === id;
+          {visibleItems.map(({ id, icon: Icon, label, shortcut, activeColor }) => {
+            const isActive = safeActiveTab === id;
             return (
               <button
                 key={id}
@@ -245,7 +274,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
           <div className="hidden lg:flex items-center gap-2">
             <span className="text-sm text-[var(--text-muted)]">Module:</span>
             <span className="text-sm font-semibold text-[var(--text-primary)] capitalize">
-              {NAV_ITEMS.find(n => n.id === activeTab)?.label || 'Sell'}
+              {visibleItems.find(n => n.id === safeActiveTab)?.label || 'Sell'}
             </span>
           </div>
 
@@ -308,7 +337,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v3.2.0 • Dronebug Technologies
+            v1.3.0 • Dronebug Technologies
           </div>
         </footer>
       </div>

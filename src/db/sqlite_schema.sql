@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT CHECK(role IN ('System Admin', 'Store Manager', 'Cashier', 'Inventory Staff', 'Accountant')) NOT NULL DEFAULT 'Cashier',
+    capabilities TEXT NOT NULL DEFAULT '[]',
     status TEXT CHECK(status IN ('active', 'suspended')) NOT NULL DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP
@@ -69,11 +70,13 @@ CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_name);
 CREATE TABLE IF NOT EXISTS customers (
     id TEXT PRIMARY KEY NOT NULL,
     full_name TEXT NOT NULL,
-    phone TEXT NOT NULL,
+    account_type TEXT CHECK(account_type IN ('individual', 'company', 'ngo', 'government')) NOT NULL DEFAULT 'individual',
+    phone TEXT,
     address TEXT,
     balance REAL NOT NULL DEFAULT 0.0, -- Positive = Customer owes store (Debt), Negative = Store credit
     points INTEGER NOT NULL DEFAULT 0,
     advance_payment REAL NOT NULL DEFAULT 0.0,
+    assigned_cashier TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

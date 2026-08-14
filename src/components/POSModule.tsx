@@ -1,6 +1,6 @@
 import React from 'react';
 import { Search, Plus, Trash2, ShoppingCart, UserCheck, Barcode, Printer, Eye, Package } from 'lucide-react';
-import { Product, Customer, CartItem, SaleRecord, PriceType, ThermalPrinterConfig, UserRole } from '../types';
+import { Product, Customer, CartItem, SaleRecord, ThermalPrinterConfig, UserRole } from '../types';
 import { formatNaira, playPOSBeep, recordAuditLog } from '../utils/storage';
 import { useToast } from './Toast';
 import { CartPreviewModal } from './CartPreviewModal';
@@ -26,28 +26,28 @@ export const POSModule: React.FC<POSModuleProps> = ({
 }) => {
   const { showToast } = useToast();
 
-  const [priceType, setPriceType] = React.useState<PriceType>('wholesale');
   const [barcodeQuery, setBarcodeQuery] = React.useState('');
   const [selectedProductId, setSelectedProductId] = React.useState<string>(products[0]?.id || '');
   const [quantity, setQuantity] = React.useState<number>(1);
-  const [selectedPhone, setSelectedPhone] = React.useState<string>('100');
+  const [selectedCustomerId, setSelectedCustomerId] = React.useState<string>(customers[0]?.id || '');
   const [cart, setCart] = React.useState<CartItem[]>([]);
   const [advancePayment, setAdvancePayment] = React.useState<number>(0);
   const [paymentMethod, setPaymentMethod] = React.useState<'Cash' | 'POS Transfer' | 'Store Credit / Account'>('Cash');
   const [isCartPreviewOpen, setIsCartPreviewOpen] = React.useState(false);
+  const barcodeInputRef = React.useRef<HTMLInputElement>(null);
 
   const selectedProduct = React.useMemo(() => {
     return products.find((p) => p.id === selectedProductId) || products[0];
   }, [products, selectedProductId]);
 
   const selectedCustomer = React.useMemo(() => {
-    return customers.find((c) => c.phone === selectedPhone) || customers[0];
-  }, [customers, selectedPhone]);
+    return customers.find((c) => c.id === selectedCustomerId) || customers[0];
+  }, [customers, selectedCustomerId]);
 
   const currentRate = React.useMemo(() => {
     if (!selectedProduct) return 0;
-    return priceType === 'wholesale' ? selectedProduct.wholesalePrice : selectedProduct.retailPrice;
-  }, [selectedProduct, priceType]);
+    return selectedProduct.retailPrice;
+  }, [selectedProduct]);
 
   // Calculate Subtotal & Total Amount (All prices already contain tax and discount)
   const cartSubtotal = React.useMemo(() => {
@@ -72,23 +72,25 @@ export const POSModule: React.FC<POSModuleProps> = ({
       setSelectedProductId(matched.id);
       playPOSBeep();
       if (matched.barcode === barcodeQuery.trim()) {
-        addItemToCart(matched, quantity, priceType);
+        addItemToCart(matched, quantity);
         setBarcodeQuery('');
+        // Keep focus on the scan field so the next item can be scanned immediately.
+        barcodeInputRef.current?.focus();
       }
     } else {
       showToast(`No product found matching barcode or code "${barcodeQuery}"`, 'warning');
     }
   };
 
-  const addItemToCart = (prod: Product, qty: number, pType: PriceType) => {
+  const addItemToCart = (prod: Product, qty: number) => {
     if (!prod) return;
     if (qty <= 0) return;
 
-    let rate = pType === 'wholesale' ? prod.wholesalePrice : prod.retailPrice;
+    let rate = prod.retailPrice;
     playPOSBeep();
 
     setCart((prev) => {
-      let existingIdx = prev.findIndex((item) => item.product.id === prod.id && item.priceType === pType);
+      let existingIdx = prev.findIndex((item) => item.product.id === prod.id);
       if (existingIdx > -1) {
         let updated = [...prev];
         let newQty = updated[existingIdx].quantity + qty;
@@ -104,7 +106,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
           {
             product: prod,
             quantity: qty,
-            priceType: pType,
+            priceType: 'retail',
             rate,
             amount: qty * rate,
           },
@@ -177,7 +179,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
       advancePayment,
       balanceDue,
       paymentMethod,
-      priceType,
+      priceType: 'retail',
       customerId: selectedCustomer?.id,
       customerName: selectedCustomer?.fullName || 'General Customer',
       customerPhone: selectedCustomer?.phone || 'N/A',
@@ -216,6 +218,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
             <Search className="w-5 h-5 absolute left-3.5 top-3.5 text-cyan-400" />
             <form onSubmit={handleBarcodeSubmit}>
               <input
+                ref={barcodeInputRef}
                 type="text"
                 placeholder="🔍 Type product name or scan barcode..."
                 value={barcodeQuery}
@@ -270,13 +273,13 @@ export const POSModule: React.FC<POSModuleProps> = ({
                 );
               })
               .map((p) => {
-                const rate = priceType === 'wholesale' ? p.wholesalePrice : p.retailPrice;
+                const rate = p.retailPrice;
                 const isLowStock = p.stockQty <= p.reorderLevel;
 
                 return (
                   <div
                     key={p.id}
-                    onClick={() => addItemToCart(p, 1, priceType)}
+                    onClick={() => addItemToCart(p, 1)}
                     className="bg-[#0d1117] hover:bg-[#21262d] border-2 border-[#30363d] hover:border-cyan-500/80 p-3.5 rounded-2xl transition cursor-pointer flex flex-col justify-between gap-3 shadow-md active:scale-98 group"
                   >
                     <div>
@@ -325,42 +328,11 @@ export const POSModule: React.FC<POSModuleProps> = ({
       <div className="w-full xl:w-5/12 flex flex-col gap-4">
         {/* Pricing Mode Toggle & Customer Select */}
         <div className="bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm space-y-3">
-          {/* Wholesale vs Retail Toggle */}
-          <div>
-            <label className="block text-xs font-black text-slate-300 uppercase mb-1.5">
-              1. Select Price Mode:
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setPriceType('wholesale')}
-                className={`py-2.5 px-3 rounded-xl text-xs font-black transition border flex items-center justify-center gap-1.5 ${
-                  priceType === 'wholesale'
-                    ? 'bg-cyan-600 text-white border-cyan-400 shadow-md shadow-cyan-950'
-                    : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'
-                }`}
-              >
-                🏷️ WHOLESALE PRICE
-              </button>
-              <button
-                type="button"
-                onClick={() => setPriceType('retail')}
-                className={`py-2.5 px-3 rounded-xl text-xs font-black transition border flex items-center justify-center gap-1.5 ${
-                  priceType === 'retail'
-                    ? 'bg-amber-600 text-white border-amber-400 shadow-md shadow-amber-950'
-                    : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'
-                }`}
-              >
-                🛍️ RETAIL PRICE
-              </button>
-            </div>
-          </div>
-
           {/* Customer Selector */}
           <div>
             <div className="flex justify-between items-center mb-1">
               <label className="text-xs font-black text-slate-300 uppercase">
-                2. Select Customer:
+                1. Select Customer:
               </label>
               <button
                 type="button"
@@ -371,13 +343,13 @@ export const POSModule: React.FC<POSModuleProps> = ({
               </button>
             </div>
             <select
-              value={selectedPhone}
-              onChange={(e) => setSelectedPhone(e.target.value)}
+              value={selectedCustomerId}
+              onChange={(e) => setSelectedCustomerId(e.target.value)}
               className="w-full rounded-xl border border-[#30363d] bg-[#0d1117] px-3.5 py-2 text-xs font-extrabold text-white focus:border-cyan-500 outline-none"
             >
               {customers.map((c) => (
-                <option key={c.id} value={c.phone} className="bg-[#161b22] text-white">
-                  {c.fullName} ({c.phone}) - Debt: {formatNaira(c.balance)}
+                <option key={c.id} value={c.id} className="bg-[#161b22] text-white">
+                  {c.fullName} ({c.phone || 'No phone'}) - Debt: {formatNaira(c.balance)}
                 </option>
               ))}
             </select>
@@ -463,7 +435,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
             {/* Payment Mode Selector Tiles */}
             <div>
               <label className="block text-xs font-black text-slate-300 uppercase mb-1.5">
-                3. Choose Payment Method:
+                2. Choose Payment Method:
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {[
@@ -529,7 +501,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
         isOpen={isCartPreviewOpen}
         onClose={() => setIsCartPreviewOpen(false)}
         cart={cart}
-        priceType={priceType}
+        priceType="retail"
         selectedCustomer={selectedCustomer}
         paymentMethod={paymentMethod}
         advancePayment={advancePayment}

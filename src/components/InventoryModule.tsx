@@ -41,7 +41,6 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
     unit: 'pack',
     costPrice: 0,
     retailPrice: 0,
-    wholesalePrice: 0,
     stockQty: 0,
     reorderLevel: 5,
   });
@@ -85,7 +84,6 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
       unit: 'pack',
       costPrice: 0,
       retailPrice: 0,
-      wholesalePrice: 0,
       stockQty: 10,
       reorderLevel: 5,
     });
@@ -155,7 +153,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
             Inventory Stock & Product Catalog
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Manage Seafood, Frozen Foods, Groceries catalog, set retail/wholesale rates, and track low stock reorder alerts.
+            Manage Seafood, Frozen Foods, Groceries catalog, set retail rates, and track low stock reorder alerts.
           </p>
         </div>
 
@@ -235,7 +233,6 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                 <th className="py-3 px-4">Category</th>
                 <th className="py-3 px-4 text-right">Cost Price (₦)</th>
                 <th className="py-3 px-4 text-right">Retail Price (₦)</th>
-                <th className="py-3 px-4 text-right">Wholesale Price (₦)</th>
                 <th className="py-3 px-4 text-center">Stock Level</th>
                 <th className="py-3 px-4 text-center">Actions</th>
               </tr>
@@ -261,9 +258,6 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                     <td className="py-3 px-4 text-right text-slate-400">{prod.costPrice.toLocaleString()}</td>
                     <td className="py-3 px-4 text-right font-extrabold text-cyan-400">
                       {prod.retailPrice.toLocaleString()}
-                    </td>
-                    <td className="py-3 px-4 text-right font-bold text-orange-400">
-                      {prod.wholesalePrice.toLocaleString()}
                     </td>
                     <td className="py-3 px-4 text-center font-bold">
                       <span
@@ -348,7 +342,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 mb-1">Cost Price (₦):</label>
                   <input
@@ -368,17 +362,6 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                     value={formData.retailPrice}
                     onChange={(e) => setFormData({ ...formData, retailPrice: parseFloat(e.target.value) || 0 })}
                     className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-cyan-400 font-extrabold outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 mb-1">Wholesale Price (₦):</label>
-                  <input
-                    type="number"
-                    required
-                    value={formData.wholesalePrice}
-                    onChange={(e) => setFormData({ ...formData, wholesalePrice: parseFloat(e.target.value) || 0 })}
-                    className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-orange-400 font-extrabold outline-none focus:border-cyan-500"
                   />
                 </div>
               </div>
