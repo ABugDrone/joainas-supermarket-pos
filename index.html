@@ -4,10 +4,61 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Joainas Seafoods & Groceries POS</title>
+    <style>
+      /* Instant boot splash — replaced by React as soon as the app mounts. */
+      #joainas-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #0c0e12;
+        color: #e2e8f0;
+        font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+      }
+      #joainas-splash .logo {
+        width: 84px;
+        height: 84px;
+        object-fit: contain;
+      }
+      #joainas-splash .title {
+        font-weight: 800;
+        font-size: 20px;
+        letter-spacing: 0.5px;
+        color: #ffffff;
+      }
+      #joainas-splash .subtitle {
+        font-size: 12px;
+        color: #94a3b8;
+        margin-top: -8px;
+      }
+      #joainas-splash .spinner {
+        width: 34px;
+        height: 34px;
+        border: 3px solid #1e293b;
+        border-top-color: #0052d4;
+        border-radius: 50%;
+        animation: joainas-spin 0.9s linear infinite;
+      }
+      @keyframes joainas-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
   <body class="bg-[#0c0e12] text-[#e2e8f0]">
-    <div id="root"></div>
+    <div id="root">
+      <div id="joainas-splash">
+        <img src="/logo.png" alt="Joainas Mart" class="logo" />
+        <div class="title">JOAINAS MART</div>
+        <div class="subtitle">POS Terminal &middot; Loading…</div>
+        <div class="spinner"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

@@ -71,13 +71,13 @@ const NAV_ITEMS: {
   shortcut: string;
   activeColor: string;
 }[] = [
-  { id: 'pos', icon: ShoppingCart, label: 'Sell', shortcut: 'F1', activeColor: 'bg-[var(--accent-color)] text-white' },
+  { id: 'pos', icon: ShoppingCart, label: 'Sell Service', shortcut: 'F1', activeColor: 'bg-[var(--accent-color)] text-white' },
   { id: 'inventory', icon: Package, label: 'Inventory', shortcut: 'F2', activeColor: 'bg-emerald-600 text-white' },
   { id: 'sales', icon: FileText, label: 'Sales', shortcut: 'F3', activeColor: 'bg-amber-600 text-white' },
   { id: 'customers', icon: Users, label: 'Customers', shortcut: 'F4', activeColor: 'bg-blue-600 text-white' },
   { id: 'expenses', icon: DollarSign, label: 'Expenses', shortcut: 'F5', activeColor: 'bg-rose-600 text-white' },
   { id: 'financials', icon: FileSpreadsheet, label: 'Reports', shortcut: 'F6', activeColor: 'bg-violet-600 text-white' },
-  { id: 'printer', icon: Printer, label: 'Printer', shortcut: 'F7', activeColor: 'bg-indigo-600 text-white' },
+  { id: 'printer', icon: Printer, label: 'Printer & Scanner', shortcut: 'F7', activeColor: 'bg-indigo-600 text-white' },
   { id: 'admin', icon: ShieldCheck, label: 'Admin', shortcut: 'F8', activeColor: 'bg-purple-600 text-white' },
 ];
 
@@ -330,7 +330,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
           <div className="hidden lg:flex items-center gap-2">
             <span className="text-sm text-[var(--text-muted)]">Module:</span>
             <span className="text-sm font-semibold text-[var(--text-primary)] capitalize">
-              {visibleItems.find(n => n.id === safeActiveTab)?.label || 'Sell'}
+              {visibleItems.find(n => n.id === safeActiveTab)?.label || 'Sell Service'}
             </span>
           </div>
 
@@ -479,7 +479,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v1.3.1 • Dronebug Technologies
+            v1.3.2 • Dronebug Technologies
           </div>
         </footer>
       </div>

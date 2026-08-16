@@ -179,6 +179,14 @@ pub fn run() {
             ",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "add_category_colors",
+            sql: "
+                ALTER TABLE categories ADD COLUMN color TEXT NOT NULL DEFAULT '#6366f1';
+            ",
+            kind: MigrationKind::Up,
+        },
     ];
 
     let (db_path, _) = resolve_db_path();

@@ -13,8 +13,13 @@ import {
 } from './utils/theme.ts';
 
 async function bootstrap() {
-  // Load all persisted data from the internal SQLite database (or localStorage in browser dev)
-  await initStorage();
+  // Load all persisted data from the internal SQLite database (or localStorage in browser dev).
+  // Never let a storage failure block the UI — always render so the app is never a blank window.
+  try {
+    await initStorage();
+  } catch (e) {
+    console.error('Storage initialization failed — continuing with empty caches.', e);
+  }
 
   // Immediately apply saved UI theme & typography settings on script boot
   applyThemeToDocument(getSavedTheme());

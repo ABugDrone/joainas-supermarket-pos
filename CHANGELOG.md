@@ -1,5 +1,24 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.3.2 (2026-08-16)
+
+### 🎨 New Features
+- **POS Product Grid Redesign**: Product cards now use category color-coded edges, stock-status borders (green/orange/red), price badges and stock pills for at-a-glance inventory health
+- **Barcode Generator**: New admin tool to generate and print unique barcode labels (series 200XXXX) in two formats — label-printer rolls or A4 sheets
+- **Financial Statements with Date Range**: Reports module now supports monthly, quarterly (Q1–Q4), half-year (H1/H2), full-year and custom from–to date range statements
+- **A4 Financial Statement Print**: Statements render on A4 (210×297mm) with a receipt-style preview modal, printable to A4 or saved as PNG/PDF
+- **Sell Service**: The primary POS nav item is renamed from "Sell" to "Sell Service"
+
+### 🐛 Fixed Bugs
+- **Reports Module Crash**: Fixed missing `FinancialStatementPaper` import that threw `ReferenceError` and prevented the Reports module from opening
+- **POS Light-Theme Text**: Dark POS sections now use explicit light-on-dark colors so text stays readable in light theme (and prints match the dark POS design)
+
+### 🔧 Technical Improvements
+- Version bumped to 1.3.2 across package.json, Cargo.toml, Cargo.lock, and tauri.conf.json
+- Added `html-to-image` and `jspdf` for statement PNG/PDF export
+
+---
+
 ## Version 1.3.1 (2026-08-14)
 
 ### 🔔 New Feature

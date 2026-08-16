@@ -6,6 +6,7 @@ import { useToast } from './Toast';
 
 interface InventoryModuleProps {
   products: Product[];
+  categories?: Category[];
   currentUser: string;
   currentUserRole: UserRole;
   onAddProduct: (product: Product) => void;
@@ -15,6 +16,7 @@ interface InventoryModuleProps {
 
 export const InventoryModule: React.FC<InventoryModuleProps> = ({
   products,
+  categories: categoriesProp,
   currentUser,
   currentUserRole,
   onAddProduct,
@@ -28,8 +30,11 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
   const [isModalOpen, setIsModalOpen] = React.useState(false);
   const [editingProduct, setEditingProduct] = React.useState<Product | null>(null);
 
-  // Dynamic Categories state
-  const [storeCategories, setStoreCategories] = React.useState<Category[]>(() => loadCategories());
+  // Dynamic Categories state — prefers the App-level source of truth so the
+  // dropdown keeps in sync with the POS grid, with a local fallback.
+  const [storeCategories, setStoreCategories] = React.useState<Category[]>(
+    () => categoriesProp ?? loadCategories()
+  );
   const [newCategoryInput, setNewCategoryInput] = React.useState('');
   const [isAddingCategory, setIsAddingCategory] = React.useState(false);
 
@@ -195,19 +200,31 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#161b22] p-4 rounded-xl border border-[#30363d] shadow-sm">
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          {categoryNames.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition border ${
-                selectedCategory === cat
-                  ? 'bg-cyan-600 text-white border-cyan-500 shadow-md shadow-cyan-900/30'
-                  : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+          {categoryNames.map((cat) => {
+            const catColor =
+              cat === 'All'
+                ? undefined
+                : storeCategories.find((c) => c.name.toLowerCase() === cat.toLowerCase())?.color;
+            return (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition border flex items-center gap-1.5 ${
+                  selectedCategory === cat
+                    ? 'bg-cyan-600 text-white border-cyan-500 shadow-md shadow-cyan-900/30'
+                    : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'
+                }`}
+              >
+                {catColor && (
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: catColor }}
+                  ></span>
+                )}
+                {cat}
+              </button>
+            );
+          })}
         </div>
 
         <div className="relative w-full sm:w-64">
@@ -317,17 +334,29 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
 
                 <div>
                   <label className="block text-slate-300 mb-1">Category:</label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full rounded border border-[#30363d] px-2.5 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500 font-bold"
-                  >
-                    {categoryNames.filter((c) => c !== 'All').map((cat) => (
-                      <option key={cat} value={cat} className="bg-[#161b22]">
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={formData.category}
+                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      className="w-full rounded border border-[#30363d] px-2.5 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500 font-bold"
+                    >
+                      {categoryNames.filter((c) => c !== 'All').map((cat) => (
+                        <option key={cat} value={cat} className="bg-[#161b22]">
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                    <span
+                      className="w-4 h-4 rounded-full border border-white/20 shrink-0"
+                      style={{
+                        backgroundColor:
+                          storeCategories.find(
+                            (c) => c.name.toLowerCase() === (formData.category || '').toLowerCase()
+                          )?.color || '#6366f1',
+                      }}
+                      title="Category color"
+                    ></span>
+                  </div>
                 </div>
               </div>
 

@@ -60,6 +60,8 @@ interface AdminModuleProps {
   currentUserRole: UserRole;
   users?: User[];
   onUpdateUsers?: (users: User[]) => void;
+  categories?: Category[];
+  onCategoriesChange?: (categories: Category[]) => void;
 }
 
 const SQLITE_SCHEMA_DDL = `-- ====================================================================
@@ -196,16 +198,22 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   currentUserRole,
   users = [],
   onUpdateUsers = (_users: User[]) => {},
+  categories: categoriesProp,
+  onCategoriesChange = (_categories: Category[]) => {},
 }) => {
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState<'users' | 'categories' | 'audit' | 'database'>('users');
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadAuditLogs());
 
-  // Category management state
-  const [categories, setCategories] = useState<Category[]>(() => loadCategories());
+  // Category management state — prefers the App-level source of truth so the
+  // POS grid picks up color changes immediately, with a local fallback.
+  const [categories, setCategories] = useState<Category[]>(
+    () => categoriesProp ?? loadCategories()
+  );
   const [newCatName, setNewCatName] = useState('');
   const [newCatDesc, setNewCatDesc] = useState('');
+  const [newCatColor, setNewCatColor] = useState('#6366f1');
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
   // User creation modal state
@@ -257,7 +265,14 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     }
   };
 
-  // Category CRUD Handlers
+  // Category CRUD Handlers — persist to storage AND bubble up to App state so
+  // the POS grid and inventory pills re-render with new colors immediately.
+  const applyCategories = (updated: Category[]) => {
+    setCategories(updated);
+    saveCategories(updated);
+    onCategoriesChange(updated);
+  };
+
   const handleAddCategory = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCatName.trim()) {
@@ -274,31 +289,51 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     let newCat: Category = {
       id: `cat-${Date.now()}`,
       name: newCatName.trim(),
+      color: newCatColor,
       description: newCatDesc.trim(),
       createdAt: new Date().toISOString().split('T')[0],
     };
 
     let updated = [...categories, newCat];
-    setCategories(updated);
-    saveCategories(updated);
+    applyCategories(updated);
 
     recordAuditLog(
       currentUser,
       currentUserRole,
       'Created Product Category',
-      `Added new inventory category "${newCat.name}".`
+      `Added new inventory category "${newCat.name}" with color ${newCat.color}.`
     );
 
     setNewCatName('');
     setNewCatDesc('');
+    setNewCatColor('#6366f1');
     showToast(`Category "${newCat.name}" added successfully!`, 'success');
+  };
+
+  const handleEditCategory = (cat: Category) => {
+    setEditingCategory({ ...cat });
+  };
+
+  const handleSaveCategoryColor = () => {
+    if (!editingCategory) return;
+    const updated = categories.map((c) =>
+      c.id === editingCategory.id ? { ...c, color: editingCategory.color } : c
+    );
+    applyCategories(updated);
+    recordAuditLog(
+      currentUser,
+      currentUserRole,
+      'Updated Category Color',
+      `Changed color of category "${editingCategory.name}" to ${editingCategory.color}.`
+    );
+    setEditingCategory(null);
+    showToast(`Color updated for "${editingCategory.name}".`, 'success');
   };
 
   const handleDeleteCategory = (cat: Category) => {
     if (confirm(`Are you sure you want to delete category "${cat.name}"?`)) {
       let updated = categories.filter((c) => c.id !== cat.id);
-      setCategories(updated);
-      saveCategories(updated);
+      applyCategories(updated);
 
       recordAuditLog(
         currentUser,
@@ -819,12 +854,37 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                     Description / Notes:
                   </label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     value={newCatDesc}
                     onChange={(e) => setNewCatDesc(e.target.value)}
                     placeholder="Brief description of items in this category..."
                     className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white outline-none focus:border-purple-500"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                    Category Color:
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={newCatColor}
+                      onChange={(e) => setNewCatColor(e.target.value)}
+                      className="w-12 h-10 rounded-lg border border-[#30363d] bg-[#0d1117] cursor-pointer"
+                      title="Pick category color"
+                    />
+                    <input
+                      type="text"
+                      value={newCatColor}
+                      onChange={(e) => setNewCatColor(e.target.value)}
+                      className="flex-1 p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white font-mono text-xs outline-none focus:border-purple-500"
+                      placeholder="#6366f1"
+                    />
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    This color classifies the category in the POS product grid.
+                  </p>
                 </div>
 
                 <button
@@ -851,6 +911,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                   <thead>
                     <tr className="bg-[#0d1117] text-slate-400 font-bold uppercase text-[10px] tracking-wider border-b border-[#30363d]">
                       <th className="py-3 px-4">Category Name</th>
+                      <th className="py-3 px-4">Color</th>
                       <th className="py-3 px-4">Description</th>
                       <th className="py-3 px-4">Created Date</th>
                       <th className="py-3 px-4 text-right">Actions</th>
@@ -859,7 +920,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                   <tbody className="divide-y divide-[#30363d]">
                     {categories.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-8 text-center text-slate-500 text-xs">
+                        <td colSpan={5} className="py-8 text-center text-slate-500 text-xs">
                           No product categories added yet. Create one using the form on the left.
                         </td>
                       </tr>
@@ -867,8 +928,19 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                       categories.map((cat) => (
                         <tr key={cat.id} className="hover:bg-[#1f242d] transition">
                           <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                            <span
+                              className="w-3 h-3 rounded-full border border-white/20 shrink-0"
+                              style={{ backgroundColor: cat.color || '#6366f1' }}
+                            ></span>
                             <span>{cat.name}</span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span
+                              className="inline-block px-2 py-0.5 rounded-full text-[10px] font-mono font-bold text-white"
+                              style={{ backgroundColor: cat.color || '#6366f1' }}
+                            >
+                              {cat.color || '#6366f1'}
+                            </span>
                           </td>
                           <td className="py-3.5 px-4 text-slate-400 font-medium">
                             {cat.description || 'No description provided'}
@@ -877,13 +949,22 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                             {cat.createdAt || 'System Default'}
                           </td>
                           <td className="py-3.5 px-4 text-right">
-                            <button
-                              onClick={() => handleDeleteCategory(cat)}
-                              className="p-1.5 rounded-lg bg-red-950/40 border border-red-800/60 text-red-400 hover:bg-red-900/60 transition"
-                              title="Delete Category"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => handleEditCategory(cat)}
+                                className="p-1.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-400 hover:bg-amber-900/60 transition"
+                                title="Edit Category Color"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCategory(cat)}
+                                className="p-1.5 rounded-lg bg-red-950/40 border border-red-800/60 text-red-400 hover:bg-red-900/60 transition"
+                                title="Delete Category"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1361,6 +1442,74 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Category Color Modal */}
+      {editingCategory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-[#30363d] pb-3">
+              <div className="flex items-center gap-2 text-purple-400 font-extrabold text-sm uppercase tracking-wide">
+                <Edit2 className="w-5 h-5" />
+                <span>Edit Category Color</span>
+              </div>
+              <button
+                onClick={() => setEditingCategory(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:bg-[#1f242d] transition"
+                title="Close"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span
+                className="w-14 h-14 rounded-2xl border-2 border-white/20 shrink-0"
+                style={{ backgroundColor: editingCategory.color || '#6366f1' }}
+              ></span>
+              <div>
+                <p className="font-extrabold text-white text-sm">{editingCategory.name}</p>
+                <p className="text-xs text-slate-400">
+                  This color classifies this category in the POS product grid.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={editingCategory.color || '#6366f1'}
+                onChange={(e) =>
+                  setEditingCategory({ ...editingCategory, color: e.target.value })
+                }
+                className="w-16 h-12 rounded-lg border border-[#30363d] bg-[#0d1117] cursor-pointer"
+              />
+              <input
+                type="text"
+                value={editingCategory.color || '#6366f1'}
+                onChange={(e) =>
+                  setEditingCategory({ ...editingCategory, color: e.target.value })
+                }
+                className="flex-1 p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white font-mono text-xs outline-none focus:border-purple-500"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setEditingCategory(null)}
+                className="w-full py-2.5 rounded-xl bg-[#0d1117] border border-[#30363d] text-slate-300 font-bold uppercase tracking-wider text-xs transition hover:bg-[#1f242d]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveCategoryColor}
+                className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold uppercase tracking-wider text-xs transition shadow-lg"
+              >
+                Save Color
+              </button>
+            </div>
           </div>
         </div>
       )}

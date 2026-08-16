@@ -1,23 +1,33 @@
 import React from 'react';
-import { Settings, Printer, Save, CheckCircle } from 'lucide-react';
-import { ThermalPrinterConfig, UserRole } from '../types';
+import { Settings, Printer, Save, CheckCircle, Barcode } from 'lucide-react';
+import { ThermalPrinterConfig, UserRole, Product, Category, Capability } from '../types';
 import { recordAuditLog } from '../utils/storage';
 import { useToast } from './Toast';
+import { BarcodeGenerator } from './BarcodeGenerator';
 
 interface ThermalPrinterSettingsProps {
   config: ThermalPrinterConfig;
   currentUser: string;
   currentUserRole: UserRole;
+  currentUserCapabilities?: Capability[];
+  products?: Product[];
+  categories?: Category[];
   onSave: (newConfig: ThermalPrinterConfig) => void;
+  onUpdateProducts?: (products: Product[]) => void;
 }
 
 export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
   config,
   currentUser,
   currentUserRole,
+  currentUserCapabilities = [],
+  products = [],
+  categories = [],
   onSave,
+  onUpdateProducts = (_products: Product[]) => {},
 }) => {
   const { showToast } = useToast();
+  const [subTab, setSubTab] = React.useState<'receipt' | 'barcode'>('receipt');
   const [formData, setFormData] = React.useState<ThermalPrinterConfig>({ ...config });
   const [savedSuccess, setSavedSuccess] = React.useState(false);
 
@@ -38,16 +48,16 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 bg-[#161b22] text-[#e2e8f0] rounded-2xl shadow-lg border border-[#30363d] font-sans">
-      <div className="flex items-center justify-between border-b border-[#30363d] pb-4 mb-6">
+    <div className="max-w-5xl mx-auto p-6 bg-[#161b22] text-[#e2e8f0] rounded-2xl shadow-lg border border-[#30363d] font-sans">
+      <div className="flex items-center justify-between border-b border-[#30363d] pb-4 mb-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-cyan-950/60 border border-cyan-800/40 text-cyan-400 rounded-xl">
             <Printer className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white">Thermal POS Printer & Hardware Setup</h2>
+            <h2 className="text-xl font-bold text-white">Printer & Scanner Module</h2>
             <p className="text-xs text-slate-400">
-              Configure receipt header, custom logo, paper size (80mm/58mm), and thermal printer parameters.
+              Configure thermal receipt printing and generate/print product barcode labels.
             </p>
           </div>
         </div>
@@ -60,6 +70,35 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
         )}
       </div>
 
+      {/* Sub-tabs: Receipt Printer / Barcode Generator */}
+      <div className="flex gap-2 mb-5">
+        <button
+          type="button"
+          onClick={() => setSubTab('receipt')}
+          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wide transition border flex items-center gap-2 ${
+            subTab === 'receipt'
+              ? 'bg-cyan-600 text-white border-cyan-400 shadow-md'
+              : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'
+          }`}
+        >
+          <Printer className="w-4 h-4" />
+          Receipt Printer
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('barcode')}
+          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wide transition border flex items-center gap-2 ${
+            subTab === 'barcode'
+              ? 'bg-indigo-600 text-white border-indigo-400 shadow-md'
+              : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'
+          }`}
+        >
+          <Barcode className="w-4 h-4" />
+          Barcode Generator
+        </button>
+      </div>
+
+      {subTab === 'receipt' ? (
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -222,6 +261,16 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
           </button>
         </div>
       </form>
+      ) : (
+        <BarcodeGenerator
+          products={products}
+          categories={categories}
+          currentUser={currentUser}
+          currentUserRole={currentUserRole}
+          currentUserCapabilities={currentUserCapabilities}
+          onUpdateProducts={onUpdateProducts}
+        />
+      )}
     </div>
   );
 };

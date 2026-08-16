@@ -69,6 +69,7 @@ export interface AuditLog {
 export interface Category {
   id: string;
   name: string;
+  color: string; // hex color for grid classification, e.g. '#14b8a6'
   description?: string;
   createdAt?: string;
 }

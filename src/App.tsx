@@ -7,6 +7,7 @@ import {
   ThermalPrinterConfig,
   User,
   UserRole,
+  Category,
 } from './types';
 import {
   loadProducts,
@@ -27,6 +28,8 @@ import {
   isLicenseAccepted,
   setLicenseAccepted,
   getDatabaseMigrationNote,
+  loadCategories,
+  saveCategories,
 } from './utils/storage';
 
 import { ToastProvider, useToast } from './components/Toast';
@@ -59,6 +62,7 @@ function MainAppContent() {
   const [expenditures, setExpenditures] = useState<Expenditure[]>(() => loadExpenditures());
   const [printerConfig, setPrinterConfig] = useState<ThermalPrinterConfig>(() => loadPrinterConfig());
   const [users, setUsers] = useState<User[]>(() => loadUsers());
+  const [categories, setCategories] = useState<Category[]>(() => loadCategories());
 
   // Current logged in user — always starts as null. Per-process session:
   // the app never auto-logs-in; a fresh login is required every launch
@@ -152,6 +156,12 @@ function MainAppContent() {
     let updated = products.filter((p) => p.id !== id);
     setProducts(updated);
     saveProducts(updated);
+  };
+
+  // Bulk update (used by the Barcode Generator to assign barcodes in batch).
+  const handleUpdateProducts = (updatedProducts: Product[]) => {
+    setProducts(updatedProducts);
+    saveProducts(updatedProducts);
   };
 
   // Customer CRUD
@@ -252,6 +262,7 @@ function MainAppContent() {
         <POSModule
           products={products}
           customers={customers}
+          categories={categories}
           printerConfig={printerConfig}
           currentUser={currentUser.username}
           currentUserRole={currentUser.role}
@@ -263,6 +274,7 @@ function MainAppContent() {
       {activeTab === 'inventory' && can(currentUser, 'inventory') && (
         <InventoryModule
           products={products}
+          categories={categories}
           currentUser={currentUser.username}
           currentUserRole={currentUser.role}
           onAddProduct={handleAddProduct}
@@ -322,7 +334,11 @@ function MainAppContent() {
             config={printerConfig}
             currentUser={currentUser.username}
             currentUserRole={currentUser.role}
+            currentUserCapabilities={currentUser.capabilities || []}
+            products={products}
+            categories={categories}
             onSave={handleSavePrinterConfig}
+            onUpdateProducts={handleUpdateProducts}
           />
         </div>
       )}
@@ -332,7 +348,12 @@ function MainAppContent() {
           currentUser={currentUser.username}
           currentUserRole={currentUser.role}
           users={users}
+          categories={categories}
           onUpdateUsers={handleUpdateUsers}
+          onCategoriesChange={(cats) => {
+            setCategories(cats);
+            saveCategories(cats);
+          }}
         />
       )}
 

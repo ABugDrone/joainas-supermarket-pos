@@ -1,6 +1,6 @@
 import React from 'react';
-import { Search, Plus, Trash2, ShoppingCart, UserCheck, Barcode, Printer, Eye, Package } from 'lucide-react';
-import { Product, Customer, CartItem, SaleRecord, ThermalPrinterConfig, UserRole } from '../types';
+import { Search, Trash2, ShoppingCart, Printer, Package, ScanBarcode } from 'lucide-react';
+import { Product, Customer, CartItem, SaleRecord, ThermalPrinterConfig, UserRole, Category } from '../types';
 import { formatNaira, playPOSBeep, recordAuditLog } from '../utils/storage';
 import { useToast } from './Toast';
 import { CartPreviewModal } from './CartPreviewModal';
@@ -8,6 +8,7 @@ import { CartPreviewModal } from './CartPreviewModal';
 interface POSModuleProps {
   products: Product[];
   customers: Customer[];
+  categories?: Category[];
   printerConfig: ThermalPrinterConfig;
   currentUser: string;
   currentUserRole: UserRole;
@@ -18,6 +19,7 @@ interface POSModuleProps {
 export const POSModule: React.FC<POSModuleProps> = ({
   products,
   customers,
+  categories = [],
   printerConfig,
   currentUser,
   currentUserRole,
@@ -35,6 +37,29 @@ export const POSModule: React.FC<POSModuleProps> = ({
   const [paymentMethod, setPaymentMethod] = React.useState<'Cash' | 'POS Transfer' | 'Store Credit / Account'>('Cash');
   const [isCartPreviewOpen, setIsCartPreviewOpen] = React.useState(false);
   const barcodeInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Category color lookup — products are classified by category color.
+  const categoryColorMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    categories.forEach((c) => map.set(c.name.toLowerCase(), c.color || '#6366f1'));
+    return map;
+  }, [categories]);
+
+  // Stock status: green = healthy, orange = low, red = depleted/out of stock.
+  const getStockStatus = (p: Product): 'good' | 'low' | 'out' => {
+    if (p.stockQty <= 0) return 'out';
+    if (p.stockQty <= p.reorderLevel) return 'low';
+    return 'good';
+  };
+
+  const getStockColor = (status: 'good' | 'low' | 'out'): string => {
+    if (status === 'out') return '#ef4444';
+    if (status === 'low') return '#f97316';
+    return '#22c55e';
+  };
+
+  const getCategoryColor = (p: Product): string =>
+    categoryColorMap.get(p.category.toLowerCase()) || '#6366f1';
 
   const selectedProduct = React.useMemo(() => {
     return products.find((p) => p.id === selectedProductId) || products[0];
@@ -80,6 +105,13 @@ export const POSModule: React.FC<POSModuleProps> = ({
     } else {
       showToast(`No product found matching barcode or code "${barcodeQuery}"`, 'warning');
     }
+  };
+
+  // Focus the scan field so a USB/handheld barcode scanner is ready to input.
+  const focusScanner = () => {
+    barcodeInputRef.current?.focus();
+    barcodeInputRef.current?.select();
+    showToast('Scanner ready — scan a barcode now.', 'info');
   };
 
   const addItemToCart = (prod: Product, qty: number) => {
@@ -212,7 +244,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
       {/* LEFT PANEL: Visual Product Selector Grid & Filters */}
       <div className="w-full xl:w-7/12 flex flex-col gap-4">
         {/* Search & Category Filter Header */}
-        <div className="bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm space-y-3">
+        <div className="pos-dark-section bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm space-y-3">
           {/* Barcode / Name Search Input */}
           <div className="relative">
             <Search className="w-5 h-5 absolute left-3.5 top-3.5 text-cyan-400" />
@@ -220,38 +252,63 @@ export const POSModule: React.FC<POSModuleProps> = ({
               <input
                 ref={barcodeInputRef}
                 type="text"
-                placeholder="🔍 Type product name or scan barcode..."
+                placeholder="Type product name or scan barcode..."
                 value={barcodeQuery}
                 onChange={(e) => setBarcodeQuery(e.target.value)}
-                className="w-full pl-11 pr-4 py-3 rounded-xl border-2 border-[var(--border-color)] bg-[var(--bg-input)] text-sm font-bold text-[var(--text-primary)] focus:border-cyan-500 outline-none transition shadow-inner"
+                className="w-full pl-11 pr-12 py-3 rounded-xl border-2 border-[var(--border-color)] bg-[var(--bg-input)] text-sm font-bold text-[var(--text-primary)] focus:border-cyan-500 outline-none transition shadow-inner"
               />
             </form>
+            <button
+              type="button"
+              onClick={focusScanner}
+              title="Focus scanner input"
+              className="absolute right-2.5 top-2 p-2 rounded-lg bg-cyan-950/60 border border-cyan-800/60 text-cyan-300 hover:bg-cyan-900/70 hover:text-cyan-100 transition active:scale-95"
+            >
+              <ScanBarcode className="w-5 h-5" />
+            </button>
           </div>
 
-          {/* Quick Category Filter Pills */}
+          {/* Quick Category Filter Pills (dynamic from store categories + colors) */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-            {['All', 'Seafood', 'Frozen Foods', 'Groceries', 'Beverages', 'Baking & Flour', 'Spices & Condiments'].map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => {
-                  if (cat === 'All') setBarcodeQuery('');
-                  else setBarcodeQuery(cat === 'Beverages' ? 'Drinks' : cat);
-                }}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition border min-w-max ${
-                  barcodeQuery.toLowerCase().includes(cat.toLowerCase()) || (cat === 'All' && !barcodeQuery)
-                    ? 'bg-cyan-600 text-white border-cyan-400 shadow-md shadow-cyan-900/40'
-                    : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'
-                }`}
-              >
-                {cat === 'All' ? '📦 ALL PRODUCTS' : cat.toUpperCase()}
-              </button>
-            ))}
+            {['All', ...categories.map((c) => c.name)].map((cat) => {
+              const catObj = categories.find(
+                (c) => c.name.toLowerCase() === cat.toLowerCase()
+              );
+              const isActive =
+                cat === 'All'
+                  ? !barcodeQuery
+                  : barcodeQuery.toLowerCase() === cat.toLowerCase();
+              const pillColor = catObj ? catObj.color || '#6366f1' : '#6366f1';
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => {
+                    if (cat === 'All') setBarcodeQuery('');
+                    else setBarcodeQuery(cat);
+                  }}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition border min-w-max flex items-center gap-1.5 ${
+                    isActive
+                      ? 'text-white shadow-md'
+                      : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'
+                  }`}
+                  style={isActive ? { backgroundColor: pillColor, borderColor: pillColor } : undefined}
+                >
+                  {cat !== 'All' && (
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: pillColor }}
+                    ></span>
+                  )}
+                  {cat === 'All' ? 'ALL PRODUCTS' : cat.toUpperCase()}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* Visual Product Grid (Tap Any Product To Add To Bill!) */}
-        <div className="bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm flex-1 flex flex-col">
+        <div className="pos-dark-section bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm flex-1 flex flex-col">
           <div className="flex items-center justify-between mb-3 border-b border-[#30363d] pb-2">
             <h3 className="font-black text-sm text-white tracking-wide flex items-center gap-2">
               <Package className="w-5 h-5 text-cyan-400" />
@@ -262,7 +319,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto max-h-[580px] p-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto max-h-[600px] p-1">
             {products
               .filter((p) => {
                 if (!barcodeQuery) return true;
@@ -273,49 +330,57 @@ export const POSModule: React.FC<POSModuleProps> = ({
                 );
               })
               .map((p) => {
-                const rate = p.retailPrice;
-                const isLowStock = p.stockQty <= p.reorderLevel;
+                const stockStatus = getStockStatus(p);
+                const stockColor = getStockColor(stockStatus);
+                const catColor = getCategoryColor(p);
+                const isOut = stockStatus === 'out';
 
                 return (
                   <div
                     key={p.id}
                     onClick={() => addItemToCart(p, 1)}
-                    className="bg-[#0d1117] hover:bg-[#21262d] border-2 border-[#30363d] hover:border-cyan-500/80 p-3.5 rounded-2xl transition cursor-pointer flex flex-col justify-between gap-3 shadow-md active:scale-98 group"
+                    className="pos-grid-card group relative rounded-2xl cursor-pointer flex flex-col transition-all duration-150 hover:scale-[1.03] hover:shadow-xl active:scale-[0.98] overflow-hidden"
+                    style={{
+                      borderLeft: `4px solid ${stockColor}`,
+                      borderTop: `3px solid ${catColor}`,
+                      borderRight: `2px solid ${catColor}`,
+                      borderBottom: `2px solid ${catColor}`,
+                      background: '#131a27',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
+                      opacity: isOut ? 0.5 : 1,
+                    }}
                   >
-                    <div>
-                      <div className="flex justify-between items-start gap-1 mb-1">
-                        <span className="text-[10px] font-black uppercase text-cyan-400 bg-cyan-950/80 border border-cyan-800/60 px-2 py-0.5 rounded-md">
-                          {p.category}
-                        </span>
-                        <span
-                          className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
-                            isLowStock
-                              ? 'bg-rose-950/80 text-rose-300 border-rose-800'
-                              : 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
-                          }`}
-                        >
-                          {p.stockQty} {p.unit}
-                        </span>
-                      </div>
-                      <h4 className="font-extrabold text-sm text-white group-hover:text-cyan-300 transition line-clamp-2">
+                    {/* Category Color Top Accent */}
+                    <div
+                      className="w-full h-1.5"
+                      style={{ backgroundColor: catColor }}
+                    />
+
+                    {/* Product Name */}
+                    <div className="w-full px-3.5 pt-3 pb-1 flex items-start justify-center text-center min-h-[64px]">
+                      <h4 className="font-semibold text-[13px] leading-[1.4] line-clamp-3 text-white group-hover:text-cyan-300 transition">
                         {p.name}
                       </h4>
                     </div>
 
-                    <div className="pt-2 border-t border-[#30363d]/60 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase block">Price:</span>
-                        <span className="text-base font-black text-cyan-300 tracking-tight">
-                          {formatNaira(rate)}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className="bg-cyan-600 group-hover:bg-cyan-500 text-white font-extrabold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 shadow-sm transition"
+                    {/* Price */}
+                    <div className="w-full px-3 pb-1 text-center">
+                      <span
+                        className="inline-flex items-center px-2.5 py-1 rounded-lg text-[12px] font-black text-white shadow-sm"
+                        style={{ backgroundColor: catColor }}
                       >
-                        <Plus className="w-4 h-4" />
-                        <span>Add</span>
-                      </button>
+                        {formatNaira(p.retailPrice)}
+                      </span>
+                    </div>
+
+                    {/* Stock Badge */}
+                    <div className="w-full pb-3 pt-1 flex items-center justify-center">
+                      <span
+                        className="inline-flex items-center justify-center px-3 py-1 rounded-full text-[11px] font-bold text-white min-w-[36px]"
+                        style={{ backgroundColor: stockColor }}
+                      >
+                        {isOut ? 'OUT' : p.stockQty}
+                      </span>
                     </div>
                   </div>
                 );
@@ -327,7 +392,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
       {/* RIGHT PANEL: Customer's Bill / Cart & Super Easy Checkout */}
       <div className="w-full xl:w-5/12 flex flex-col gap-4">
         {/* Pricing Mode Toggle & Customer Select */}
-        <div className="bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm space-y-3">
+        <div className="pos-dark-section bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm space-y-3">
           {/* Customer Selector */}
           <div>
             <div className="flex justify-between items-center mb-1">
@@ -357,7 +422,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
         </div>
 
         {/* Cart Items List */}
-        <div className="bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm flex-1 flex flex-col justify-between gap-4">
+        <div className="pos-dark-section bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm flex-1 flex flex-col justify-between gap-4">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#30363d] mb-3">
               <h3 className="font-black text-sm text-white tracking-wide flex items-center gap-2">

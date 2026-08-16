@@ -9,7 +9,7 @@ import {
   UserRole,
   Category,
 } from '../types';
-import { INITIAL_PRINTER_CONFIG } from '../data/initialData';
+import { INITIAL_PRINTER_CONFIG, DEFAULT_CATEGORIES } from '../data/initialData';
 import {
   isTauriRuntime,
   dbLoadProducts,
@@ -136,6 +136,12 @@ export async function initStorage(): Promise<void> {
     // No persisted active-user session: signing out or closing the app
     // always requires a fresh login (per-process session).
     cacheActiveUser = null;
+
+    // Seed default category colors on a fresh database so the POS grid has
+    // color-coded classification from the first launch. Existing data is kept.
+    if (categories.length === 0) {
+      saveCategories(DEFAULT_CATEGORIES);
+    }
   } else {
     cacheProducts = lsGet<Product[]>(LKEYS.PRODUCTS, []);
     cacheCustomers = lsGet<Customer[]>(LKEYS.CUSTOMERS, []);
@@ -147,6 +153,10 @@ export async function initStorage(): Promise<void> {
     cachePrinterConfig = lsGet<ThermalPrinterConfig | null>(LKEYS.PRINTER_CONFIG, null);
     cacheAdminSetupDone = lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false);
     cacheActiveUser = lsGet<User | null>(LKEYS.ACTIVE_USER, null);
+
+    if (cacheCategories.length === 0) {
+      saveCategories(DEFAULT_CATEGORIES);
+    }
   }
 }
 

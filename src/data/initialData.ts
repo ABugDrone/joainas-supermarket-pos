@@ -1,4 +1,23 @@
-import { Product, Customer, SaleRecord, Expenditure, ThermalPrinterConfig, StoreDeveloperInfo } from '../types';
+import {
+  Product,
+  Customer,
+  SaleRecord,
+  Expenditure,
+  ThermalPrinterConfig,
+  StoreDeveloperInfo,
+  Category,
+} from '../types';
+
+// Default category colors used to classify the POS product grid.
+// Admins can customize these per category via Admin -> Categories.
+export const DEFAULT_CATEGORIES: Category[] = [
+  { id: 'cat-seafood', name: 'Seafood', color: '#14b8a6', description: 'Fish, prawns, crabs & fresh catch', createdAt: '2026-01-01' },
+  { id: 'cat-frozen', name: 'Frozen Foods', color: '#f97316', description: 'Frozen meats, poultry & processed items', createdAt: '2026-01-01' },
+  { id: 'cat-groceries', name: 'Groceries', color: '#8b5cf6', description: 'Tinned goods, rice, oil & pantry staples', createdAt: '2026-01-01' },
+  { id: 'cat-beverages', name: 'Beverages', color: '#eab308', description: 'Water, soft drinks, juices & energy drinks', createdAt: '2026-01-01' },
+  { id: 'cat-baking', name: 'Baking & Flour', color: '#ec4899', description: 'Flour, bread, buns & bakery ingredients', createdAt: '2026-01-01' },
+  { id: 'cat-spices', name: 'Spices & Condiments', color: '#ef4444', description: 'Seasonings, sauces, spices & condiments', createdAt: '2026-01-01' },
+];
 
 export const INITIAL_PRODUCTS: Product[] = [
   {

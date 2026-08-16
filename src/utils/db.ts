@@ -16,6 +16,7 @@ export const isTauriRuntime = (): boolean =>
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 let db: Database | null = null;
+let dbPromise: Promise<Database | null> | null = null;
 
 let cachedDbUrl: string | null = null;
 let cachedDbInfo: { url: string; folder: string; migrated: boolean } | null = null;
@@ -54,13 +55,24 @@ export async function openDb(url: string): Promise<Database | null> {
   return next;
 }
 
-export async function getDb(): Promise<Database | null> {
-  if (!isTauriRuntime()) return null;
-  if (db) return db;
-  const url = await getDbUrl();
-  cachedDbUrl = url;
-  db = await openDb(url);
-  return db;
+export function getDb(): Promise<Database | null> {
+  if (!isTauriRuntime()) return Promise.resolve(null);
+  if (db) return Promise.resolve(db);
+  // Share a single in-flight connection promise so concurrent loads (e.g.
+  // initStorage's Promise.all) reuse one SQLite pool instead of each opening
+  // their own — this avoids migration races and drastically speeds up startup.
+  if (!dbPromise) {
+    dbPromise = (async () => {
+      const url = await getDbUrl();
+      cachedDbUrl = url;
+      const inst = await openDb(url);
+      db = inst;
+      return inst;
+    })().finally(() => {
+      dbPromise = null;
+    });
+  }
+  return dbPromise;
 }
 
 // Move the live database to a new folder (native folder picker path) and
@@ -119,6 +131,7 @@ export function mapCategory(row: any): Category {
   return {
     id: row.id,
     name: row.name,
+    color: row.color || '#6366f1',
     description: row.description || undefined,
     createdAt: row.created_at,
   };
@@ -282,9 +295,9 @@ export async function dbSaveCategories(categories: Category[]): Promise<void> {
   await d.execute('DELETE FROM categories');
   for (const c of categories) {
     await d.execute(
-      `INSERT INTO categories (id, name, description, created_at)
-       VALUES (?, ?, ?, ?)`,
-      [c.id, c.name, c.description || null, c.createdAt || null]
+      `INSERT INTO categories (id, name, color, description, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [c.id, c.name, c.color || '#6366f1', c.description || null, c.createdAt || null]
     );
   }
 }
