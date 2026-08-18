@@ -3,7 +3,7 @@ import { Printer, X, Copy, Check, Volume2, Image as ImageIcon, FileDown, AlertTr
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { SaleRecord, ThermalPrinterConfig } from '../types';
-import { formatNaira, playPOSBeep, pickReceiptSavePath, writeBinaryFile } from '../utils/storage';
+import { formatNaira, playPOSBeep, pickReceiptSavePath, writeBinaryFile, openInDefaultApp } from '../utils/storage';
 import { printReceipt } from '../utils/escpos';
 import { isTauriRuntime } from '../utils/db';
 import { useToast } from './Toast';
@@ -73,20 +73,26 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
     if (!node) return;
     try {
       const dataUrl = await toPng(node, { backgroundColor: '#ffffff', pixelRatio: 2 });
+      // Build the PDF at the EXACT thermal paper size (80mm/58mm wide x natural
+      // receipt height). A4 was the problem: any reader (Foxit etc.) centered
+      // the small receipt on the big page, wasting paper below the top edge.
+      const paperW = config.paperWidth === '58mm' ? 58 : 80;
+      const imgWidth = paperW;
+      const imgHeight = (node.offsetHeight / node.offsetWidth) * imgWidth;
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
-        format: 'a4',
+        format: [imgWidth, imgHeight],
+        compress: true,
       });
-      const imgWidth = 190;
-      const imgHeight = (node.offsetHeight / node.offsetWidth) * imgWidth;
-      pdf.addImage(dataUrl, 'PNG', 10, 0, imgWidth, imgHeight);
+      pdf.addImage(dataUrl, 'PNG', 0, 0, imgWidth, imgHeight);
       const fileName = `Receipt_${sale.receiptNo.replace(/[^\w-]/g, '_')}.pdf`;
       const path = await pickReceiptSavePath(fileName, 'pdf');
       if (!path) return;
       const pdfBytes = new Uint8Array(pdf.output('arraybuffer'));
       await writeBinaryFile(path, pdfBytes);
       showToast(`Receipt saved as PDF.`, 'success');
+      await openInDefaultApp(path);
     } catch (e) {
       console.error('PDF export failed', e);
       showToast('Failed to export receipt as PDF.', 'error');
@@ -216,63 +222,63 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             className={`bg-white text-black p-5 rounded-lg shadow-lg border border-gray-200 ${
               config.paperWidth === '58mm' ? 'w-[240px]' : 'w-[330px]'
             }`}
-            style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: '13px', lineHeight: '1.4' }}
+            style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: '14px', lineHeight: '1.45' }}
           >
             {/* Store Header */}
-            <div className="text-center mb-3 pb-3 border-b border-dashed border-gray-400">
+            <div className="text-center mb-3 pb-3 border-b-2 border-gray-700">
               {config.showLogo && (
-                <img src="/logo.png" alt="Logo" className="w-14 h-14 mx-auto mb-2 object-contain" />
+                <img src="/logo.png" alt="Logo" className="w-16 h-16 mx-auto mb-2 object-contain" />
               )}
-              <div className="font-black text-lg tracking-tight text-black uppercase leading-tight">{config.storeName}</div>
-              <div className="text-xs text-gray-700 font-bold mt-1">{config.tagline}</div>
-              <div className="text-[11px] text-gray-600 mt-1">{config.address}</div>
-              <div className="text-[11px] text-gray-600">Tel: {config.phone}</div>
+              <div className="font-black text-2xl tracking-tight text-black uppercase leading-tight">{config.storeName}</div>
+              <div className="text-sm text-gray-800 font-bold mt-1">{config.tagline}</div>
+              <div className="text-xs text-gray-700 font-medium mt-1">{config.address}</div>
+              <div className="text-xs text-gray-700 font-medium">Tel: {config.phone}</div>
             </div>
 
             {/* Transaction Info */}
-            <div className="border-t border-b border-dashed border-gray-400 py-2 my-2 text-[12px] space-y-1">
-              <div className="flex justify-between">
+            <div className="border-t-2 border-b-2 border-gray-700 py-2 my-2 text-[13px] space-y-1">
+              <div className="flex justify-between font-bold">
                 <span>Receipt:</span>
-                <span className="font-extrabold">{sale.receiptNo}</span>
+                <span className="font-black">{sale.receiptNo}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between font-semibold">
                 <span>Date/Time:</span>
                 <span>{sale.date} {sale.time}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between font-semibold">
                 <span>Cashier:</span>
-                <span className="font-semibold">{sale.cashier}</span>
+                <span className="font-bold">{sale.cashier}</span>
               </div>
               {sale.customerName && (
-                <div className="flex justify-between">
+                <div className="flex justify-between font-semibold">
                   <span>Customer:</span>
-                  <span className="font-bold text-gray-900">{sale.customerName}</span>
+                  <span className="font-black text-gray-900">{sale.customerName}</span>
                 </div>
               )}
-              <div className="flex justify-between">
+              <div className="flex justify-between font-semibold">
                 <span>Sale Type:</span>
-                <span className="uppercase font-bold text-blue-800">{sale.priceType}</span>
+                <span className="uppercase font-black text-blue-800">{sale.priceType}</span>
               </div>
             </div>
 
             {/* Items */}
             <table className="w-full text-left my-2 border-collapse">
               <thead>
-                <tr className="border-b-2 border-black text-[11px] font-black uppercase">
+                <tr className="border-b-2 border-black text-[12px] font-black uppercase">
                   <th className="py-1">Qty</th>
                   <th className="py-1">Item</th>
                   <th className="py-1 text-right">Rate</th>
                   <th className="py-1 text-right">Amt</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-300">
+              <tbody className="divide-y-2 divide-gray-400">
                 {sale.items.map((item, idx) => (
-                  <tr key={idx} className="text-[12px]">
-                    <td className="py-1.5 font-bold align-top">{item.quantity}</td>
-                    <td className="py-1.5 pr-1 align-top break-words max-w-[110px] font-semibold text-gray-900">
+                  <tr key={idx} className="text-[13px]">
+                    <td className="py-1.5 font-black align-top">{item.quantity}</td>
+                    <td className="py-1.5 pr-1 align-top break-words max-w-[110px] font-bold text-gray-900">
                       {item.product.name}
                     </td>
-                    <td className="py-1.5 text-right align-top text-gray-700">{item.rate.toLocaleString()}</td>
+                    <td className="py-1.5 text-right align-top text-gray-800 font-semibold">{item.rate.toLocaleString()}</td>
                     <td className="py-1.5 text-right font-black align-top text-black">
                       {item.amount.toLocaleString()}
                     </td>
@@ -282,12 +288,12 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             </table>
 
             {/* Totals */}
-            <div className="border-t-2 border-black pt-2 mt-2 space-y-1 text-[12px]">
-              <div className="flex justify-between text-lg font-black text-black">
+            <div className="border-t-2 border-black pt-2 mt-2 space-y-1.5 text-[13px]">
+              <div className="flex justify-between text-xl font-black text-black">
                 <span>TOTAL:</span>
                 <span>{formatNaira(sale.totalAmount)}</span>
               </div>
-              <div className="flex justify-between font-bold text-gray-800">
+              <div className="flex justify-between font-black text-gray-900">
                 <span>Paid:</span>
                 <span>{formatNaira(sale.advancePayment)}</span>
               </div>
@@ -297,12 +303,12 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
                   <span>{formatNaira(sale.balanceDue)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-[11px] text-gray-700 pt-1 border-t border-dashed border-gray-400">
+              <div className="flex justify-between text-xs text-gray-800 font-bold pt-1 border-t-2 border-gray-700">
                 <span>Method:</span>
-                <span className="font-extrabold uppercase">{sale.paymentMethod}</span>
+                <span className="font-black uppercase">{sale.paymentMethod}</span>
               </div>
               {sale.pointsEarned > 0 && (
-                <div className="flex justify-between text-[11px] text-emerald-800 font-bold bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200">
+                <div className="flex justify-between text-xs text-emerald-800 font-black bg-emerald-50 px-1 py-0.5 rounded border border-emerald-300">
                   <span>Points Earned:</span>
                   <span>+{sale.pointsEarned} pts</span>
                 </div>
@@ -310,8 +316,8 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             </div>
 
             {/* Footer */}
-            <div className="text-center text-[11px] text-gray-800 border-t border-dashed border-gray-400 pt-3 mt-3 space-y-1">
-              <p className="font-bold text-black">{config.receiptFooterNote}</p>
+            <div className="text-center text-xs text-gray-800 font-bold border-t-2 border-gray-700 pt-3 mt-3 space-y-1">
+              <p className="font-black text-black">{config.receiptFooterNote}</p>
             </div>
           </div>
         </div>

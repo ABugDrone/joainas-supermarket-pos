@@ -284,9 +284,21 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
                 placeholder="POS-80C"
                 className="w-full rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2 text-sm text-white focus:border-cyan-500 outline-none"
               />
-              <button
+              {typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window) ? (
+                <p className="mt-1.5 text-[11px] leading-snug text-amber-400/90">
+                  Web preview mode — the browser cannot connect to your printer. Install the desktop app to detect and print to the Xprinter.
+                </p>
+              ) : (
+                <button
                 type="button"
                 onClick={async () => {
+                  if (typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window)) {
+                    showToast(
+                      'Web mode: the browser cannot access your printer. Install the desktop app and open Hardware Config there to detect the Xprinter.',
+                      'error'
+                    );
+                    return;
+                  }
                   const names = await (await import('../utils/escpos')).listNativePrinters();
                   if (!names.length) {
                     showToast('No printers detected. Make sure the Xprinter is connected.', 'error');
@@ -301,6 +313,7 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
               >
                 Detect Printers
               </button>
+              )}
             </div>
 
             <div className="flex flex-col justify-end space-y-2">

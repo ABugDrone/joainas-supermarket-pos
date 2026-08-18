@@ -1,5 +1,24 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.3.4 (2026-08-18)
+
+### 🖨️ Bigger, Bolder Receipts + PDF Printing via Default Viewer
+- **Bolder & Bigger Receipt Text**: Receipt fonts are larger and heavier than before — 14px base body (up from 13px), bigger store name (`text-2xl`), larger TOTAL line (`text-xl`), thicker black divider rules, and heavier weights throughout so text is clearly readable on thermal paper and printed PDFs.
+- **Thermal-Sized PDF Export**: Saved receipts are built at the exact paper width (80mm or 58mm) × natural receipt height instead of A4 — this is what makes PDF readers center the receipt and waste paper below the top edge.
+- **Auto-Open PDF in Default Viewer**: After saving a receipt as PDF, the desktop app automatically opens it in the OS default PDF viewer (e.g. Foxit Reader), so the cashier can print to the 80mm device immediately without hunting for the file.
+- **Native ESC/POS Direct Printing**: The desktop app prints receipts by sending raw ESC/POS commands straight to the Windows printer queue — no browser print dialog, no A4 page, no wasted paper. Receipts start at the very top of the 58mm/80mm roll.
+- **Printer Name + Detect Printers**: Hardware Config now has a "Printer Name" field and a "Detect Printers" button that lists installed Windows printers and auto-selects the thermal one.
+- **Print Density Control**: "High" density sends the printer's own `GS ( K` density command for darker, bolder output matching the Xprinter driver test print.
+- **Web Preview Notice**: Hardware Config shows a clear notice in web mode that the browser cannot connect to the printer — install the desktop app to detect and print.
+
+### 🔧 Technical Improvements
+- Native `print_raw` and `list_printers` Tauri commands in the Rust backend (`Win32::Graphics::Printing` spooler API, RAW datatype).
+- `src/utils/escpos.ts` ESC/POS builder; `printer_name` column added to `printer_configs` (schema + migration v5).
+- Receipt Print button shows spinner + success/error toasts.
+- Version bumped to 1.3.4 across package.json, Cargo.toml, and tauri.conf.json.
+
+---
+
 ## Version 1.3.3 (2026-08-18)
 
 ### 🖨️ Native Thermal Printing (No Print Dialog)
@@ -15,6 +34,11 @@
 - New `src/utils/escpos.ts` builder converts any sale into an exact ESC/POS byte stream (init, density, alignment, bold, double-height, partial cut).
 - Added `printer_name` column to `printer_configs` (schema + migration v5).
 - Version bumped to 1.3.3 across package.json, Cargo.toml, and tauri.conf.json.
+
+### 🖨️ PDF Export for Thermal Printing
+- **Thermal-Sized PDFs**: Saved receipts are now built at the exact paper width (80mm or 58mm) × natural receipt height — the old A4-sized PDF was what made readers center the receipt and waste paper.
+- **Auto-Open in PDF Viewer**: After saving a receipt as PDF, the desktop app automatically opens it in the OS default PDF viewer (e.g. Foxit Reader) so the cashier can print to the 80mm device without hunting for the file.
+- **Bigger, Bolder Receipt**: All receipt text is larger and heavier (14px base, thicker dividers, black 2px rules, bigger store name and TOTAL) so it is clearly readable on thermal paper and in printed PDFs.
 
 ---
 

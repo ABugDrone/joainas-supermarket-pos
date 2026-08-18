@@ -402,6 +402,19 @@ async function loadFsPlugin(): Promise<typeof import('@tauri-apps/plugin-fs') | 
   }
 }
 
+// Open a file (e.g. a saved PDF) with the OS default application.
+// In the desktop app this launches the default PDF viewer (Foxit Reader,
+// Edge, etc.) so the user can print from there. No-op on the web preview.
+export async function openInDefaultApp(path: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    const shell = await import('@tauri-apps/plugin-shell');
+    await shell.open(path);
+  } catch (e) {
+    console.error('Failed to open file with default app', e);
+  }
+}
+
 // Open a native folder picker. Returns the selected folder path or null.
 export async function pickBackupFolder(): Promise<string | null> {
   const dialog = await loadDialogPlugin();

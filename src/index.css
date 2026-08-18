@@ -270,10 +270,11 @@ textarea:focus {
 }
 
 /* ================= THERMAL PRINT STYLES ================= */
-/* Named page for the 80mm thermal receipt — zero margins so content
-   starts at the very top of the paper. */
+/* Named page for the thermal receipt — zero margins so content starts at the
+   very top of the paper. `auto` lets the width follow the receipt element,
+   which is fixed to 58mm or 80mm in the print rules below. */
 @page thermal-receipt {
-  size: 80mm auto;
+  size: auto;
   margin: 0mm;
 }
 
