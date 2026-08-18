@@ -191,6 +191,7 @@ export function mapPrinterConfig(row: any): ThermalPrinterConfig {
     autoPrintOnSale: !!row.auto_print_on_sale,
     pointRate: row.point_rate,
     printDensity: row.print_density,
+    printerName: row.printer_name || 'POS-80C',
   };
 }
 
@@ -465,8 +466,8 @@ export async function dbSavePrinterConfig(config: ThermalPrinterConfig): Promise
   if (!d) return;
   await d.execute(
     `INSERT INTO printer_configs (id, store_name, tagline, address, phone, receipt_header_note, receipt_footer_note,
-      show_logo, paper_width, auto_print_on_sale, point_rate, print_density)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      show_logo, paper_width, auto_print_on_sale, point_rate, print_density, printer_name)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        store_name = excluded.store_name,
        tagline = excluded.tagline,
@@ -479,6 +480,7 @@ export async function dbSavePrinterConfig(config: ThermalPrinterConfig): Promise
        auto_print_on_sale = excluded.auto_print_on_sale,
        point_rate = excluded.point_rate,
        print_density = excluded.print_density,
+       printer_name = excluded.printer_name,
        updated_at = CURRENT_TIMESTAMP`,
     [
       config.storeName,
@@ -492,6 +494,7 @@ export async function dbSavePrinterConfig(config: ThermalPrinterConfig): Promise
       config.autoPrintOnSale ? 1 : 0,
       config.pointRate,
       config.printDensity,
+      config.printerName || 'POS-80C',
     ]
   );
 }

@@ -151,6 +151,7 @@ export interface ThermalPrinterConfig {
   autoPrintOnSale: boolean;
   pointRate: number; // e.g. 2 points per 1000 Naira
   printDensity: 'Normal' | 'High' | 'Draft';
+  printerName: string;
 }
 
 export interface StoreDeveloperInfo {

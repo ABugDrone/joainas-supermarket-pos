@@ -1,9 +1,11 @@
 import React from 'react';
-import { Printer, X, Copy, Check, Volume2, Image as ImageIcon, FileDown } from 'lucide-react';
+import { Printer, X, Copy, Check, Volume2, Image as ImageIcon, FileDown, AlertTriangle } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { SaleRecord, ThermalPrinterConfig } from '../types';
 import { formatNaira, playPOSBeep, pickReceiptSavePath, writeBinaryFile } from '../utils/storage';
+import { printReceipt } from '../utils/escpos';
+import { isTauriRuntime } from '../utils/db';
 import { useToast } from './Toast';
 
 interface ThermalReceiptModalProps {
@@ -21,12 +23,30 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
 }) => {
   const { showToast } = useToast();
   const [copied, setCopied] = React.useState(false);
+  const [printing, setPrinting] = React.useState(false);
 
   if (!isOpen || !sale) return null;
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     playPOSBeep();
-    window.print();
+    if (!isTauriRuntime()) {
+      window.print();
+      return;
+    }
+    setPrinting(true);
+    try {
+      const result = await printReceipt(sale, config);
+      if (result.error) {
+        showToast(result.error, 'error');
+      } else {
+        showToast('Receipt sent to printer.', 'success');
+      }
+    } catch (e) {
+      console.error('Print failed', e);
+      showToast('Failed to print receipt.', 'error');
+    } finally {
+      setPrinting(false);
+    }
   };
 
   const handleExportPng = async () => {
@@ -60,7 +80,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
       });
       const imgWidth = 190;
       const imgHeight = (node.offsetHeight / node.offsetWidth) * imgWidth;
-      pdf.addImage(dataUrl, 'PNG', 10, 10, imgWidth, imgHeight);
+      pdf.addImage(dataUrl, 'PNG', 10, 0, imgWidth, imgHeight);
       const fileName = `Receipt_${sale.receiptNo.replace(/[^\w-]/g, '_')}.pdf`;
       const path = await pickReceiptSavePath(fileName, 'pdf');
       if (!path) return;
@@ -146,10 +166,15 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
         <div className="grid grid-cols-2 gap-3 p-6 pb-0">
           <button
             onClick={handlePrint}
-            className="flex items-center justify-center gap-2 rounded-xl bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] py-3 px-4 text-sm font-semibold text-white shadow-sm transition"
+            disabled={printing}
+            className="flex items-center justify-center gap-2 rounded-xl bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] py-3 px-4 text-sm font-semibold text-white shadow-sm transition disabled:opacity-60"
           >
-            <Printer className="w-4 h-4" />
-            Print Receipt
+            {printing ? (
+              <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Printer className="w-4 h-4" />
+            )}
+            {printing ? 'Printing...' : 'Print Receipt'}
           </button>
           <button
             onClick={handleCopyText}
@@ -191,21 +216,21 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             className={`bg-white text-black p-5 rounded-lg shadow-lg border border-gray-200 ${
               config.paperWidth === '58mm' ? 'w-[240px]' : 'w-[330px]'
             }`}
-            style={{ fontFamily: "'Courier New', Courier, monospace" }}
+            style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: '13px', lineHeight: '1.4' }}
           >
             {/* Store Header */}
-            <div className="text-center mb-3 pb-3 border-b border-dashed border-gray-300">
+            <div className="text-center mb-3 pb-3 border-b border-dashed border-gray-400">
               {config.showLogo && (
-                <img src="/logo.png" alt="Logo" className="w-12 h-12 mx-auto mb-2 object-contain" />
+                <img src="/logo.png" alt="Logo" className="w-14 h-14 mx-auto mb-2 object-contain" />
               )}
-              <div className="font-black text-sm tracking-tight text-black uppercase">{config.storeName}</div>
-              <div className="text-[10px] text-gray-600 font-bold mt-0.5">{config.tagline}</div>
-              <div className="text-[10px] text-gray-500 mt-1">{config.address}</div>
-              <div className="text-[10px] text-gray-500">Tel: {config.phone}</div>
+              <div className="font-black text-lg tracking-tight text-black uppercase leading-tight">{config.storeName}</div>
+              <div className="text-xs text-gray-700 font-bold mt-1">{config.tagline}</div>
+              <div className="text-[11px] text-gray-600 mt-1">{config.address}</div>
+              <div className="text-[11px] text-gray-600">Tel: {config.phone}</div>
             </div>
 
             {/* Transaction Info */}
-            <div className="border-t border-b border-dashed border-gray-300 py-2 my-2 text-[11px] space-y-0.5">
+            <div className="border-t border-b border-dashed border-gray-400 py-2 my-2 text-[12px] space-y-1">
               <div className="flex justify-between">
                 <span>Receipt:</span>
                 <span className="font-extrabold">{sale.receiptNo}</span>
@@ -233,16 +258,16 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             {/* Items */}
             <table className="w-full text-left my-2 border-collapse">
               <thead>
-                <tr className="border-b-2 border-black text-[10px] font-black uppercase">
+                <tr className="border-b-2 border-black text-[11px] font-black uppercase">
                   <th className="py-1">Qty</th>
                   <th className="py-1">Item</th>
                   <th className="py-1 text-right">Rate</th>
                   <th className="py-1 text-right">Amt</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-gray-300">
                 {sale.items.map((item, idx) => (
-                  <tr key={idx} className="text-[11px]">
+                  <tr key={idx} className="text-[12px]">
                     <td className="py-1.5 font-bold align-top">{item.quantity}</td>
                     <td className="py-1.5 pr-1 align-top break-words max-w-[110px] font-semibold text-gray-900">
                       {item.product.name}
@@ -257,8 +282,8 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             </table>
 
             {/* Totals */}
-            <div className="border-t-2 border-black pt-2 mt-2 space-y-1 text-[11px]">
-              <div className="flex justify-between text-base font-black text-black">
+            <div className="border-t-2 border-black pt-2 mt-2 space-y-1 text-[12px]">
+              <div className="flex justify-between text-lg font-black text-black">
                 <span>TOTAL:</span>
                 <span>{formatNaira(sale.totalAmount)}</span>
               </div>
@@ -272,12 +297,12 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
                   <span>{formatNaira(sale.balanceDue)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-[10px] text-gray-700 pt-1 border-t border-dashed border-gray-300">
+              <div className="flex justify-between text-[11px] text-gray-700 pt-1 border-t border-dashed border-gray-400">
                 <span>Method:</span>
                 <span className="font-extrabold uppercase">{sale.paymentMethod}</span>
               </div>
               {sale.pointsEarned > 0 && (
-                <div className="flex justify-between text-[10px] text-emerald-800 font-bold bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200">
+                <div className="flex justify-between text-[11px] text-emerald-800 font-bold bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200">
                   <span>Points Earned:</span>
                   <span>+{sale.pointsEarned} pts</span>
                 </div>
@@ -285,7 +310,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             </div>
 
             {/* Footer */}
-            <div className="text-center text-[10px] text-gray-800 border-t border-dashed border-gray-300 pt-3 mt-3 space-y-1">
+            <div className="text-center text-[11px] text-gray-800 border-t border-dashed border-gray-400 pt-3 mt-3 space-y-1">
               <p className="font-bold text-black">{config.receiptFooterNote}</p>
             </div>
           </div>

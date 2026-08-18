@@ -270,6 +270,13 @@ textarea:focus {
 }
 
 /* ================= THERMAL PRINT STYLES ================= */
+/* Named page for the 80mm thermal receipt — zero margins so content
+   starts at the very top of the paper. */
+@page thermal-receipt {
+  size: 80mm auto;
+  margin: 0mm;
+}
+
 /* Named page for A4 financial statements — the receipt prints on `auto`
    (thermal roll) while the statement uses a real A4 sheet. The paper's own
    internal padding provides the document margins, so the page margin is 0. */
@@ -317,18 +324,20 @@ textarea:focus {
     transform: none !important;
   }
 
-  /* Target the thermal receipt element directly */
+  /* Named page for thermal receipt — zero margins so the receipt starts
+     at the very top of the paper, no browser-added whitespace. */
   #printable-thermal-receipt {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
-    margin: 0 auto !important;
-    padding: 3mm !important;
+    margin: 0 !important;
+    padding: 2mm 3mm !important;
     background: #ffffff !important;
     color: #000000 !important;
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
+    page: thermal-receipt !important;
     page-break-after: avoid !important;
     break-after: avoid !important;
   }

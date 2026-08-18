@@ -273,6 +273,7 @@ export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
   autoPrintOnSale: true,
   pointRate: 2,
   printDensity: 'High',
+  printerName: 'POS-80C',
 };
 
 export const DEVELOPER_INFO: StoreDeveloperInfo = {

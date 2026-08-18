@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS printer_configs (
     auto_print_on_sale BOOLEAN NOT NULL DEFAULT 1,
     point_rate INTEGER NOT NULL DEFAULT 2,
     print_density TEXT CHECK(print_density IN ('Normal', 'High', 'Draft')) NOT NULL DEFAULT 'Normal',
+    printer_name TEXT NOT NULL DEFAULT 'POS-80C',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

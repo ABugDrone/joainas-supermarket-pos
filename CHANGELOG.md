@@ -1,5 +1,23 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.3.3 (2026-08-18)
+
+### 🖨️ Native Thermal Printing (No Print Dialog)
+- **Direct ESC/POS Printing**: The desktop app now prints receipts by sending raw ESC/POS commands straight to the Windows printer queue — **no browser print dialog, no A4 page, no wasted paper**. The receipt always starts at the very top edge of the 58mm/80mm roll.
+- **Printer Name Config**: Hardware Config now has a "Printer Name" field plus a "Detect Printers" button that lists the installed Windows printers and auto-selects the thermal one.
+- **Print Density Control**: The ESC/POS stream now sends the printer's own density command (`GS ( K`, fn=49) so "High" gives darker, bolder output that matches the Xprinter's driver test print.
+- **Robust Receipt Layout**: Store name prints double-height, the TOTAL line is doubled and bold, all amounts bold — readable on thermal paper. Included the logo space via double-height store header at the very top.
+- **Browser Dev Fallback**: In localhost (no Tauri runtime) printing still falls back to `window.print()` so the receipt modal preview can be tested.
+- **Receipt Modal Polish**: Print button shows a spinner and toast feedback; a clear error toast appears if the printer name is wrong or the printer is offline.
+
+### 🔧 Technical Improvements
+- Native `print_raw` and `list_printers` Tauri commands added in the Rust backend (`Win32::Graphics::Printing` spooler API, RAW datatype).
+- New `src/utils/escpos.ts` builder converts any sale into an exact ESC/POS byte stream (init, density, alignment, bold, double-height, partial cut).
+- Added `printer_name` column to `printer_configs` (schema + migration v5).
+- Version bumped to 1.3.3 across package.json, Cargo.toml, and tauri.conf.json.
+
+---
+
 ## Version 1.3.2 (2026-08-16)
 
 ### 🎨 New Features

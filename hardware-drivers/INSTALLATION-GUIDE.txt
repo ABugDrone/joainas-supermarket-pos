@@ -1,0 +1,149 @@
+================================================================================
+  JOAINAS MART POS - HARDWARE INSTALLATION GUIDE
+  Version: 1.0 | Date: 16 August 2026
+  Prepared by: Dronebug Technologies
+================================================================================
+
+HARDWARE LIST:
+  1. Xprinter M813 - Thermal Receipt Printer (80mm, USB+RS232, ESC/POS)
+  2. ISSYZONE POS - Handheld USB Barcode Scanner
+
+================================================================================
+  DEVICE 1: XPRINTER M813 THERMAL RECEIPT PRINTER
+================================================================================
+
+WHAT'S INCLUDED:
+  - XPrinter Driver Setup V7.77.exe  (this folder)
+
+SYSTEM REQUIREMENTS:
+  - Windows 7 / 8 / 10 / 11 (32-bit or 64-bit)
+  - USB port on your computer
+  - The printer's power adapter (24V 2.5A)
+
+STEP-BY-STEP INSTALLATION:
+  1. Connect the printer to your computer using the USB cable (Type-B end
+     into the printer, Type-A end into your PC).
+
+  2. Connect the power adapter to the printer and plug it into a power outlet.
+     Turn the printer ON using the power switch.
+
+  3. Wait for Windows to detect the new hardware (you may hear a beep or see
+     a notification). Windows may attempt to install a generic driver - this is
+     fine, but we need the proper driver for full functionality.
+
+  4. Double-click "XPrinter Driver Setup V7.77.exe" in this folder.
+
+  5. Accept the license agreement and click "Next" through the prompts.
+     Default install path: C:\XINYE POS Printer Driver\XPrinter Driver V7.77
+
+  6. When the driver configuration window opens:
+     - Select your Windows version
+     - Select "USB" as the connection type
+     - Select "POS-80C" as the printer series (80mm with cutter)
+     - Click "Install Now"
+
+  7. After installation completes, open Windows Control Panel:
+     - Go to Devices and Printers
+     - You should see "POS-80C" listed as a printer
+     - Right-click it > Printer Properties > Print Test Page
+
+  8. The printer should print a test page. If it does, the driver is working.
+
+TROUBLESHOOTING:
+  - If the printer doesn't appear in Devices and Printers, try a different
+    USB cable or USB port.
+  - If print quality is poor, check the paper roll is loaded correctly and
+    the thermal side faces the print head.
+  - The cash drawer port (24V 1A) is for connecting a cash drawer - the
+    drawer will open automatically when the printer receives the command.
+
+================================================================================
+  DEVICE 2: ISSYZONE POS HANDHELD BARCODE SCANNER
+================================================================================
+
+DRIVER STATUS: ** NO DRIVER NEEDED **
+
+The ISSYZONE POS barcode scanner is a USB HID (Human Interface Device)
+keyboard-emulation scanner. This means:
+
+  - Windows automatically recognizes it as a keyboard when plugged in.
+  - No special driver installation is required.
+  - When you scan a barcode, the scanner "types" the barcode numbers as if
+    you were pressing keys on a keyboard.
+
+INSTALLATION:
+  1. Plug the scanner's USB cable into any available USB port on your computer.
+
+  2. Windows will automatically detect and configure the scanner. You may hear
+     a beep from the scanner confirming it's ready.
+
+  3. To test: Open Notepad, then scan any barcode. The barcode number should
+     appear as text in Notepad.
+
+  4. In the Joainas POS app, the scanner works by focusing on the search/input
+     field and scanning - the product code will be typed into the field
+     automatically.
+
+SCANNER BEHAVIOR:
+  - The scanner acts exactly like a keyboard.
+  - After scanning, it automatically appends a "carriage return" (Enter key).
+  - This means in the POS app, scanning a barcode will:
+    a) Type the barcode number into the search field
+    b) Automatically trigger a search/lookup
+  - If you need to scan multiple items, just scan again - each scan replaces
+    the previous text and searches again.
+
+CONFIGURATION (Optional):
+  - The scanner comes with a configuration barcode sheet (manual).
+  - You can scan specific barcodes to change:
+    * Prefix/Suffix characters
+    * Buzzer on/off
+    * LED on/off
+    * Code type (EAN-13, Code 128, etc.)
+  - Default settings work fine for most POS environments.
+
+TROUBLESHOOTING:
+  - If scanner doesn't work: unplug and replug the USB cable.
+  - If scanner beeps but nothing appears in the app, make sure the POS
+    search input field is focused (click on it or press the scan button).
+  - If the scanner is not recognized, try a different USB port.
+
+================================================================================
+  QUICK REFERENCE - JOAINAS POS APP HARDWARE SECTION
+================================================================================
+
+In the Joainas POS desktop app:
+
+  - Press F7 or click "Printer & Scanner" in the left navigation.
+  - The Hardware section has three tabs:
+    * Receipt Printer  - Configure thermal printer settings, paper size,
+                         print test receipts
+    * Barcode Generator - Generate and print barcode labels for products
+    * Hardware Settings - General hardware configuration
+
+  - For receipt printing: The app sends ESC/POS commands directly to the
+    printer through the installed driver.
+
+  - For barcode scanning: Simply focus the scan input field in the POS
+    module (F1 or click "Sell Service") and scan with the handheld scanner.
+
+================================================================================
+  FILES IN THIS FOLDER
+================================================================================
+
+  INSTALLATION-GUIDE.txt       - This file (you're reading it)
+  XPrinter-Driver-Setup-V7.77.exe - Xprinter universal receipt printer driver
+
+================================================================================
+  SUPPORT
+================================================================================
+
+  For technical support, contact:
+  Dronebug Technologies & Services
+  Email: dronebugtechnologies@gmail.com
+  Phone: +2347035716349
+
+  For Xprinter hardware issues, refer to the printer manual or visit:
+  https://www.xprintertech.com/support
+
+================================================================================

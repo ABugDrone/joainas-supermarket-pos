@@ -77,7 +77,7 @@ const NAV_ITEMS: {
   { id: 'customers', icon: Users, label: 'Customers', shortcut: 'F4', activeColor: 'bg-blue-600 text-white' },
   { id: 'expenses', icon: DollarSign, label: 'Expenses', shortcut: 'F5', activeColor: 'bg-rose-600 text-white' },
   { id: 'financials', icon: FileSpreadsheet, label: 'Reports', shortcut: 'F6', activeColor: 'bg-violet-600 text-white' },
-  { id: 'printer', icon: Printer, label: 'Printer & Scanner', shortcut: 'F7', activeColor: 'bg-indigo-600 text-white' },
+  { id: 'printer', icon: Printer, label: 'Hardware Config', shortcut: 'F7', activeColor: 'bg-indigo-600 text-white' },
   { id: 'admin', icon: ShieldCheck, label: 'Admin', shortcut: 'F8', activeColor: 'bg-purple-600 text-white' },
 ];
 
@@ -479,7 +479,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v1.3.2 • Dronebug Technologies
+            v1.3.3 • Dronebug Technologies
           </div>
         </footer>
       </div>

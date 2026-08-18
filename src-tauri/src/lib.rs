@@ -4,6 +4,13 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri_plugin_sql::{Builder as SqlBuilder, Migration, MigrationKind};
 
+use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Graphics::Printing::{
+    ClosePrinter, EndDocPrinter, EndPagePrinter, OpenPrinterW, StartDocPrinterW,
+    StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_ACCESS_USE, PRINTER_DEFAULTSW,
+};
+
 const APP_IDENTIFIER: &str = "com.joainas.pos.desktop";
 const DB_FILE_NAME: &str = "joainas_pos.db";
 const POINTER_FILE_NAME: &str = "db_path.txt";
@@ -127,6 +134,135 @@ fn relocate_database(dir: String) -> Result<String, String> {
     Ok(format!("sqlite:{}", target.display()))
 }
 
+// ---------------------------------------------------------------------------
+// Native ESC/POS thermal printing via the Windows Print Spooler.
+//
+// Sends RAW bytes directly to the printer queue — no browser print dialog, no
+// A4 reformatting, no wasted paper. The frontend builds the exact ESC/POS
+// command stream and hands it to this command; we simply spool it to the
+// printer as-is (datatype "RAW").
+// ---------------------------------------------------------------------------
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[tauri::command]
+fn print_raw(printer: String, data: Vec<u8>) -> Result<(), String> {
+    unsafe {
+        let mut hprinter: HANDLE = HANDLE(std::ptr::null_mut());
+        let printer_name = wide(&printer);
+        let defaults = PRINTER_DEFAULTSW {
+            pDatatype: PWSTR::null(),
+            pDevMode: std::ptr::null_mut(),
+            DesiredAccess: PRINTER_ACCESS_USE,
+        };
+
+        OpenPrinterW(
+            PCWSTR(printer_name.as_ptr()),
+            &mut hprinter,
+            Some(&defaults),
+        )
+        .map_err(|e| {
+            format!(
+                "Could not open printer \"{}\" ({:#x}). Check the printer name in Hardware Config and make sure it is connected.",
+                printer,
+                e.code().0
+            )
+        })?;
+
+        let mut doc_name = wide("Joainas POS Receipt");
+        let mut datatype = wide("RAW");
+        let doc_info = DOC_INFO_1W {
+            pDocName: PWSTR(doc_name.as_mut_ptr()),
+            pOutputFile: PWSTR::null(),
+            pDatatype: PWSTR(datatype.as_mut_ptr()),
+        };
+
+        if StartDocPrinterW(hprinter, 1, &doc_info) == 0 {
+            let _ = ClosePrinter(hprinter);
+            return Err("StartDocPrinter failed.".to_string());
+        }
+        if !StartPagePrinter(hprinter).as_bool() {
+            let _ = EndDocPrinter(hprinter);
+            let _ = ClosePrinter(hprinter);
+            return Err("StartPagePrinter failed.".to_string());
+        }
+
+        let mut written: u32 = 0;
+        let mut offset = 0usize;
+        let chunk = 4096usize;
+        while offset < data.len() {
+            let end = (offset + chunk).min(data.len());
+            let ok = WritePrinter(
+                hprinter,
+                data[offset..end].as_ptr() as *const _,
+                (end - offset) as u32,
+                &mut written,
+            );
+            if !ok.as_bool() {
+                let _ = EndPagePrinter(hprinter);
+                let _ = EndDocPrinter(hprinter);
+                let _ = ClosePrinter(hprinter);
+                return Err("WritePrinter failed while sending the receipt.".to_string());
+            }
+            offset = end;
+        }
+
+        let _ = EndPagePrinter(hprinter);
+        let _ = EndDocPrinter(hprinter);
+        let _ = ClosePrinter(hprinter);
+    }
+    Ok(())
+}
+
+/// List installed printers (names only) so the app can offer a picker.
+#[tauri::command]
+fn list_printers() -> Vec<String> {
+    unsafe {
+        use windows::Win32::Graphics::Printing::{
+            EnumPrintersW, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_INFO_1W,
+        };
+        let flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+        let mut needed: u32 = 0;
+        let mut count: u32 = 0;
+        let _ = EnumPrintersW(
+            flags,
+            PCWSTR::null(),
+            2,
+            None,
+            &mut needed,
+            &mut count,
+        );
+        let mut buf = vec![0u8; needed as usize];
+        let ok = EnumPrintersW(
+            flags,
+            PCWSTR::null(),
+            2,
+            Some(buf.as_mut_slice()),
+            &mut needed,
+            &mut count,
+        );
+        let mut names = Vec::new();
+        if ok.is_ok() {
+            let mut ptr = buf.as_ptr() as *const PRINTER_INFO_1W;
+            for _ in 0..count {
+                let info = &*ptr;
+                let p = info.pName.as_ptr();
+                if !p.is_null() {
+                    let len = (0usize..)
+                        .find(|&i| *p.offset(i as isize) == 0)
+                        .unwrap_or(0);
+                    let name: Vec<u16> = (0..len).map(|i| *p.offset(i as isize)).collect();
+                    names.push(String::from_utf16_lossy(&name));
+                }
+                ptr = ptr.offset(1);
+            }
+        }
+        names
+    }
+}
+
 pub fn run() {
     let migrations = vec![
         Migration {
@@ -187,6 +323,14 @@ pub fn run() {
             ",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "add_printer_name",
+            sql: "
+                ALTER TABLE printer_configs ADD COLUMN printer_name TEXT NOT NULL DEFAULT 'POS-80C';
+            ",
+            kind: MigrationKind::Up,
+        },
     ];
 
     let (db_path, _) = resolve_db_path();
@@ -197,7 +341,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![get_db_info, relocate_database])
+        .invoke_handler(tauri::generate_handler![
+            get_db_info,
+            relocate_database,
+            print_raw,
+            list_printers
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Joainas POS Windows application");
 }
