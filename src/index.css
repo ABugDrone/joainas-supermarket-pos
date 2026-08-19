@@ -270,17 +270,22 @@ textarea:focus {
 }
 
 /* ================= THERMAL PRINT STYLES ================= */
-/* Named page for the thermal receipt — zero margins so content starts at the
-   very top of the paper. `auto` lets the width follow the receipt element,
-   which is fixed to 58mm or 80mm in the print rules below. */
-@page thermal-receipt {
-  size: auto;
-  margin: 0mm;
+/* Named pages for the thermal receipt — explicit 80mm/58mm width with auto
+   height for continuous thermal printing, zero margins so content starts at
+   the very top of the paper. Without an explicit width the browser falls back
+   to A4 and centers the receipt (the cause of wasted paper). */
+@page thermal-receipt-80 {
+  size: 80mm auto;
+  margin: 0;
 }
 
-/* Named page for A4 financial statements — the receipt prints on `auto`
-   (thermal roll) while the statement uses a real A4 sheet. The paper's own
-   internal padding provides the document margins, so the page margin is 0. */
+@page thermal-receipt-58 {
+  size: 58mm auto;
+  margin: 0;
+}
+
+/* Named page for A4 financial statements — the receipt prints on the thermal
+   roll while the statement uses a real A4 sheet. */
 @page financial-a4 {
   size: A4 portrait;
   margin: 0mm;
@@ -297,6 +302,10 @@ textarea:focus {
     background-color: #ffffff !important;
     color: #000000 !important;
     font-family: 'Courier New', Courier, monospace !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   /* Isolate the printed document: everything else is visually hidden but
@@ -326,32 +335,35 @@ textarea:focus {
   }
 
   /* Named page for thermal receipt — zero margins so the receipt starts
-     at the very top of the paper, no browser-added whitespace. */
+     at the very top of the paper, no browser-added whitespace. Width-specific
+     named pages force 80mm/58mm so the browser never falls back to A4. */
   #printable-thermal-receipt {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
     margin: 0 !important;
-    padding: 2mm 3mm !important;
+    padding: 0 3mm 2mm 3mm !important;
     background: #ffffff !important;
     color: #000000 !important;
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
-    page: thermal-receipt !important;
     page-break-after: avoid !important;
     break-after: avoid !important;
   }
 
-  /* Match the printer paper width chosen in Settings. */
+  /* Match the printer paper width chosen in Settings — the named page also
+     switches so the printed sheet is exactly the thermal roll width. */
   #printable-thermal-receipt[data-paper="58mm"] {
     width: 58mm !important;
     max-width: 58mm !important;
+    page: thermal-receipt-58 !important;
   }
 
   #printable-thermal-receipt[data-paper="80mm"] {
     width: 80mm !important;
     max-width: 80mm !important;
+    page: thermal-receipt-80 !important;
   }
 
   #printable-thermal-receipt table,

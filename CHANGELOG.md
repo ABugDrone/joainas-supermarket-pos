@@ -1,5 +1,15 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.3.5 (2026-08-18)
+
+### 🖨️ Browser Print Fix — No More A4 Centering
+- **Explicit Thermal Page Sizes**: The `@media print` rules now force the sheet to exactly `80mm auto` or `58mm auto` (zero margins). Previously `size: auto` let the browser fall back to A4 and center the receipt — the cause of wasted paper below the top edge when printing from a browser (e.g. via `window.print()`).
+- **Width-Specific Named Pages**: Added `@page thermal-receipt-80` and `@page thermal-receipt-58`; the receipt element switches to the matching named page so the printed sheet is always exactly the thermal roll width, and the receipt starts at the top-left with zero margins (`position: absolute; left:0; top:0`).
+- **Print Color Exact**: `-webkit-print-color-adjust: exact` keeps blacks and colored elements dark instead of being dropped to light grays.
+- A4 financial statements are unaffected — they keep their own `financial-a4` named page.
+
+---
+
 ## Version 1.3.4 (2026-08-18)
 
 ### 🖨️ Bigger, Bolder Receipts + PDF Printing via Default Viewer

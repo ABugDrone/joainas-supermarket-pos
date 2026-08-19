@@ -1,0 +1,14 @@
+Solution 1: Fix Printer Settings in Windows (Recommended)
+Open Control Panel on Windows 10 and go to Devices and Printers (or search for Printers & scanners in Settings).
+
+Right-click your thermal printer (XP-80C) and select Printing Preferences.
+
+Look for the Paper/Quality or Page Setup tab.
+
+Set the paper size to 80 x 297 mm (or standard roll size like 80(72.1) x 210 mm / 80 x Continuous).
+
+Ensure the Paper Source or Media Type is set to Receipt or Continuous Roll (not Cut Sheet or A4).
+
+Click Apply and OK.
+
+Optional: Right-click XP-80C again, go to Printer properties > Advanced > Printing Defaults..., and set the same paper size there as well.
