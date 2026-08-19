@@ -281,7 +281,7 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
                 type="text"
                 value={formData.printerName || ''}
                 onChange={(e) => setFormData({ ...formData, printerName: e.target.value })}
-                placeholder="POS-80C"
+                placeholder="XP-80C"
                 className="w-full rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2 text-sm text-white focus:border-cyan-500 outline-none"
               />
               {typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window) ? (
@@ -292,22 +292,21 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
                 <button
                 type="button"
                 onClick={async () => {
-                  if (typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window)) {
-                    showToast(
-                      'Web mode: the browser cannot access your printer. Install the desktop app and open Hardware Config there to detect the Xprinter.',
-                      'error'
-                    );
-                    return;
-                  }
-                  const names = await (await import('../utils/escpos')).listNativePrinters();
+                  const escpos = await import('../utils/escpos');
+                  const [names, def] = await Promise.all([
+                    escpos.listNativePrinters(),
+                    escpos.getDefaultNativePrinter(),
+                  ]);
                   if (!names.length) {
-                    showToast('No printers detected. Make sure the Xprinter is connected.', 'error');
+                    showToast('No printers detected. Make sure the Xprinter is connected (Control Panel > Devices and Printers).', 'error');
                     return;
                   }
-                  const firstThermal =
-                    names.find((n) => /pos|80|thermal|xprinter|receipt/i.test(n)) || names[0];
-                  setFormData({ ...formData, printerName: firstThermal });
-                  showToast(`Printer set to "${firstThermal}".`, 'success');
+                  const pick =
+                    def ||
+                    names.find((n) => /xp-80|pos-80|80c|thermal|receipt|xprinter|80/i.test(n)) ||
+                    names[0];
+                  setFormData({ ...formData, printerName: pick });
+                  showToast(`Printer set to "${pick}".`, 'success');
                 }}
                 className="mt-1.5 w-full rounded-lg border border-cyan-800/50 bg-cyan-950/40 px-2 py-1.5 text-xs font-bold text-cyan-300 hover:bg-cyan-900/40 transition"
               >

@@ -150,70 +150,137 @@ fn wide(s: &str) -> Vec<u16> {
 #[tauri::command]
 fn print_raw(printer: String, data: Vec<u8>) -> Result<(), String> {
     unsafe {
-        let mut hprinter: HANDLE = HANDLE(std::ptr::null_mut());
-        let printer_name = wide(&printer);
-        let defaults = PRINTER_DEFAULTSW {
-            pDatatype: PWSTR::null(),
-            pDevMode: std::ptr::null_mut(),
-            DesiredAccess: PRINTER_ACCESS_USE,
-        };
-
-        OpenPrinterW(
-            PCWSTR(printer_name.as_ptr()),
-            &mut hprinter,
-            Some(&defaults),
-        )
-        .map_err(|e| {
-            format!(
-                "Could not open printer \"{}\" ({:#x}). Check the printer name in Hardware Config and make sure it is connected.",
-                printer,
-                e.code().0
-            )
-        })?;
-
-        let mut doc_name = wide("Joainas POS Receipt");
-        let mut datatype = wide("RAW");
-        let doc_info = DOC_INFO_1W {
-            pDocName: PWSTR(doc_name.as_mut_ptr()),
-            pOutputFile: PWSTR::null(),
-            pDatatype: PWSTR(datatype.as_mut_ptr()),
-        };
-
-        if StartDocPrinterW(hprinter, 1, &doc_info) == 0 {
-            let _ = ClosePrinter(hprinter);
-            return Err("StartDocPrinter failed.".to_string());
+        // Try the configured printer name first, then the Windows default
+        // printer, then any printer that looks like a thermal receipt printer.
+        let mut candidates = Vec::new();
+        if !printer.trim().is_empty() {
+            candidates.push(printer.trim().to_string());
         }
-        if !StartPagePrinter(hprinter).as_bool() {
-            let _ = EndDocPrinter(hprinter);
-            let _ = ClosePrinter(hprinter);
-            return Err("StartPagePrinter failed.".to_string());
+        let default = get_default_printer_name();
+        if let Some(d) = &default {
+            if !candidates.contains(d) {
+                candidates.push(d.clone());
+            }
+        }
+        let thermal = list_printers();
+        for name in thermal {
+            if !candidates.contains(&name)
+                && (name.contains("XP-80")
+                    || name.contains("POS-80")
+                    || name.to_lowercase().contains("thermal")
+                    || name.to_lowercase().contains("receipt")
+                    || name.to_lowercase().contains("80")
+                    || name.to_lowercase().contains("xprinter"))
+            {
+                candidates.push(name);
+            }
         }
 
-        let mut written: u32 = 0;
-        let mut offset = 0usize;
-        let chunk = 4096usize;
-        while offset < data.len() {
-            let end = (offset + chunk).min(data.len());
-            let ok = WritePrinter(
-                hprinter,
-                data[offset..end].as_ptr() as *const _,
-                (end - offset) as u32,
-                &mut written,
-            );
-            if !ok.as_bool() {
-                let _ = EndPagePrinter(hprinter);
+        if candidates.is_empty() {
+            return Err("No printer found. Connect the thermal printer and check Devices and Printers.".to_string());
+        }
+
+        let mut errors: Vec<String> = Vec::new();
+        let mut printed_ok = false;
+
+        for candidate in &candidates {
+            let mut hprinter: HANDLE = HANDLE(std::ptr::null_mut());
+            let printer_name = wide(candidate);
+            let defaults = PRINTER_DEFAULTSW {
+                pDatatype: PWSTR::null(),
+                pDevMode: std::ptr::null_mut(),
+                DesiredAccess: PRINTER_ACCESS_USE,
+            };
+
+            match OpenPrinterW(
+                PCWSTR(printer_name.as_ptr()),
+                &mut hprinter,
+                Some(&defaults),
+            ) {
+                Ok(_) => {}
+                Err(e) => {
+                    errors.push(format!("\"{}\": {:#x}", candidate, e.code().0));
+                    continue;
+                }
+            }
+
+            let mut doc_name = wide("Joainas POS Receipt");
+            let mut datatype = wide("RAW");
+            let doc_info = DOC_INFO_1W {
+                pDocName: PWSTR(doc_name.as_mut_ptr()),
+                pOutputFile: PWSTR::null(),
+                pDatatype: PWSTR(datatype.as_mut_ptr()),
+            };
+
+            if StartDocPrinterW(hprinter, 1, &doc_info) == 0 {
+                let _ = ClosePrinter(hprinter);
+                errors.push(format!("\"{}\": StartDoc failed", candidate));
+                continue;
+            }
+            if !StartPagePrinter(hprinter).as_bool() {
                 let _ = EndDocPrinter(hprinter);
                 let _ = ClosePrinter(hprinter);
-                return Err("WritePrinter failed while sending the receipt.".to_string());
+                errors.push(format!("\"{}\": StartPage failed", candidate));
+                continue;
             }
-            offset = end;
+
+            let mut written: u32 = 0;
+            let mut offset = 0usize;
+            let chunk = 4096usize;
+            while offset < data.len() {
+                let end = (offset + chunk).min(data.len());
+                let ok = WritePrinter(
+                    hprinter,
+                    data[offset..end].as_ptr() as *const _,
+                    (end - offset) as u32,
+                    &mut written,
+                );
+                if !ok.as_bool() {
+                    break;
+                }
+                offset = end;
+            }
+
+            let _ = EndPagePrinter(hprinter);
+            let _ = EndDocPrinter(hprinter);
+            let _ = ClosePrinter(hprinter);
+
+            if offset >= data.len() {
+                printed_ok = true;
+                break;
+            } else {
+                errors.push(format!("\"{}\": write failed", candidate));
+            }
         }
 
-        let _ = EndPagePrinter(hprinter);
-        let _ = EndDocPrinter(hprinter);
-        let _ = ClosePrinter(hprinter);
+        if printed_ok {
+            Ok(())
+        } else {
+            Err(format!(
+                "Could not send to any printer. Tried: {}. Make sure the printer is on and connected (see Control Panel > Devices and Printers).",
+                errors.join("; ")
+            ))
+        }
     }
-    Ok(())
+}
+
+/// Return the Windows default printer name (empty string if none).
+fn get_default_printer_name() -> Option<String> {
+    unsafe {
+        use windows::Win32::Graphics::Printing::GetDefaultPrinterW;
+        let mut len: u32 = 0;
+        let _ = GetDefaultPrinterW(PWSTR::null(), &mut len);
+        if len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u16; len as usize];
+        let ok = GetDefaultPrinterW(PWSTR(buf.as_mut_ptr()), &mut len);
+        if !ok.as_bool() {
+            return None;
+        }
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        Some(String::from_utf16_lossy(&buf[..end]))
+    }
 }
 
 /// List installed printers (names only) so the app can offer a picker.
@@ -261,6 +328,12 @@ fn list_printers() -> Vec<String> {
         }
         names
     }
+}
+
+/// Return the Windows default printer name so the UI can prefill it.
+#[tauri::command]
+fn get_default_printer() -> String {
+    get_default_printer_name().unwrap_or_default()
 }
 
 pub fn run() {
@@ -327,7 +400,7 @@ pub fn run() {
             version: 5,
             description: "add_printer_name",
             sql: "
-                ALTER TABLE printer_configs ADD COLUMN printer_name TEXT NOT NULL DEFAULT 'POS-80C';
+                ALTER TABLE printer_configs ADD COLUMN printer_name TEXT NOT NULL DEFAULT 'XP-80C';
             ",
             kind: MigrationKind::Up,
         },
@@ -345,7 +418,8 @@ pub fn run() {
             get_db_info,
             relocate_database,
             print_raw,
-            list_printers
+            list_printers,
+            get_default_printer
         ])
         .run(tauri::generate_context!())
         .expect("error while running Joainas POS Windows application");

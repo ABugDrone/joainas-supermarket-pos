@@ -191,7 +191,7 @@ export function mapPrinterConfig(row: any): ThermalPrinterConfig {
     autoPrintOnSale: !!row.auto_print_on_sale,
     pointRate: row.point_rate,
     printDensity: row.print_density,
-    printerName: row.printer_name || 'POS-80C',
+    printerName: row.printer_name || 'XP-80C',
   };
 }
 
@@ -494,7 +494,7 @@ export async function dbSavePrinterConfig(config: ThermalPrinterConfig): Promise
       config.autoPrintOnSale ? 1 : 0,
       config.pointRate,
       config.printDensity,
-      config.printerName || 'POS-80C',
+      config.printerName || 'XP-80C',
     ]
   );
 }

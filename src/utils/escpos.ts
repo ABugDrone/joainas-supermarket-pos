@@ -196,7 +196,7 @@ export async function printViaNative(
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     const data = buildEscPos(sale, config);
-    const printer = config.printerName || 'POS-80C';
+    const printer = config.printerName || '';
     await invoke('print_raw', { printer, data: Array.from(data) });
     return { ok: true };
   } catch (e) {
@@ -212,6 +212,16 @@ export async function listNativePrinters(): Promise<string[]> {
     return (await invoke('list_printers')) as string[];
   } catch {
     return [];
+  }
+}
+
+export async function getDefaultNativePrinter(): Promise<string> {
+  if (!isTauriRuntime()) return '';
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return (await invoke('get_default_printer')) as string;
+  } catch {
+    return '';
   }
 }
 
