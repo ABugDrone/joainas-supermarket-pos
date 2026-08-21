@@ -335,37 +335,59 @@ textarea:focus {
   }
 
   /* Named page for thermal receipt — zero margins so the receipt starts
-     at the very top of the paper, no browser-added whitespace. Width-specific
-     named pages force 80mm/58mm so the browser never falls back to A4. */
+     at the very top of the paper. Box-sizing keeps padding INSIDE the mm
+     width. Hardware margins on Xprinter (≈2-3mm per side) mean a full 80mm
+     container is clipped on the right — we use 76mm printable width for 80mm
+     roll and 54mm for 58mm roll to leave a safe hardware margin on both sides,
+     so no amount or subtotal is hidden on the RHS (see Xprinter photo). */
   #printable-thermal-receipt {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
-    margin: 0 !important;
-    padding: 0 3mm 2mm 3mm !important;
+    margin: 0 auto !important;
     background: #ffffff !important;
     color: #000000 !important;
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
+    box-sizing: border-box !important;
     page-break-after: avoid !important;
     break-after: avoid !important;
+    overflow: visible !important;
+    font-size: 10.5px !important;
+    line-height: 1.35 !important;
   }
 
-  /* Match the printer paper width chosen in Settings — the named page also
-     switches so the printed sheet is exactly the thermal roll width. */
-  #printable-thermal-receipt[data-paper="58mm"] {
-    width: 58mm !important;
-    max-width: 58mm !important;
-    page: thermal-receipt-58 !important;
-  }
-
+  /* 80mm roll: 76mm printable width centred on 80mm page leaves ~2mm hardware margin each side. */
   #printable-thermal-receipt[data-paper="80mm"] {
-    width: 80mm !important;
-    max-width: 80mm !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
+    min-width: 76mm !important;
+    padding: 2mm 2mm 2mm 2mm !important;
     page: thermal-receipt-80 !important;
   }
 
+  /* 58mm roll: 54mm printable width centred on 58mm page. */
+  #printable-thermal-receipt[data-paper="58mm"] {
+    width: 54mm !important;
+    max-width: 54mm !important;
+    min-width: 54mm !important;
+    padding: 2mm 1.5mm 2mm 1.5mm !important;
+    page: thermal-receipt-58 !important;
+    font-size: 9.5px !important;
+  }
+
+  #printable-thermal-receipt table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+  }
+  #printable-thermal-receipt th,
+  #printable-thermal-receipt td {
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    white-space: normal !important;
+  }
   #printable-thermal-receipt table,
   #printable-thermal-receipt tr,
   #printable-thermal-receipt td {

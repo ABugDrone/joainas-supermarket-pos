@@ -150,7 +150,7 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
             Customer Profiles & Account Ledger
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Manage customer credit accounts, advance deposits, loyalty points, and view customer purchase history.
+            Manage customer credit accounts and advance deposits, and view customer purchase history.
             {!isViewerAdmin && ' You can only view the customers you registered or served.'}
           </p>
         </div>
@@ -192,7 +192,6 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
                   <th className="py-2.5 px-3">Phone No</th>
                   <th className="py-2.5 px-3">Address</th>
                   <th className="py-2.5 px-3 text-right">Balance</th>
-                  <th className="py-2.5 px-3 text-right">Point</th>
                   <th className="py-2.5 px-3 text-center">Owner</th>
                 </tr>
               </thead>
@@ -231,9 +230,6 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
                       }`}>
                         {c.balance.toLocaleString()}
                       </td>
-                      <td className="py-2.5 px-3 text-right font-mono text-slate-400">
-                        {c.points.toLocaleString()}
-                      </td>
                       <td className="py-2.5 px-3 text-center">
                         {owned ? (
                           <span className="text-[9px] font-bold text-slate-500">{isViewerAdmin ? 'All' : 'Mine'}</span>
@@ -246,7 +242,7 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
                 })}
                 {filteredCustomers.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-500">
+                    <td colSpan={5} className="py-12 text-center text-slate-500">
                       No customers found.
                     </td>
                   </tr>
@@ -269,7 +265,7 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
                 Sales Details: {selectedCustomer?.fullName || 'Select Customer'}
               </h3>
               <p className="text-[10px] text-slate-400">
-                Phone: {selectedCustomer?.phone || 'N/A'} • Points: {selectedCustomer?.points.toLocaleString()}
+                Phone: {selectedCustomer?.phone || 'N/A'}
               </p>
             </div>
 
@@ -292,14 +288,13 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
                   <th className="py-2.5 px-3 text-right">Amount (₦)</th>
                   <th className="py-2.5 px-3 text-right">Advance (₦)</th>
                   <th className="py-2.5 px-3 text-right">Balance (₦)</th>
-                  <th className="py-2.5 px-3 text-right">Point</th>
                   <th className="py-2.5 px-3 text-center">Date</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#30363d]">
                 {customerSales.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-500">
+                    <td colSpan={5} className="py-12 text-center text-slate-500">
                       No sales records found for this customer.
                     </td>
                   </tr>
@@ -310,7 +305,6 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
                       <td className="py-2.5 px-3 text-right font-extrabold text-white">{s.totalAmount.toLocaleString()}</td>
                       <td className="py-2.5 px-3 text-right text-emerald-400 font-semibold">{s.advancePayment.toLocaleString()}</td>
                       <td className="py-2.5 px-3 text-right text-red-400 font-bold">{s.balanceDue.toLocaleString()}</td>
-                      <td className="py-2.5 px-3 text-right font-mono text-slate-400">+{s.pointsEarned}</td>
                       <td className="py-2.5 px-3 text-center text-slate-400 text-[11px]">{s.date}</td>
                     </tr>
                   ))

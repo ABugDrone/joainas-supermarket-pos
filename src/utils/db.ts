@@ -52,7 +52,293 @@ export async function openDb(url: string): Promise<Database | null> {
   } catch (e) {
     console.error('Failed to enable foreign keys', e);
   }
+  // The schema is bootstrapped idempotently on every connection instead of via
+  // sqlx migrations — older builds edited migration v1's SQL which broke the
+  // checksum/dirty checks on existing databases and even on fresh installs.
+  // Running it here keeps old databases working and existing data safe.
+  await bootstrapSchema(next);
   return next;
+}
+
+// ============================================================
+// IDEMPOTENT SCHEMA BOOTSTRAP
+// Creates every table/index it needs and adds any columns that may be
+// missing on databases created by older app versions. Safe to run on
+// every connection — it never deletes or rewrites existing data.
+// ============================================================
+
+const SCHEMA_CREATES: string[] = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY NOT NULL,
+    full_name TEXT NOT NULL,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT CHECK(role IN ('System Admin', 'Store Manager', 'Cashier', 'Inventory Staff', 'Accountant')) NOT NULL DEFAULT 'Cashier',
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    status TEXT CHECK(status IN ('active', 'suspended')) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS categories (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT UNIQUE NOT NULL,
+    color TEXT NOT NULL DEFAULT '#6366f1',
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY NOT NULL,
+    barcode TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    category_name TEXT NOT NULL,
+    unit TEXT CHECK(unit IN ('kg', 'pack', 'carton', 'bottle', 'piece', 'bag')) NOT NULL DEFAULT 'piece',
+    cost_price REAL NOT NULL DEFAULT 0.0,
+    retail_price REAL NOT NULL DEFAULT 0.0,
+    wholesale_price REAL NOT NULL DEFAULT 0.0,
+    stock_qty INTEGER NOT NULL DEFAULT 0,
+    reorder_level INTEGER NOT NULL DEFAULT 5,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS customers (
+    id TEXT PRIMARY KEY NOT NULL,
+    full_name TEXT NOT NULL,
+    account_type TEXT CHECK(account_type IN ('individual', 'company', 'ngo', 'government')) NOT NULL DEFAULT 'individual',
+    phone TEXT,
+    address TEXT,
+    balance REAL NOT NULL DEFAULT 0.0,
+    points INTEGER NOT NULL DEFAULT 0,
+    advance_payment REAL NOT NULL DEFAULT 0.0,
+    assigned_cashier TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS sales (
+    id TEXT PRIMARY KEY NOT NULL,
+    receipt_no TEXT UNIQUE NOT NULL,
+    subtotal REAL NOT NULL DEFAULT 0.0,
+    total_amount REAL NOT NULL DEFAULT 0.0,
+    advance_payment REAL NOT NULL DEFAULT 0.0,
+    balance_due REAL NOT NULL DEFAULT 0.0,
+    payment_method TEXT CHECK(payment_method IN ('Cash', 'Transfer', 'POS/Card', 'Cash + Transfer', 'Store Credit / Account', 'POS Transfer', 'Split Payment')) NOT NULL DEFAULT 'Cash',
+    price_type TEXT CHECK(price_type IN ('retail', 'wholesale')) NOT NULL DEFAULT 'retail',
+    customer_id TEXT,
+    customer_name TEXT,
+    customer_phone TEXT,
+    points_earned INTEGER NOT NULL DEFAULT 0,
+    cash_amount REAL,
+    transfer_amount REAL,
+    payment_note TEXT,
+    cashier_username TEXT NOT NULL,
+    sale_date TEXT NOT NULL,
+    sale_time TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS sale_items (
+    id TEXT PRIMARY KEY NOT NULL,
+    sale_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    price_type TEXT CHECK(price_type IN ('retail', 'wholesale')) NOT NULL,
+    rate REAL NOT NULL,
+    amount REAL NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS expenditures (
+    id TEXT PRIMARY KEY NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0.0,
+    expense_date TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS printer_configs (
+    id INTEGER PRIMARY KEY CHECK (id = 1) DEFAULT 1,
+    store_name TEXT NOT NULL,
+    tagline TEXT,
+    address TEXT,
+    phone TEXT,
+    receipt_header_note TEXT,
+    receipt_footer_note TEXT,
+    show_logo BOOLEAN NOT NULL DEFAULT 1,
+    paper_width TEXT CHECK(paper_width IN ('80mm', '58mm')) NOT NULL DEFAULT '80mm',
+    auto_print_on_sale BOOLEAN NOT NULL DEFAULT 1,
+    point_rate INTEGER NOT NULL DEFAULT 2,
+    print_density TEXT CHECK(print_density IN ('Normal', 'High', 'Draft')) NOT NULL DEFAULT 'Normal',
+    printer_name TEXT NOT NULL DEFAULT 'XP-80C',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    username TEXT NOT NULL,
+    user_role TEXT NOT NULL,
+    action TEXT NOT NULL,
+    details TEXT NOT NULL,
+    log_timestamp INTEGER NOT NULL,
+    log_date TEXT NOT NULL,
+    log_time TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS inventory_adjustments (
+    id TEXT PRIMARY KEY NOT NULL,
+    product_id TEXT NOT NULL,
+    adjustment_type TEXT NOT NULL,
+    quantity_changed INTEGER NOT NULL,
+    reason TEXT,
+    adjusted_by TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+];
+
+const SCHEMA_INDEXES: string[] = [
+  'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
+  'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)',
+  'CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(name)',
+  'CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)',
+  'CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_name)',
+  'CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)',
+  'CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name)',
+  'CREATE INDEX IF NOT EXISTS idx_sales_receipt ON sales(receipt_no)',
+  'CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(sale_date)',
+  'CREATE INDEX IF NOT EXISTS idx_sales_cashier ON sales(cashier_username)',
+  'CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)',
+  'CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id)',
+  'CREATE INDEX IF NOT EXISTS idx_expenditures_date ON expenditures(expense_date)',
+  'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(log_timestamp DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_audit_logs_username ON audit_logs(username)',
+];
+
+async function tableColumnNames(d: Database, table: string): Promise<string[]> {
+  try {
+    const rows = await d.select<{ name: string }[]>(`PRAGMA table_info(${table})`);
+    return rows.map((r) => r.name);
+  } catch (e) {
+    console.error(`Failed to inspect table "${table}"`, e);
+    return [];
+  }
+}
+
+async function ensureColumn(
+  d: Database,
+  table: string,
+  column: string,
+  ddl: string
+): Promise<void> {
+  const cols = await tableColumnNames(d, table);
+  if (!cols.includes(column)) {
+    try {
+      await d.execute(ddl, []);
+      console.info(`Added missing column "${table}.${column}"`);
+    } catch (e) {
+      console.error(`Failed to add column "${table}.${column}"`, e);
+    }
+  }
+}
+
+export async function bootstrapSchema(d: Database): Promise<void> {
+  // 1. Create any missing tables (never alters existing ones).
+  for (const sql of SCHEMA_CREATES) {
+    try {
+      await d.execute(sql, []);
+    } catch (e) {
+      console.error('Schema create failed', sql, e);
+    }
+  }
+
+  // 2. Customers table normalization. Databases created before v1.3.0 have a
+  //    `phone NOT NULL` column and no `account_type`/`assigned_cashier`. We
+  //    rebuild the table once (copying all rows) so old and new databases
+  //    end up with the exact same structure. Data is preserved.
+  const custCols = await tableColumnNames(d, 'customers');
+  if (!custCols.includes('account_type')) {
+    try {
+      await d.execute('ALTER TABLE customers RENAME TO customers_old', []);
+      await d.execute(
+        `CREATE TABLE customers (
+          id TEXT PRIMARY KEY NOT NULL,
+          full_name TEXT NOT NULL,
+          account_type TEXT CHECK(account_type IN ('individual', 'company', 'ngo', 'government')) NOT NULL DEFAULT 'individual',
+          phone TEXT,
+          address TEXT,
+          balance REAL NOT NULL DEFAULT 0.0,
+          points INTEGER NOT NULL DEFAULT 0,
+          advance_payment REAL NOT NULL DEFAULT 0.0,
+          assigned_cashier TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+        []
+      );
+      await d.execute(
+        `INSERT INTO customers (id, full_name, account_type, phone, address, balance, points, advance_payment, assigned_cashier, created_at)
+         SELECT id, full_name, 'individual', phone, address, balance, points, advance_payment, NULL, created_at FROM customers_old`,
+        []
+      );
+      await d.execute('DROP TABLE customers_old', []);
+      console.info('Normalized legacy customers table');
+    } catch (e) {
+      console.error('Failed to normalize customers table', e);
+    }
+  } else {
+    await ensureColumn(
+      d,
+      'customers',
+      'assigned_cashier',
+      'ALTER TABLE customers ADD COLUMN assigned_cashier TEXT'
+    );
+  }
+
+  // 3. Add columns introduced after the original schema.
+  await ensureColumn(
+    d,
+    'users',
+    'capabilities',
+    `ALTER TABLE users ADD COLUMN capabilities TEXT NOT NULL DEFAULT '[]'`
+  );
+  await ensureColumn(
+    d,
+    'categories',
+    'color',
+    `ALTER TABLE categories ADD COLUMN color TEXT NOT NULL DEFAULT '#6366f1'`
+  );
+  await ensureColumn(
+    d,
+    'printer_configs',
+    'printer_name',
+    `ALTER TABLE printer_configs ADD COLUMN printer_name TEXT NOT NULL DEFAULT 'XP-80C'`
+  );
+  await ensureColumn(d, 'sales', 'cash_amount', 'ALTER TABLE sales ADD COLUMN cash_amount REAL');
+  await ensureColumn(d, 'sales', 'transfer_amount', 'ALTER TABLE sales ADD COLUMN transfer_amount REAL');
+  await ensureColumn(d, 'sales', 'payment_note', 'ALTER TABLE sales ADD COLUMN payment_note TEXT');
+
+  // 4. Indexes (idempotent).
+  for (const sql of SCHEMA_INDEXES) {
+    try {
+      await d.execute(sql, []);
+    } catch (e) {
+      console.error('Index create failed', sql, e);
+    }
+  }
+
+  // 5. Seed the single printer-config row when missing.
+  try {
+    await d.execute(
+      `INSERT INTO printer_configs (
+        id, store_name, tagline, address, phone,
+        receipt_header_note, receipt_footer_note, show_logo,
+        paper_width, auto_print_on_sale, point_rate, print_density, printer_name
+      ) VALUES (
+        1, 'Joainas Supermarket & Coldstore', '', '', '', '', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
+      )
+      ON CONFLICT(id) DO NOTHING`,
+      []
+    );
+  } catch (e) {
+    console.error('Failed to seed printer config', e);
+  }
 }
 
 export function getDb(): Promise<Database | null> {
@@ -243,11 +529,14 @@ export function mapSale(row: any, productLookup: Map<string, Product>): SaleReco
     advancePayment: row.advance_payment,
     balanceDue: row.balance_due,
     paymentMethod: row.payment_method,
+    cashAmount: row.cash_amount ?? undefined,
+    transferAmount: row.transfer_amount ?? undefined,
+    paymentNote: row.payment_note || undefined,
     priceType: row.price_type,
     customerId: row.customer_id || undefined,
     customerName: row.customer_name || undefined,
     customerPhone: row.customer_phone || undefined,
-    pointsEarned: row.points_earned,
+    pointsEarned: row.points_earned || 0,
     cashier: row.cashier_username,
     date: row.sale_date,
     time: row.sale_time,
@@ -386,8 +675,8 @@ export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
   for (const s of sales) {
     await d.execute(
       `INSERT INTO sales (id, receipt_no, subtotal, total_amount, advance_payment, balance_due, payment_method, price_type,
-        customer_id, customer_name, customer_phone, points_earned, cashier_username, sale_date, sale_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        customer_id, customer_name, customer_phone, points_earned, cash_amount, transfer_amount, payment_note, cashier_username, sale_date, sale_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         s.id,
         s.receiptNo,
@@ -400,7 +689,10 @@ export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
         s.customerId || null,
         s.customerName || null,
         s.customerPhone || null,
-        s.pointsEarned,
+        s.pointsEarned || 0,
+        (s as any).cashAmount ?? null,
+        (s as any).transferAmount ?? null,
+        (s as any).paymentNote || null,
         s.cashier,
         s.date,
         s.time,
@@ -548,4 +840,17 @@ export async function dbDeleteSetting(key: string): Promise<void> {
   const d = await getDb();
   if (!d) return;
   await d.execute('DELETE FROM app_settings WHERE key = ?', [key]);
+}
+
+// ============================================================
+// ADMIN RESET HELPERS
+// Used by the Backup & Restore panel to wipe test data. The table name
+// is always a hard-coded identifier from the app (never user input), so
+// there is no SQL injection risk.
+// ============================================================
+
+export async function dbClearTable(table: string): Promise<void> {
+  const d = await getDb();
+  if (!d) return;
+  await d.execute(`DELETE FROM ${table}`, []);
 }

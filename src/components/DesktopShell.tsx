@@ -19,7 +19,7 @@ import {
   PackagePlus,
 } from 'lucide-react';
 import { HeaderLogo } from './HeaderLogo';
-import { formatNaira, playLowStockAlert } from '../utils/storage';
+import { playLowStockAlert } from '../utils/storage';
 import { Capability, UserRole, Product } from '../types';
 import { useToast } from './Toast';
 import {
@@ -42,7 +42,7 @@ interface DesktopShellProps {
   currentUser: string;
   currentUserRole: UserRole;
   currentUserCapabilities: Capability[];
-  todaySalesTotal: number;
+  todaySalesTotal?: number;
   products: Product[];
   onOpenLoginModal: () => void;
   onLogout?: () => void;
@@ -87,7 +87,6 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   currentUser,
   currentUserRole,
   currentUserCapabilities,
-  todaySalesTotal,
   products,
   onOpenLoginModal,
   onLogout,
@@ -275,12 +274,6 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             );
           })}
         </nav>
-
-        {/* Today's Sales Card */}
-        <div className="hidden lg:block mx-3 mb-3 p-4 rounded-xl bg-gradient-to-br from-[var(--accent-color)] to-[var(--accent-hover)] text-white shadow-lg">
-          <div className="text-xs font-medium text-white/80 uppercase tracking-wide">Today's Sales</div>
-          <div className="text-xl font-black mt-1">{formatNaira(todaySalesTotal)}</div>
-        </div>
 
         {/* Sidebar Bottom - User Info & Settings */}
         <div className="hidden lg:block mx-3 mb-2 p-3 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)]">
@@ -479,7 +472,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v1.3.5 • Dronebug Technologies
+            v1.3.8 • Dronebug Technologies
           </div>
         </footer>
       </div>

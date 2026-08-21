@@ -57,7 +57,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
           Behind Fire Service, Gimba Road, Jimeta Yola, Adamawa State, Nigeria
         </p>
         <p className="text-[10px] text-gray-600">
-          Serviced by Dronebug Technologies • dronebugtechnologies@gmail.com • +2347035716349
+          Serviced by Dronebug Technologies • dronebugtechnologies@gmail.com
         </p>
       </div>
 
@@ -131,7 +131,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
         <div className="text-right">
           <p className="font-bold">Software Developer Verification:</p>
           <p className="mt-1 font-semibold">Dronebug Technologies and Services</p>
-          <p>dronebugtechnologies@gmail.com • +2347035716349</p>
+          <p>dronebugtechnologies@gmail.com</p>
         </div>
       </div>
     </div>

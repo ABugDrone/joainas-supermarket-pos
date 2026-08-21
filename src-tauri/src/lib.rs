@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri_plugin_sql::{Builder as SqlBuilder, Migration, MigrationKind};
+use tauri_plugin_sql::Builder as SqlBuilder;
 
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::HANDLE;
@@ -337,80 +337,18 @@ fn get_default_printer() -> String {
 }
 
 pub fn run() {
-    let migrations = vec![
-        Migration {
-            version: 1,
-            description: "create_joainas_pos_tables",
-            sql: include_str!("../../src/db/sqlite_schema.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 2,
-            description: "seed_printer_config_default",
-            sql: "
-                INSERT INTO printer_configs (
-                    id, store_name, tagline, address, phone,
-                    receipt_header_note, receipt_footer_note, show_logo,
-                    paper_width, auto_print_on_sale, point_rate, print_density
-                ) VALUES (
-                    1, 'Joainas Supermarket & Coldstore', '',
-                    '', '', '', '', 1, '80mm', 1, 2, 'Normal'
-                )
-                ON CONFLICT(id) DO NOTHING;
-            ",
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 3,
-            description: "add_capabilities_and_customer_account_type",
-            sql: "
-                ALTER TABLE users ADD COLUMN capabilities TEXT NOT NULL DEFAULT '[]';
-
-                ALTER TABLE customers RENAME TO customers_old;
-                CREATE TABLE customers (
-                    id TEXT PRIMARY KEY NOT NULL,
-                    full_name TEXT NOT NULL,
-                    account_type TEXT CHECK(account_type IN ('individual', 'company', 'ngo', 'government')) NOT NULL DEFAULT 'individual',
-                    phone TEXT,
-                    address TEXT,
-                    balance REAL NOT NULL DEFAULT 0.0,
-                    points INTEGER NOT NULL DEFAULT 0,
-                    advance_payment REAL NOT NULL DEFAULT 0.0,
-                    assigned_cashier TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-                INSERT INTO customers (id, full_name, account_type, phone, address, balance, points, advance_payment, assigned_cashier, created_at)
-                    SELECT id, full_name, 'individual', phone, address, balance, points, advance_payment, NULL, created_at FROM customers_old;
-                DROP TABLE customers_old;
-
-                CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
-                CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name);
-            ",
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 4,
-            description: "add_category_colors",
-            sql: "
-                ALTER TABLE categories ADD COLUMN color TEXT NOT NULL DEFAULT '#6366f1';
-            ",
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 5,
-            description: "add_printer_name",
-            sql: "
-                ALTER TABLE printer_configs ADD COLUMN printer_name TEXT NOT NULL DEFAULT 'XP-80C';
-            ",
-            kind: MigrationKind::Up,
-        },
-    ];
-
-    let (db_path, _) = resolve_db_path();
-    let db_url = format!("sqlite:{}", db_path.display());
+    let _ = resolve_db_path();
 
     tauri::Builder::default()
-        .plugin(SqlBuilder::default().add_migrations(&db_url, migrations).build())
+        // NOTE: No sqlx migrations are registered here on purpose. Older
+        // releases embedded the whole schema as migration v1 and later edited
+        // that same file, which broke the migration checksum/dirty-state
+        // checks on existing databases and even on fresh installs (migration
+        // v3 tried to re-add a column already present in the updated schema).
+        // The schema is now bootstrapped idempotently from the frontend
+        // (src/utils/db.ts -> bootstrapSchema) on every connection, so old and
+        // new databases both work and existing data is never lost.
+        .plugin(SqlBuilder::default().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

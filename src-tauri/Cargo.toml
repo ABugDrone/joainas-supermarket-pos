@@ -1,6 +1,6 @@
 [package]
 name = "joainas-pos"
-version = "1.3.5"
+version = "1.3.8"
 description = "Joainas Supermarket & Coldstore POS System"
 authors = ["Dronebug Technologies & Services"]
 edition = "2021"

@@ -14,7 +14,7 @@ interface CartPreviewModalProps {
   advancePayment: number;
   cashierName: string;
   printerConfig: ThermalPrinterConfig;
-  onConfirmCheckout: () => void;
+  onConfirmCheckout: (opts?: { saveOnly?: boolean }) => void;
 }
 
 export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
@@ -151,13 +151,21 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
             Back to Cart
           </button>
 
-          <button
-            onClick={onConfirmCheckout}
-            className="w-full sm:w-auto py-3 px-8 rounded-xl bg-gradient-to-r from-[var(--accent-orange)] to-[var(--accent-orange-hover)] hover:opacity-90 text-white font-bold text-sm uppercase tracking-wider shadow-lg transition flex items-center justify-center gap-2"
-          >
-            <CheckCircle2 className="w-5 h-5" />
-            Confirm & Print Receipt
-          </button>
+          <div className="flex gap-3 w-full sm:w-auto">
+            <button
+              onClick={() => onConfirmCheckout({ saveOnly: true })}
+              className="flex-1 sm:flex-none py-3 px-6 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] font-bold text-sm transition flex items-center justify-center gap-2"
+            >
+              💾 Save Only
+            </button>
+            <button
+              onClick={() => onConfirmCheckout()}
+              className="flex-1 sm:flex-none py-3 px-8 rounded-xl bg-gradient-to-r from-[var(--accent-orange)] to-[var(--accent-orange-hover)] hover:opacity-90 text-white font-bold text-sm uppercase tracking-wider shadow-lg transition flex items-center justify-center gap-2"
+            >
+              <CheckCircle2 className="w-5 h-5" />
+              Print & Save
+            </button>
+          </div>
         </div>
       </div>
     </div>

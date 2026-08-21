@@ -1,5 +1,117 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.3.8 (2026-08-21)
+
+### 🧹 Privacy — Developer Phone Removed
+- **+2347035716349** removed from all UI, receipts, ESC/POS footer, printer config defaults, financial statements, and setup placeholders. Store address/phone is now entered by the store; the footer now reads **“Software by Dronebug Tech”**.
+
+### 🛒 Sell Service — Products Hidden by Default
+- Product grid is now **hidden by default** (reduces clutter, scanner/search-first workflow). A **Show Products / Hide Products** toggle remains next to the “TAP ANY ITEM TO ADD TO BILL” header; the **{products.length} Items** badge stays visible. When **search is active** (or scanner finds a match) the filtered grid shows even while hidden.
+
+### 💳 Payments — Transfer vs POS vs Cash+Transfer Split
+- **POS Transfer** split into two distinct methods: **📱 Transfer (USSD / mobile app)** and **💳 POS / Card (bank licensed POS device)**. Both are standalone.
+- New **💵+📱 Cash + Transfer** method: adds manual **Cash Paid** and **Transfer Paid** inputs, a **mini report** (Total / Paid / Balance or Change / Overpay), and an optional **Payment Note** (e.g. “Over-transfer N2,000 given as cash change. Instead of auto-calculating, both amounts are entered manually”). The note and split amounts are stored per sale (`cashAmount`, `transferAmount`, `paymentNote`) and appear on the receipt (HTML + ESC/POS) as `Cash:` / `Transfer:` / `Note:` lines. `Balance Due` can now be negative to show **Change** when over-paid.
+
+### 🎁 Rewards Removed
+- **All loyalty/reward points removed** — no longer applicable. Removed points column from **Customers** left/right tables, points badge from HTML receipt and `Loyalty Points:` line from ESC/POS/text copy, `Point Rate` from Hardware Config, and customer points from header/ledger. Initial demo customers and sales now have `points: 0` / `pointsEarned: 0`. DB columns (`points`, `points_earned`, `point_rate`) remain for backward compatibility but are no longer read/written in the UI. `StockQty` only drives balances.
+
+### 🧭 Sidebar — Today’s Sales Card Removed
+- The **Today’s Sales** gradient card near the theme button in the left sidebar has been removed (per request). The underlying `todaySalesTotal` calculation remains for reports but is no longer shown in the nav.
+
+### 🧾 Save Only vs Print & Save
+- **POS checkout** now offers two explicit actions: **💾 Save Only (No Print)** — records the sale (default, no print modal), with a hint that PDF/PNG can be exported later from **Sales → Reprint**; and **Print & Save** — saves and opens the thermal receipt for immediate printing. **Cart Preview** mirrors this with **Save Only** + **Print & Save** buttons. All saves are durable before UI refresh.
+
+### 🔒 Caps Lock Indicator
+- Every password field now reflects Caps Lock state: **Login**, **First-Time Setup (Password/Confirm)**, **Admin Recovery (new/confirm)**, **Admin → Add Staff**, and **Security Vault unlock** show a gold **“Caps Lock ON”** badge, amber border, and helper text when `getModifierState('CapsLock')` is true — preventing wrong-password errors.
+
+### 🖨️ Xprinter RHS Clipping — Subtotals Fully Contained
+- **Root cause**: 80 mm HTML receipt at `80mm` + `3mm` side padding + `overflow:hidden` exceeded the Xprinter’s hardware printable area (~76 mm), so the rightmost digits of `RATE`/`AMT` (e.g. `25,000` → `25,00`) and the `TOTAL` line were clipped (see photo). Table used fluid width with no fixed layout, so long names pushed amounts off-page.
+- **Fix**: Print now uses **76 mm printable width centred on 80 mm page** (54 mm on 58 mm), `box-sizing:border-box`, `overflow:visible`, `table-layout:fixed` with **10%/48%/21%/21%** columns, `word-break: break-word` for Item and `white-space: nowrap` for Rate/Amt, and a slightly narrower ESC/POS character width (**45** for 80 mm / **30** for 58 mm) to leave hardware margins. Screen preview updated to `w-[76mm]`/`w-[54mm]` with matching `2mm` padding and `11.5px`/`10.5px` print font so WYSIWYG matches paper.
+
+---
+
+## Version 1.3.7 (2026-08-21)
+
+### 🖨️ Print Fix — Exact Thermal Paper Fit
+
+- **80mm overflow fixed**: The receipt preview and print CSS now use real `mm` sizing (`80mm` page with `3mm` side padding → `74mm` content; `box-sizing: border-box`). The previous `330px` (≈86.8 mm) preview exceeded the 80 mm roll and caused the right edge to clip; now both screen preview (`w-[73mm]`) and the `@page thermal-receipt-80` named page match the roll exactly with no overflow.
+- **58mm 75 %-strip fixed**: `58mm` now renders as a true `58mm` page with tighter `2 mm` side padding (`54 mm` content, `w-[53mm]` preview). The prior `240px` (≈63 mm) + centered `@page` left a large white strip on the right when the browser fell back to A4; the new `min-width: 58mm` + `page: thermal-receipt-58` forces edge-to-edge fill.
+- **Font tuned per roll**: 80 mm uses `12.5px`, 58 mm uses `11.5px` so narrow rolls stay readable without wrapping. Both share the same monospace metrics, so PNG/PDF exports (via `html-to-image` + `jsPDF` at `param paperW`) remain crisp at native width.
+
+### 🔐 New: ADMIN Password Recovery Vault (5 Uncomfortable Questions)
+
+- **5 private questions** are set in **Step 3 of 3** of First-Time Setup (and later in **Admin → Security & Recovery**). They are deliberately uncomfortable / non-obvious PII so a colleague cannot guess:
+  1. Full name of your first childhood crush; 2. Exact date you first met your current partner/lover; 3. Secret family nickname only your mother uses; 4. Deeply embarrassing teenage memory you hid from work; 5. Private fear/insecurity never shared at work.
+- **Trigger**: The recovery UI is **invisible until the ADMIN account fails 5 times** on the Sign In screen. A gold banner then appears with **Recover ADMIN Password** — it asks **one random** of the 5 questions. The answer is checked locally (bcrypt, case-insensitive).
+- **30-second reveal**: On correct answer the **actual ADMIN password is shown in plain text for 30 seconds** with a countdown (copy button included) and auto-hides. An alternative **Set New Password** form lets the admin create a new one immediately (bcrypt-hashed, vault re-encrypted, audit logged).
+- **Vault storage**: 5 answers are bcrypt-hashed and the plain password is obfuscated (`XOR + base64` with a local key) in `localStorage` + SQLite `app_settings` (`admin_recovery` / `joainas_admin_recovery_v1`). No code path ever exposes the password without a correct answer.
+- **Admin management**: **Admin → Security & Recovery** shows vault status, lets the ADMIN re-save all 5 answers after confirming the current plain password, and documents the developer path for older installs.
+
+### 🛠️ Developer Retrieval (Older Installs Without a Vault) — Q&A
+
+> **Q: As a developer, how do I retrieve it without the 5-attempt process assuming an older version is installed?**
+>
+> **A – In-app (≥v1.3.7):** On the Sign In screen press **Ctrl + Shift + Alt + D**, enter master code **`JOAINAS-DEV-2026-DRONEBUG`** in the dev section of the recovery modal — if a vault exists the plain password is revealed without a question.
+>
+> **A – Direct file/DB (any version, including v1.3.6 with no vault):**
+> 1. Find the live DB path via **Admin → SQLite DB & Backups** or `%APPDATA%\com.joainas.pos.desktop\db_path.txt`.
+> 2. Open `joainas_pos.db` with DB Browser / `sqlite3`:
+>    ```sql
+>    SELECT value FROM app_settings WHERE key='admin_recovery';
+>    SELECT id, username, role, password_hash FROM users WHERE username='admin';
+>    UPDATE users SET password_hash='' WHERE username='admin'; -- then sign in with any password and set a real one via recovery
+>    ```
+> 3. In browser dev mode the vault is `localStorage.getItem('joainas_admin_recovery_v1')` (encryptedPassword is deobfuscated with the same utility). See **`RECOVERY_GUIDE.md`** in the install folder for the full walkthrough.
+
+### 🔧 Technical Improvements
+
+- Version bumped to 1.3.7 across package.json, Cargo.toml, Cargo.lock, tauri.conf.json, Admin backup export and footer.
+- New modules: `src/utils/recovery.ts` (vault + obfuscation), `src/components/AdminRecoveryModal.tsx` (30 s reveal + reset), `RECOVERY_GUIDE.md`.
+
+---
+
+## Version 1.3.6 (2026-08-19)
+
+### 🔐 Fixed: App No Longer Reverts to Full System Setup After Closing
+- **Root cause fixed**: The database schema was bootstrapped through sqlx migrations, and an older release edited the schema file *after* it had already been applied. This broke the migration checksum/dirty-state checks — on existing databases it threw a migration mismatch, and on **fresh installs** migration v3 tried to re-add a column that the updated schema already created, failing silently and leaving the app unable to persist the "admin setup done" flag. Result: closing and reopening the app bounced straight back into the first-time setup wizard.
+- **New behavior**: The schema is now bootstrapped idempotently from the frontend on every database connection (`bootstrapSchema`). Tables, indexes and missing columns are created/repaired safely without ever deleting data, so old databases upgrade cleanly and fresh installs work immediately. No sqlx migration chain is registered any more.
+- **Extra safety**: The "admin setup completed" flag is now also mirrored to localStorage, so even an interrupted DB write can never push the user back into the setup wizard — the app always lands on the **login gate** after restart.
+
+### 🔐 Fixed: "User admin not found" During Login After First-Time Setup
+- **Root cause**: `saveUsers()` updated the in-memory cache instantly but wrote to SQLite through an asynchronous, un-awaited queue. The setup wizard then switched straight to the login screen — if the app was closed right after setup, that queued write could be lost while the localStorage setup flag survived. The next launch correctly skipped setup but hit an **empty users table** → "User admin not found". This is also the broken state left behind by older builds (flag set, users never saved).
+- **Fix 1 — durable setup**: The wizard now **flushes all queued SQLite writes** before leaving setup, so the admin account, setup flag and audit entry are guaranteed on disk before the login screen appears. Closing the app after setup can never lose the account again.
+- **Fix 2 — recovery gate**: The app now treats "setup flagged as done but **zero user accounts exist**" as not-yet-configured and shows the setup wizard again. A database broken by an older build now recovers to the setup screen (where the admin is created and durably saved) instead of a dead-end login screen with no accounts.
+- **Fix 3 — restore safety**: Importing a backup that contains user accounts now flushes writes to disk before the app reloads, so a restore can never restart into a no-users state.
+- The required flow is preserved exactly: first install → license → configure system → then **login every time** after logout or closing the app. It never re-configures after a successful first setup.
+
+### 🔄 Fixed: Admin Reset No Longer Undoes Itself After Refresh / Re-login
+- **Root cause**: The reset buttons updated the in-memory cache immediately (so the UI looked cleared) but the SQLite writes were queued asynchronously and never awaited. If the page was refreshed or the user logged out/reopened the app before the writes finished — or if the parallel `Promise.all` writes tripped SQLite's write-lock ("database is locked") — the old rows were still on disk and came straight back.
+- **Fix 1 — awaited, sequential writes**: `resetSalesAndReports`, `resetInventoryAndProducts` and `resetAllSystemData` now return a promise that resolves only after every table has been written to disk sequentially (no more concurrent `Promise.all` that could hit the SQLite write-lock).
+- **Fix 2 — flush before reload/logout**: All three reset handlers now `await` the reset, then flush the audit-log write, and only then refresh the UI / reload the app. Refreshing or re-logging-in after a reset now shows the genuinely-cleared data permanently.
+- The audit trail still records each reset, and full reset returns to the login gate (users, printer config and setup flag are preserved).
+
+### 🚫 Fixed: First-Time Setup No Longer Freezes When Entering the Dashboard
+- **Root cause**: The transition out of the setup wizard awaited queued SQLite writes with no guard — a slow or stuck write could hang the UI at the exact moment the app was about to show the login/dashboard. Any unexpected render error after setup would also unmount the whole window into a blank, frozen screen.
+- **Fix 1 — flush timeout**: The write-flush now races against a generous timeout, so a stuck database write can never freeze the app — it proceeds with the in-memory cache and the next launch recovers cleanly.
+- **Fix 2 — error recovery**: The setup completion handler is wrapped so any failure shows a clear error toast instead of silently freezing, and the whole app tree is wrapped in an error boundary that displays a "Something went wrong — Reload App" screen if any screen crashes, instead of a frozen blank window.
+
+### 🗑️ New: Admin Reset Data Panel (Backup & Restore)
+- New "Reset System Data" section in **Admin → SQLite DB & Backups** (admin-only) for clearing dummy/test records before real use:
+  - **Reset Sales & Reports** — deletes all sales/sale items and expenditures, resets all customer balances, points and advance payments to zero (keeps inventory & users).
+  - **Reset Inventory** — deletes all products and stock adjustments (keeps sales, customers & users).
+  - **Full System Reset** — wipes ALL business data (products, sales, customers, expenditures, audit logs) and restores default categories. User accounts, printer/hardware config and the login gate are kept, so the app returns to **login** (never back to setup). Requires typing `RESET` to confirm.
+- Every reset is recorded in the audit trail and the whole UI (POS grid, sales, reports, today-total) refreshes immediately.
+
+### 📷 Barcode Scanner Fixes & Tutorials
+- **Global scanning anywhere in Sell Service**: previously a scan only worked if the search box happened to be focused. The POS now listens at the window level — a scan (digits + Enter) adds the item to the bill even if the cashier tapped a product tile or focus moved. Scans are decoded by physical key (`e.code`), so a different Windows keyboard layout on the target PC cannot mangle the digits.
+- **Code normalization**: scanned codes are cleaned of stray prefix/suffix characters before matching product barcodes, so scanners with a custom suffix (or an alternate layout) still match.
+- **Hardware Config → Barcode Generator**: the scanner guide now includes a **Live Scanner Test** box plus an 8-step troubleshooting checklist aimed at the "scanner beeps/flashes but nothing appears" case (focus the app window, test in Notepad, Device Manager → Keyboards, English-US layout, different USB port, factory-reset the scanner, reboot the PC). The hardware `INSTALLATION-GUIDE.txt` was updated with the same checklist.
+
+### 🔧 Technical Improvements
+- Version bumped to 1.3.6 across package.json, Cargo.toml, Cargo.lock, and tauri.conf.json.
+
+---
+
 ## Version 1.3.5 (2026-08-18)
 
 ### 🖨️ Browser Print Fix — No More A4 Centering

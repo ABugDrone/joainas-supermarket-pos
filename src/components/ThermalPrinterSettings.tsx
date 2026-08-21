@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Printer, Save, CheckCircle, Barcode, ChevronDown, ChevronRight, ExternalLink, Monitor, Cable, Usb } from 'lucide-react';
+import { Settings, Printer, Save, CheckCircle, Barcode, ChevronDown, ChevronRight, ExternalLink, Monitor, Cable, Usb, ScanBarcode, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { ThermalPrinterConfig, UserRole, Product, Category, Capability } from '../types';
 import { recordAuditLog } from '../utils/storage';
 import { useToast } from './Toast';
@@ -32,6 +32,48 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
   const [savedSuccess, setSavedSuccess] = React.useState(false);
   const [showPrinterGuide, setShowPrinterGuide] = React.useState(false);
   const [showScannerGuide, setShowScannerGuide] = React.useState(false);
+  const [scannerTest, setScannerTest] = React.useState<{ captured: string; ok: boolean } | null>(null);
+  const scannerTestRef = React.useRef<{ captured: string; ok: boolean } | null>(null);
+
+  // Live scanner test: listens for the fast burst of keypresses that a USB
+  // handheld scanner "types" (barcode digits then Enter) and shows the result.
+  // Decodes by physical key (e.code) so a different Windows keyboard layout
+  // cannot scramble the digits. This gives the user instant feedback whether
+  // the scanner reaches the app on THIS PC.
+  React.useEffect(() => {
+    let buffer = '';
+    let lastTime = 0;
+    const handler = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const code = e.code || '';
+      let ch: string | null = null;
+      if (code.startsWith('Digit')) ch = code.slice(5);
+      else if (code.startsWith('Numpad')) ch = code.slice(6);
+      else if (code.startsWith('Key')) ch = code.slice(3).toUpperCase();
+      if (ch !== null && ch.length === 1) {
+        if (Date.now() - lastTime > 150) buffer = '';
+        buffer += ch;
+        lastTime = Date.now();
+        if (buffer.length > 48) buffer = '';
+        return;
+      }
+      if (e.key === 'Enter' && buffer.length >= 3) {
+        const captured = buffer;
+        buffer = '';
+        lastTime = 0;
+        const result = { captured, ok: true };
+        scannerTestRef.current = result;
+        setScannerTest(result);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const handleScannerTestReset = () => {
+    scannerTestRef.current = null;
+    setScannerTest(null);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,17 +240,6 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
-              Point Reward Rate (Points per ₦1,000)
-            </label>
-            <input
-              type="number"
-              value={formData.pointRate}
-              onChange={(e) => setFormData({ ...formData, pointRate: parseFloat(e.target.value) || 1 })}
-              className="w-full rounded-lg border border-[#30363d] bg-[#0d1117] px-3 py-2 text-sm text-white focus:border-cyan-500 outline-none"
-            />
-          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -374,12 +405,62 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
                     <p className="text-slate-400 text-[11px]">You'll hear a beep when it's ready. The red laser light means it's working.</p>
                   </div>
                   <div className="space-y-2">
-                    <h4 className="font-black text-white text-[13px]">Step 2: Test It</h4>
-                    <p>Open <strong className="text-indigo-300">Notepad</strong> on your computer. Scan any barcode (like one on a product). You should see numbers appear in Notepad — that means it's working!</p>
-                    <p>To use in the POS app: go to <strong className="text-indigo-300">Sell Service (F1)</strong>, click on the search box, then scan a product barcode. The product will be found automatically.</p>
-                    <p className="text-slate-400 text-[11px]">The scanner is plug-and-play — it works on any computer without installing anything.</p>
+                    <h4 className="font-black text-white text-[13px]">Step 2: Test It Here (Live Scanner Test)</h4>
+                    <p>Click the box below, keep the POS window focused, then scan any barcode (like one on a product). If the code appears, the scanner is reaching this app correctly.</p>
+
+                    <div className="bg-[#161b22] border border-indigo-800/60 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] font-black uppercase text-indigo-300 flex items-center gap-1.5">
+                          <ScanBarcode className="w-4 h-4" /> Scanner Live Test
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleScannerTestReset}
+                          className="text-[10px] font-bold text-slate-400 hover:text-white px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d]"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      {scannerTest ? (
+                        <div className="flex items-center gap-2 text-emerald-400">
+                          <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                          <div>
+                            <div className="font-black text-sm text-white font-mono">{scannerTest.captured}</div>
+                            <div className="text-[10px] text-emerald-300">
+                              Scanner detected! This code can now be scanned in the POS (Sell Service).
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-slate-400 text-[11px] animate-pulse">
+                          Waiting for scan... point the scanner at a barcode and scan now.
+                        </div>
+                      )}
+                      <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
+                        Still nothing? Make sure the POS window is active/focused (click anywhere on it),
+                        or try the steps in the troubleshooting section below.
+                      </p>
+                    </div>
                   </div>
                 </div>
+
+                <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-3 mt-2">
+                  <h4 className="font-black text-white text-[12px] mb-2 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                    Troubleshooting — scanner beeps/flashes but nothing appears
+                  </h4>
+                  <ol className="space-y-1.5 text-[11px] text-slate-300 list-decimal list-inside leading-relaxed">
+                    <li><strong className="text-white">Focus the app window.</strong> Click anywhere on the Joainas POS window so it becomes the active window, then scan. Keyboard-style scanners type into whichever window is focused.</li>
+                    <li><strong className="text-white">Test in Notepad first.</strong> Open Notepad, click inside it, then scan. If numbers appear, the scanner works and the issue is only about focus in the POS app.</li>
+                    <li><strong className="text-white">Try a different USB port.</strong> Unplug and plug the scanner into a port directly on the computer (avoid hubs/dockers). Some PCs power-manage USB ports.</li>
+                    <li><strong className="text-white">Check Device Manager.</strong> Press <span className="font-mono">Win+X → Device Manager → Keyboards</span>. You should see the scanner (often as "HID Keyboard Device" or a USB input device). If you see a yellow warning triangle, a driver failed — try unplugging/replugging, or plug into another port.</li>
+                    <li><strong className="text-white">Check the Windows keyboard layout.</strong> Press <span className="font-mono">Win+Space</span> and make sure it is set to <span className="font-mono">English (United States)</span>. If a non-English layout is active, the scanner's digits can be typed as letters/symbols.</li>
+                    <li><strong className="text-white">Reset the scanner to factory defaults.</strong> The scanner ships with a configuration sheet — scan its "Reset to Defaults" barcode (or hold the button while plugging it in). A changed suffix/prefix can stop codes from matching.</li>
+                    <li><strong className="text-white">The app scans automatically.</strong> In the POS you do NOT need to click the search box — with this build, a scan anywhere in the Sell Service screen adds the item to the bill.</li>
+                    <li><strong className="text-white">Reboot the PC.</strong> A bad Windows activation or pending updates can leave drivers half-installed. Restart, re-plug the scanner, and repeat step 2.</li>
+                  </ol>
+                </div>
+
                 <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-3 mt-2">
                   <h4 className="font-black text-white text-[12px] mb-1">Helpful Links</h4>
                   <div className="space-y-1 text-[11px]">

@@ -34,9 +34,93 @@ export const POSModule: React.FC<POSModuleProps> = ({
   const [selectedCustomerId, setSelectedCustomerId] = React.useState<string>(customers[0]?.id || '');
   const [cart, setCart] = React.useState<CartItem[]>([]);
   const [advancePayment, setAdvancePayment] = React.useState<number>(0);
-  const [paymentMethod, setPaymentMethod] = React.useState<'Cash' | 'POS Transfer' | 'Store Credit / Account'>('Cash');
+  const [paymentMethod, setPaymentMethod] = React.useState<'Cash' | 'Transfer' | 'POS/Card' | 'Cash + Transfer' | 'Store Credit / Account'>('Cash');
+  const [cashAmount, setCashAmount] = React.useState<number>(0);
+  const [transferAmount, setTransferAmount] = React.useState<number>(0);
+  const [paymentNote, setPaymentNote] = React.useState<string>('');
   const [isCartPreviewOpen, setIsCartPreviewOpen] = React.useState(false);
+  const [showProducts, setShowProducts] = React.useState(false);
   const barcodeInputRef = React.useRef<HTMLInputElement>(null);
+
+  // --- Global barcode-scan capture ----------------------------------------
+  // Handheld USB scanners work like keyboards: they "type" the barcode and
+  // then press Enter. If the scan input loses focus (cashier taps a product
+  // tile, or the WebView focus moves) those keystrokes used to go nowhere.
+  // This window-level listener buffers the burst of keys and treats an
+  // Enter-terminated sequence as a barcode scan — regardless of which element
+  // has focus. It also decodes keys by PHYSICAL key (e.code), so a different
+  // Windows keyboard layout on another PC cannot mangle the scanned digits.
+  const scanBufferRef = React.useRef('');
+  const lastScanKeyRef = React.useRef(0);
+  // Holds the latest closure so the listener is attached only once.
+  const processScanRef = React.useRef<(code: string) => void>(() => {});
+  processScanRef.current = (raw: string) => {
+    const code = raw.trim();
+    const norm = code.replace(/[^a-zA-Z0-9]/g, '');
+    if (!norm) {
+      showToast('Scanner input was empty.', 'warning');
+      return;
+    }
+    const matched =
+      products.find((p) => p.barcode === code) ||
+      products.find((p) => p.barcode.replace(/[^a-zA-Z0-9]/g, '') === norm) ||
+      products.find((p) => p.name.toLowerCase().includes(code.toLowerCase()));
+    if (matched) {
+      setSelectedProductId(matched.id);
+      // OUT OF STOCK — block the scan with a clear message instead of adding.
+      if (matched.stockQty <= 0) {
+        playPOSBeep();
+        showToast(`${matched.name} is OUT OF STOCK. Add inventory before selling.`, 'error');
+        return;
+      }
+      playPOSBeep();
+      addItemToCart(matched, quantity);
+      showToast(`Scanned: ${matched.name}`, 'success');
+    } else {
+      playPOSBeep();
+      showToast(`No product found for code "${code}"`, 'warning');
+    }
+  };
+
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isFormField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      // When a real input is focused, let normal typing / form-submit handle
+      // the scan (existing behaviour). The global path is the fallback for
+      // scans that arrive while focus is elsewhere.
+      if (isFormField) return;
+
+      const now = Date.now();
+      const code = e.code || '';
+      let ch: string | null = null;
+      if (code.startsWith('Digit')) ch = code.slice(5); // Digit0-Digit9
+      else if (code.startsWith('Numpad')) ch = code.slice(6); // Numpad0-Numpad9
+      else if (code.startsWith('Key')) ch = code.slice(3).toUpperCase(); // KeyA-KeyZ
+
+      if (ch !== null && ch.length === 1) {
+        // A slow key (>150ms gap) starts a new burst — human typing is much
+        // slower than a scanner burst.
+        if (now - lastScanKeyRef.current > 150) scanBufferRef.current = '';
+        scanBufferRef.current += ch;
+        lastScanKeyRef.current = now;
+        if (scanBufferRef.current.length > 48) scanBufferRef.current = '';
+        return;
+      }
+
+      if (e.key === 'Enter' && scanBufferRef.current.length >= 3) {
+        e.preventDefault();
+        const raw = scanBufferRef.current;
+        scanBufferRef.current = '';
+        lastScanKeyRef.current = 0;
+        processScanRef.current(raw);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Category color lookup — products are classified by category color.
   const categoryColorMap = React.useMemo(() => {
@@ -81,22 +165,57 @@ export const POSModule: React.FC<POSModuleProps> = ({
 
   // Sync default advance payment when cart changes
   React.useEffect(() => {
+    if (paymentMethod === 'Cash + Transfer') {
+      // keep manual split but ensure total reflects if cart changes and both were zero
+      if (cashAmount + transferAmount === 0 && cartSubtotal > 0) {
+        setCashAmount(cartSubtotal);
+        setTransferAmount(0);
+        setAdvancePayment(cartSubtotal);
+      }
+      return;
+    }
     setAdvancePayment(cartSubtotal);
-  }, [cartSubtotal]);
+  }, [cartSubtotal, paymentMethod, cashAmount, transferAmount]);
+
+  // When switching to Cash + Transfer, prefill cash with total
+  React.useEffect(() => {
+    if (paymentMethod === 'Cash + Transfer' && cartSubtotal > 0) {
+      if (cashAmount === 0 && transferAmount === 0) {
+        setCashAmount(cartSubtotal);
+        setTransferAmount(0);
+        setAdvancePayment(cartSubtotal);
+      }
+    }
+  }, [paymentMethod]);
+
+  // Keep advancePayment as sum for split
+  React.useEffect(() => {
+    if (paymentMethod === 'Cash + Transfer') {
+      setAdvancePayment((cashAmount || 0) + (transferAmount || 0));
+    }
+  }, [cashAmount, transferAmount, paymentMethod]);
 
   // Handle barcode scanner search
   const handleBarcodeSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!barcodeQuery.trim()) return;
 
-    let matched = products.find(
-      (p) => p.barcode === barcodeQuery.trim() || p.name.toLowerCase().includes(barcodeQuery.toLowerCase())
-    );
+    const code = barcodeQuery.trim();
+    const norm = code.replace(/[^a-zA-Z0-9]/g, '');
+    const matched =
+      products.find((p) => p.barcode === code) ||
+      products.find((p) => p.barcode.replace(/[^a-zA-Z0-9]/g, '') === norm) ||
+      products.find((p) => p.name.toLowerCase().includes(code.toLowerCase()));
 
     if (matched) {
       setSelectedProductId(matched.id);
-      playPOSBeep();
-      if (matched.barcode === barcodeQuery.trim()) {
+      if (matched.barcode === code || matched.barcode.replace(/[^a-zA-Z0-9]/g, '') === norm) {
+        // OUT OF STOCK — block the search/scan add with a clear message.
+        if (matched.stockQty <= 0) {
+          playPOSBeep();
+          showToast(`${matched.name} is OUT OF STOCK. Add inventory before selling.`, 'error');
+          return;
+        }
         addItemToCart(matched, quantity);
         setBarcodeQuery('');
         // Keep focus on the scan field so the next item can be scanned immediately.
@@ -117,6 +236,18 @@ export const POSModule: React.FC<POSModuleProps> = ({
   const addItemToCart = (prod: Product, qty: number) => {
     if (!prod) return;
     if (qty <= 0) return;
+
+    // OUT OF STOCK guard — never add a depleted product until inventory is restocked.
+    if (prod.stockQty <= 0) {
+      showToast(`${prod.name} is OUT OF STOCK. Add inventory before selling.`, 'error');
+      return;
+    }
+    // Cap total quantity across the cart at the available stock.
+    const alreadyInCart = cart.find((i) => i.product.id === prod.id)?.quantity || 0;
+    if (alreadyInCart + qty > prod.stockQty) {
+      showToast(`Only ${prod.stockQty} unit(s) of ${prod.name} in stock (${alreadyInCart} already on the bill). Restock inventory to sell more.`, 'warning');
+      return;
+    }
 
     let rate = prod.retailPrice;
     playPOSBeep();
@@ -162,6 +293,12 @@ export const POSModule: React.FC<POSModuleProps> = ({
       removeItemFromCart(index);
       return;
     }
+    // Never exceed available stock — same rule as adding: restock to sell more.
+    const item = cart[index];
+    if (item && newQty > item.product.stockQty) {
+      showToast(`Only ${item.product.stockQty} unit(s) of ${item.product.name} in stock. Restock inventory to sell more.`, 'warning');
+      return;
+    }
     setCart((prev) => {
       let updated = [...prev];
       let item = updated[index];
@@ -191,16 +328,36 @@ export const POSModule: React.FC<POSModuleProps> = ({
     setIsCartPreviewOpen(true);
   };
 
-  // Final Checkout Execution
-  const handleCheckout = () => {
+  // Final Checkout Execution — supports saveOnly vs printAndSave
+  const handleCheckout = (opts?: { saveOnly?: boolean }) => {
     if (cart.length === 0) {
       showToast('Cart is empty! Add items before completing sale.', 'warning');
       return;
     }
 
     let totalAmount = cartSubtotal;
-    let balanceDue = Math.max(0, totalAmount - advancePayment);
-    let pointsEarned = Math.floor((totalAmount / 1000) * (printerConfig.pointRate || 2));
+    // For Cash + Transfer, amounts are entered manually; otherwise advance is total (or 0 for debt)
+    let effectiveAdvance = advancePayment;
+    let cashAmt: number | undefined;
+    let transferAmt: number | undefined;
+    let note: string | undefined;
+    if (paymentMethod === 'Cash + Transfer') {
+      cashAmt = Math.max(0, cashAmount || 0);
+      transferAmt = Math.max(0, transferAmount || 0);
+      effectiveAdvance = cashAmt + transferAmt;
+      note = paymentNote.trim() || undefined;
+      // Build mini report note if user left it empty but there's overpay/underpay
+      if (!note) {
+        const diff = effectiveAdvance - totalAmount;
+        if (diff > 0) note = `Over-transfer ${formatNaira(diff)} given as cash change`;
+        else if (diff < 0) note = `Balance due ${formatNaira(Math.abs(diff))}`;
+      }
+    } else if (paymentMethod === 'Store Credit / Account') {
+      effectiveAdvance = 0;
+    } else {
+      effectiveAdvance = totalAmount;
+    }
+    let balanceDue = totalAmount - effectiveAdvance; // can be negative for overpay change
 
     let newSale: SaleRecord = {
       id: `sale-${Date.now()}`,
@@ -208,35 +365,45 @@ export const POSModule: React.FC<POSModuleProps> = ({
       items: cart,
       subtotal: totalAmount,
       totalAmount,
-      advancePayment,
+      advancePayment: effectiveAdvance,
       balanceDue,
-      paymentMethod,
+      paymentMethod: paymentMethod as any,
+      cashAmount: cashAmt,
+      transferAmount: transferAmt,
+      paymentNote: note,
       priceType: 'retail',
       customerId: selectedCustomer?.id,
       customerName: selectedCustomer?.fullName || 'General Customer',
       customerPhone: selectedCustomer?.phone || 'N/A',
-      pointsEarned,
+      pointsEarned: 0,
       cashier: currentUser,
       date: new Date().toISOString().split('T')[0],
       time: new Date().toLocaleTimeString('en-GB'),
       timestamp: Date.now(),
     };
 
-    onCompleteSale(newSale);
+    (onCompleteSale as any)(newSale, { saveOnly: !!opts?.saveOnly });
 
     // Record activity audit log
     recordAuditLog(
       currentUser,
       currentUserRole,
       'Completed Checkout Sale',
-      `Processed receipt ${newSale.receiptNo} totaling ${formatNaira(totalAmount)} via ${paymentMethod}.`
+      `Processed receipt ${newSale.receiptNo} totaling ${formatNaira(totalAmount)} via ${paymentMethod}${opts?.saveOnly ? ' (saved only, no print)' : ' (print & save)'}.`
     );
 
     setCart([]);
     setAdvancePayment(0);
+    setCashAmount(0);
+    setTransferAmount(0);
+    setPaymentNote('');
     setIsCartPreviewOpen(false);
     playPOSBeep();
-    showToast(`Sale completed successfully! Receipt ${newSale.receiptNo} sent to thermal printer.`, 'success');
+    if (opts?.saveOnly) {
+      showToast(`Sale saved (no print) — ${newSale.receiptNo} recorded. Export as PDF/PNG from Sales if needed.`, 'success');
+    } else {
+      showToast(`Sale completed — ${newSale.receiptNo} saved and ready to print.`, 'success');
+    }
   };
 
   return (
@@ -309,27 +476,47 @@ export const POSModule: React.FC<POSModuleProps> = ({
 
         {/* Visual Product Grid (Tap Any Product To Add To Bill!) */}
         <div className="pos-dark-section bg-[#161b22] rounded-2xl border border-[#30363d] p-4 shadow-sm flex-1 flex flex-col">
-          <div className="flex items-center justify-between mb-3 border-b border-[#30363d] pb-2">
+          <div className="flex items-center justify-between mb-3 border-b border-[#30363d] pb-2 gap-2">
             <h3 className="font-black text-sm text-white tracking-wide flex items-center gap-2">
               <Package className="w-5 h-5 text-cyan-400" />
               <span>TAP ANY ITEM TO ADD TO BILL</span>
             </h3>
-            <span className="text-xs font-bold text-slate-400 bg-[#0d1117] px-2.5 py-1 rounded-lg border border-[#30363d]">
-              {products.length} Items Available
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-400 bg-[#0d1117] px-2.5 py-1 rounded-lg border border-[#30363d]">
+                {products.length} Items
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowProducts((v) => !v)}
+                className={`text-xs font-bold px-3 py-1 rounded-lg border transition ${showProducts ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-[#21262d]'}`}
+              >
+                {showProducts ? 'Hide Products' : 'Show Products'}
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto max-h-[600px] p-1">
-            {products
-              .filter((p) => {
-                if (!barcodeQuery) return true;
-                return (
-                  p.name.toLowerCase().includes(barcodeQuery.toLowerCase()) ||
-                  p.category.toLowerCase().includes(barcodeQuery.toLowerCase()) ||
-                  p.barcode.includes(barcodeQuery)
-                );
-              })
-              .map((p) => {
+          {/* Product grid hidden by default — user searches/scans to pick. Toggle keeps count visible. */}
+          {!(showProducts || barcodeQuery.trim()) ? (
+            <div className="py-10 text-center border-2 border-dashed border-[#30363d] rounded-2xl bg-[#0d1117]">
+              <Package className="w-10 h-10 stroke-1 text-slate-600 mx-auto mb-2" />
+              <p className="font-black text-sm text-slate-300">Products hidden</p>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">Use search or scanner to find items, or click <strong className="text-cyan-400">Show Products</strong> to browse all {products.length} items.</p>
+              <button type="button" onClick={() => setShowProducts(true)} className="mt-3 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold">
+                Show Products
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto max-h-[600px] p-1">
+              {products
+                .filter((p) => {
+                  if (!barcodeQuery) return true;
+                  return (
+                    p.name.toLowerCase().includes(barcodeQuery.toLowerCase()) ||
+                    p.category.toLowerCase().includes(barcodeQuery.toLowerCase()) ||
+                    p.barcode.includes(barcodeQuery)
+                  );
+                })
+                .map((p) => {
                 const stockStatus = getStockStatus(p);
                 const stockColor = getStockColor(stockStatus);
                 const catColor = getCategoryColor(p);
@@ -339,7 +526,9 @@ export const POSModule: React.FC<POSModuleProps> = ({
                   <div
                     key={p.id}
                     onClick={() => addItemToCart(p, 1)}
-                    className="pos-grid-card group relative rounded-2xl cursor-pointer flex flex-col transition-all duration-150 hover:scale-[1.03] hover:shadow-xl active:scale-[0.98] overflow-hidden"
+                    className={`pos-grid-card group relative rounded-2xl flex flex-col overflow-hidden ${
+                      isOut ? 'cursor-not-allowed' : 'cursor-pointer transition-all duration-150 hover:scale-[1.03] hover:shadow-xl active:scale-[0.98]'
+                    }`}
                     style={{
                       borderLeft: `4px solid ${stockColor}`,
                       borderTop: `3px solid ${catColor}`,
@@ -347,7 +536,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
                       borderBottom: `2px solid ${catColor}`,
                       background: '#131a27',
                       boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
-                      opacity: isOut ? 0.5 : 1,
+                      opacity: isOut ? 0.55 : 1,
                     }}
                   >
                     {/* Category Color Top Accent */}
@@ -373,19 +562,26 @@ export const POSModule: React.FC<POSModuleProps> = ({
                       </span>
                     </div>
 
-                    {/* Stock Badge */}
-                    <div className="w-full pb-3 pt-1 flex items-center justify-center">
-                      <span
-                        className="inline-flex items-center justify-center px-3 py-1 rounded-full text-[11px] font-bold text-white min-w-[36px]"
-                        style={{ backgroundColor: stockColor }}
-                      >
-                        {isOut ? 'OUT' : p.stockQty}
-                      </span>
+                    {/* Stock Badge / OUT OF STOCK banner — blocked from adding until restocked */}
+                    <div className="w-full pb-3 pt-1 flex items-center justify-center min-h-[34px]">
+                      {isOut ? (
+                        <span className="w-full mx-2 inline-flex items-center justify-center gap-1 px-2 py-1 rounded-full text-[10px] font-black text-white tracking-wide" style={{ backgroundColor: stockColor }}>
+                          ⛔ OUT OF STOCK
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center justify-center px-3 py-1 rounded-full text-[11px] font-bold text-white min-w-[36px]"
+                          style={{ backgroundColor: stockColor }}
+                        >
+                          {p.stockQty}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
               })}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -505,12 +701,13 @@ export const POSModule: React.FC<POSModuleProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { name: 'Cash', label: '💵 CASH' },
-                  { name: 'POS Transfer', label: '💳 POS / CARD' },
-                  { name: 'POS Transfer', label: '📱 TRANSFER' },
+                  { name: 'Transfer', label: '📱 TRANSFER (USSD/App)' },
+                  { name: 'POS/Card', label: '💳 POS / CARD' },
+                  { name: 'Cash + Transfer', label: '💵+📱 CASH + TRANSFER' },
                   { name: 'Store Credit / Account', label: '📝 DEBT / CREDIT' },
-                ].map((m, i) => (
+                ].map((m) => (
                   <button
-                    key={i}
+                    key={m.name}
                     type="button"
                     onClick={() => setPaymentMethod(m.name as any)}
                     className={`py-2 px-3 rounded-xl text-xs font-black transition border text-left ${
@@ -523,6 +720,59 @@ export const POSModule: React.FC<POSModuleProps> = ({
                   </button>
                 ))}
               </div>
+
+              {/* Cash + Transfer split inputs */}
+              {paymentMethod === 'Cash + Transfer' && (
+                <div className="mt-3 p-3 rounded-xl bg-[#0d1117] border border-emerald-800/40 space-y-3">
+                  <p className="text-[11px] font-bold text-emerald-300 uppercase">Split Payment — enter both amounts manually</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Cash Paid (₦)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={cashAmount}
+                        onChange={(e) => setCashAmount(Math.max(0, Number(e.target.value) || 0))}
+                        placeholder="0"
+                        className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-sm font-bold outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Transfer Paid (₦)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={transferAmount}
+                        onChange={(e) => setTransferAmount(Math.max(0, Number(e.target.value) || 0))}
+                        placeholder="0"
+                        className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-sm font-bold outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Mini Report / Note (optional)</label>
+                    <input
+                      type="text"
+                      value={paymentNote}
+                      onChange={(e) => setPaymentNote(e.target.value)}
+                      placeholder="e.g. Over-transfer N2,000 given as cash change"
+                      className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-xs outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  {/* Mini transaction report */}
+                  <div className="bg-[#161b22] rounded-lg border border-[#30363d] p-2.5 text-xs space-y-1">
+                    <div className="flex justify-between text-slate-400"><span>Total Bill:</span><span className="font-bold text-white">{formatNaira(cartSubtotal)}</span></div>
+                    <div className="flex justify-between text-slate-400"><span>Cash:</span><span className="font-bold text-emerald-400">{formatNaira(cashAmount || 0)}</span></div>
+                    <div className="flex justify-between text-slate-400"><span>Transfer:</span><span className="font-bold text-cyan-400">{formatNaira(transferAmount || 0)}</span></div>
+                    <div className="flex justify-between text-slate-300 border-t border-[#30363d] pt-1"><span>Paid Total:</span><span className="font-black text-white">{formatNaira((cashAmount || 0) + (transferAmount || 0))}</span></div>
+                    <div className={`flex justify-between font-black ${((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal < 0 ? 'text-amber-400' : ((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal > 0 ? 'text-cyan-400' : 'text-slate-400'}`}>
+                      <span>{((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal > 0 ? 'Change / Overpay:' : ((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal < 0 ? 'Balance Due:' : 'Balanced:'}</span>
+                      <span>{formatNaira(Math.abs(((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal))}</span>
+                    </div>
+                    {paymentNote.trim() && <div className="text-[11px] text-amber-300 italic border-t border-[#30363d] pt-1">Note: {paymentNote}</div>}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Total Amount Display */}
@@ -543,20 +793,36 @@ export const POSModule: React.FC<POSModuleProps> = ({
               </button>
             </div>
 
-            {/* Giant Green Complete Sale Button */}
-            <button
-              type="button"
-              onClick={handleCheckout}
-              disabled={cart.length === 0}
-              className={`w-full py-4 px-6 rounded-2xl font-black text-base uppercase tracking-wider shadow-xl transition flex items-center justify-center gap-3 ${
-                cart.length === 0
-                  ? 'bg-[#21262d] text-slate-500 border border-[#30363d] cursor-not-allowed'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/60 ring-4 ring-emerald-500/30 active:scale-98'
-              }`}
-            >
-              <Printer className="w-6 h-6" />
-              <span>PRINT RECEIPT & FINISH SALE ({formatNaira(cartSubtotal)})</span>
-            </button>
+            {/* Save / Print Actions — customer may not need receipt */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => handleCheckout({ saveOnly: true })}
+                disabled={cart.length === 0}
+                className={`py-3.5 px-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-lg transition flex items-center justify-center gap-2 border ${
+                  cart.length === 0
+                    ? 'bg-[#21262d] text-slate-500 border-[#30363d] cursor-not-allowed'
+                    : 'bg-[#21262d] hover:bg-[#30363d] text-slate-200 border-[#30363d] hover:border-slate-500'
+                }`}
+                title="Save to records only — no print. Export as PDF/PNG later from Sales if needed."
+              >
+                <span>💾 Save Only</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCheckout()}
+                disabled={cart.length === 0}
+                className={`py-3.5 px-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl transition flex items-center justify-center gap-2 ${
+                  cart.length === 0
+                    ? 'bg-[#21262d] text-slate-500 border border-[#30363d] cursor-not-allowed'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/60 ring-4 ring-emerald-500/30 active:scale-98'
+                }`}
+              >
+                <Printer className="w-5 h-5" />
+                <span>Print & Save</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 text-center">Save Only records the sale (default). Print & Save also opens the receipt for printing. PDFs/PNGs can be exported later from Sales → Reprint.</p>
           </div>
         </div>
       </div>

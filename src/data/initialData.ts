@@ -222,7 +222,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
     phone: '100',
     address: 'Main Street, Yola',
     balance: 0,
-    points: 3079542.06,
+    points: 0,
     advancePayment: 0,
     createdAt: '2026-01-10',
   },
@@ -233,7 +233,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
     phone: '08031234567',
     address: 'Commercial Layout, Yola',
     balance: 15000, // owes 15,000
-    points: 1250,
+    points: 0,
     advancePayment: 0,
     createdAt: '2026-02-15',
   },
@@ -244,7 +244,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
     phone: '07039876543',
     address: 'Jimeta Bypass, Yola',
     balance: -25000, // advance credit of 25,000
-    points: 4800,
+    points: 0,
     advancePayment: 25000,
     createdAt: '2026-03-01',
   },
@@ -255,7 +255,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
     phone: '08123456789',
     address: 'Airport Road, Yola',
     balance: 0,
-    points: 9200,
+    points: 0,
     advancePayment: 0,
     createdAt: '2026-04-12',
   }
@@ -265,13 +265,13 @@ export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
   storeName: 'JOAINAS MART',
   tagline: 'Seafoods, Frozen Foods & Groceries',
   address: 'Behind Fire Service, Gimba Road, Jimeta Yola. Adamawa State.',
-  phone: '+234 703 571 6349 / +234 802 000 1122',
+  phone: '',
   receiptHeaderNote: 'WELCOME TO JOAINAS SEAFOODS & GROCERIES',
   receiptFooterNote: 'Thank you for shopping with us! No refund on frozen items after 24 hrs.',
   showLogo: true,
   paperWidth: '80mm',
   autoPrintOnSale: true,
-  pointRate: 2,
+  pointRate: 0,
   printDensity: 'High',
   printerName: 'XP-80C',
 };
@@ -279,7 +279,7 @@ export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
 export const DEVELOPER_INFO: StoreDeveloperInfo = {
   company: 'Dronebug Technologies and services',
   email: 'dronebugtechnologies@gmail.com',
-  phone: '+2347035716349',
+  phone: '',
   appVersion: 'v3.2.0 Desktop POS (React + Vite + Tauri Engine)',
 };
 
@@ -361,7 +361,7 @@ export const INITIAL_SALES: SaleRecord[] = [
     customerId: 'cust-1',
     customerName: 'Joainas Supermarket VIP',
     customerPhone: '100',
-    pointsEarned: 126,
+    pointsEarned: 0,
     cashier: 'Cashier-1',
     date: '2026-08-11',
     time: '14:32:10',
@@ -423,7 +423,7 @@ export const INITIAL_SALES: SaleRecord[] = [
     customerId: 'cust-2',
     customerName: 'Alhaji Abubakar Musa',
     customerPhone: '08031234567',
-    pointsEarned: 52,
+    pointsEarned: 0,
     cashier: 'Cashier-1',
     date: '2026-08-11',
     time: '15:10:45',

@@ -31,6 +31,7 @@ import {
   dbGetSetting,
   dbSetSetting,
   dbDeleteSetting,
+  dbClearTable,
   getDbInfo,
   relocateDatabaseTo,
 } from './db';
@@ -58,6 +59,25 @@ let cacheActiveUser: User | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 function enqueueWrite(task: () => Promise<void>): void {
   writeQueue = writeQueue.then(task).catch((e) => console.error('SQLite write failed', e));
+}
+
+// Wait until every queued SQLite write has completed. Critical before
+// transitioning out of first-time setup: it guarantees the admin account
+// (and the setup flag) are durable on disk, so closing the app right after
+// setup can never lose the account and strand the user at a login screen
+// with no users to sign in with. A generous timeout keeps a stuck write from
+// ever freezing the UI — if it times out we continue with the in-memory cache
+// (the app still works for the session and recovers on the next launch).
+export async function flushWrites(timeoutMs: number = 15000): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    await Promise.race([
+      writeQueue,
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  } catch (e) {
+    console.error('Failed to flush queued SQLite writes', e);
+  }
 }
 
 // Browser fallback keys (only used when running outside Tauri).
@@ -132,7 +152,11 @@ export async function initStorage(): Promise<void> {
     cacheAuditLogs = auditLogs;
     cacheCategories = categories;
     cachePrinterConfig = printerConfig;
-    cacheAdminSetupDone = setupDone === 'true';
+    // The setup-completed flag is mirrored to localStorage as a safety net so
+    // a freshly-upgraded database can never bounce the user back into the
+    // first-time setup wizard. If the SQLite read fails for any reason the
+    // app still lands on the login gate instead of the setup screen.
+    cacheAdminSetupDone = setupDone === 'true' || lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false);
     // No persisted active-user session: signing out or closing the app
     // always requires a fresh login (per-process session).
     cacheActiveUser = null;
@@ -306,10 +330,11 @@ export const isAdminSetupCompleted = (): boolean => cacheAdminSetupDone;
 
 export const setAdminSetupCompleted = (done: boolean = true) => {
   cacheAdminSetupDone = done;
+  // Mirror to localStorage too (belt-and-suspenders) so the flag survives even
+  // if a queued SQLite write is interrupted by the app closing.
+  lsSet(LKEYS.ADMIN_SETUP_DONE, done);
   if (isTauriRuntime()) {
     enqueueWrite(() => dbSetSetting('admin_setup_done', String(done)));
-  } else {
-    lsSet(LKEYS.ADMIN_SETUP_DONE, done);
   }
 };
 
@@ -353,6 +378,98 @@ export const saveCategories = (categories: Category[]) => {
   } else {
     lsSet(LKEYS.CATEGORIES, categories);
   }
+};
+
+// ============================================================
+// ADMIN SYSTEM RESET (Backup & Restore panel)
+// Wipes test/dummy business data so the store can start fresh WITHOUT
+// losing user accounts, printer/hardware config, or the login gate.
+// Admin-only access (the whole Admin module requires the 'admin'
+// capability).
+// ============================================================
+
+// Enqueue a write task and wait for the whole queue (including any writes
+// queued earlier, e.g. a sale that was just completed) to finish. Used by the
+// admin reset actions so the cleared tables are durable on disk BEFORE the UI
+// reloads or the user logs out — otherwise the old rows would come straight
+// back on the next launch.
+const enqueueAndFlush = async (task: () => Promise<void>): Promise<void> => {
+  enqueueWrite(task);
+  await flushWrites();
+};
+
+// Clears all sales, sale items and expenditures, and resets every customer's
+// balance / points / advance payment to zero. Inventory and users are kept.
+// Returns a promise that resolves once the changes are durable on disk.
+export const resetSalesAndReports = async (): Promise<void> => {
+  const zeroedCustomers = cacheCustomers.map((c) => ({
+    ...c,
+    balance: 0,
+    points: 0,
+    advancePayment: 0,
+  }));
+  cacheSales = [];
+  cacheExpenditures = [];
+  cacheCustomers = zeroedCustomers;
+  if (isTauriRuntime()) {
+    // Run the writes SEQUENTIALLY on the shared connection. Running several
+    // execute() calls at once (Promise.all) on the sqlx pool can trip SQLite's
+    // write-lock with "database is locked", silently discarding the reset.
+    await enqueueAndFlush(async () => {
+      await dbSaveSales([]);
+      await dbSaveExpenditures([]);
+      await dbSaveCustomers(zeroedCustomers);
+    });
+    return;
+  }
+  lsSet(LKEYS.SALES, []);
+  lsSet(LKEYS.EXPENDITURES, []);
+  lsSet(LKEYS.CUSTOMERS, zeroedCustomers);
+};
+
+// Clears all products (and stock-adjustment audit rows). Sales, customers
+// and categories are kept. Returns a promise that resolves once durable.
+export const resetInventoryAndProducts = async (): Promise<void> => {
+  cacheProducts = [];
+  if (isTauriRuntime()) {
+    await enqueueAndFlush(async () => {
+      await dbSaveProducts([]);
+      await dbClearTable('inventory_adjustments');
+    });
+    return;
+  }
+  lsSet(LKEYS.PRODUCTS, []);
+};
+
+// Full factory reset: clears every business table, restores the default
+// categories and starts fresh. User accounts, the printer/hardware config
+// and the completed-setup flag are kept, so the app returns to the LOGIN
+// gate (never back to the first-time setup wizard). Returns a promise that
+// resolves once the changes are durable on disk.
+export const resetAllSystemData = async (): Promise<void> => {
+  cacheProducts = [];
+  cacheSales = [];
+  cacheCustomers = [];
+  cacheExpenditures = [];
+  cacheCategories = [...DEFAULT_CATEGORIES];
+  cacheAuditLogs = [];
+  if (isTauriRuntime()) {
+    await enqueueAndFlush(async () => {
+      await dbSaveProducts([]);
+      await dbSaveSales([]);
+      await dbSaveCustomers([]);
+      await dbSaveExpenditures([]);
+      await dbSaveCategories(DEFAULT_CATEGORIES);
+      await dbClearTable('inventory_adjustments');
+    });
+    return;
+  }
+  lsSet(LKEYS.PRODUCTS, []);
+  lsSet(LKEYS.SALES, []);
+  lsSet(LKEYS.CUSTOMERS, []);
+  lsSet(LKEYS.EXPENDITURES, []);
+  lsSet(LKEYS.CATEGORIES, DEFAULT_CATEGORIES);
+  lsSet(LKEYS.AUDIT_LOGS, []);
 };
 
 // ============================================================

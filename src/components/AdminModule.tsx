@@ -26,6 +26,10 @@ import {
   writeBackupFile,
   pickBackupFile,
   readBackupFile,
+  resetSalesAndReports,
+  resetInventoryAndProducts,
+  resetAllSystemData,
+  flushWrites,
 } from '../utils/storage';
 import { useToast } from './Toast';
 import {
@@ -53,6 +57,9 @@ import {
   Edit2,
   ListFilter,
   Code2,
+  RotateCcw,
+  KeyRound,
+  Package,
 } from 'lucide-react';
 
 interface AdminModuleProps {
@@ -62,6 +69,7 @@ interface AdminModuleProps {
   onUpdateUsers?: (users: User[]) => void;
   categories?: Category[];
   onCategoriesChange?: (categories: Category[]) => void;
+  onDataReset?: () => void;
 }
 
 const SQLITE_SCHEMA_DDL = `-- ====================================================================
@@ -200,11 +208,40 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   onUpdateUsers = (_users: User[]) => {},
   categories: categoriesProp,
   onCategoriesChange = (_categories: Category[]) => {},
+  onDataReset = () => {},
 }) => {
   const { showToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<'users' | 'categories' | 'audit' | 'database'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'categories' | 'audit' | 'database' | 'security'>('users');
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadAuditLogs());
+
+  // Security & recovery state (ADMIN only) — single question selected (1 of 5).
+  // For legacy 1.3.7 vaults that stored all 5, we default to the first question on update.
+  const [secSelectedIdx, setSecSelectedIdx] = useState(0);
+  const [secSingleAnswer, setSecSingleAnswer] = useState('');
+  const [secHasVault, setSecHasVault] = useState(false);
+  const [secSaving, setSecSaving] = useState(false);
+  const [capsSec, setCapsSec] = useState(false);
+  const checkCapsSec = (e: React.KeyboardEvent<HTMLInputElement>) => setCapsSec(e.getModifierState('CapsLock'));
+  const [capsAddUser, setCapsAddUser] = useState(false);
+  const checkCapsAddUser = (e: React.KeyboardEvent<HTMLInputElement>) => setCapsAddUser(e.getModifierState('CapsLock'));
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { hasRecoverySetup, loadRecoveryRecord } = await import('../utils/recovery');
+        setSecHasVault(await hasRecoverySetup());
+        const rec = await loadRecoveryRecord();
+        if (rec && rec.questions.length > 0) {
+          // For updates from a 5-question legacy vault, pre-select its first question.
+          setSecSelectedIdx(rec.questions[0].id);
+        }
+      } catch {}
+    })();
+  }, [activeTab]);
+
+  // Full-system reset confirmation modal state (requires typing RESET).
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
 
   // Category management state — prefers the App-level source of truth so the
   // POS grid picks up color changes immediately, with a local fallback.
@@ -453,7 +490,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     try {
       const backupData = {
         app: 'JOAINAS MART POS SYSTEM',
-        version: '1.3.1',
+        version: '1.3.8',
         timestamp: new Date().toISOString(),
         products: loadProducts(),
         customers: loadCustomers(),
@@ -553,9 +590,13 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         );
 
         showToast('Database backup restored successfully! Reloading system...', 'success');
-        setTimeout(() => {
-          window.location.reload();
-        }, 1200);
+        // Make sure every restored table (especially users) is durable on disk
+        // before the reload, otherwise the app could restart with no accounts.
+        void flushWrites().finally(() => {
+          setTimeout(() => {
+            window.location.reload();
+          }, 1200);
+        });
       } catch (err) {
         console.error('Failed to import backup', err);
         showToast('Error reading backup JSON file!', 'error');
@@ -597,12 +638,92 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       );
 
       showToast('Database backup restored successfully! Reloading system...', 'success');
+      // Make sure every restored table (especially users) is durable on disk
+      // before the reload, otherwise the app could restart with no accounts.
+      await flushWrites();
       setTimeout(() => {
         window.location.reload();
       }, 1200);
     } catch (err) {
       console.error('Failed to restore native backup', err);
       showToast('Error reading backup JSON file!', 'error');
+    }
+  };
+
+  // Reset Sales & Reports — clears test sales, expenditures and customer
+  // balances so financial records start from zero. Keeps inventory & users.
+  const handleResetSales = async () => {
+    if (!confirm('Reset ALL sales records, reports and customer balances?\n\nThis permanently deletes every sale receipt and expense, and sets all customer balances/points/advance payments back to zero. Products and user accounts are kept.\n\nThis CANNOT be undone — make a backup first if unsure.')) return;
+
+    try {
+      // Await the DB write so the cleared tables are durable BEFORE the UI
+      // updates — otherwise the old rows would come straight back on refresh
+      // or re-login.
+      await resetSalesAndReports();
+      recordAuditLog(
+        currentUser,
+        currentUserRole,
+        'Reset Sales & Reports',
+        'All sales records, expenditures and customer balances were reset to zero (admin reset).'
+      );
+      setAuditLogs(loadAuditLogs());
+      onDataReset();
+      showToast('Sales, reports and customer balances have been reset.', 'success');
+    } catch (error) {
+      console.error('Reset Sales & Reports failed', error);
+      showToast('Reset failed — please try again.', 'error');
+    }
+  };
+
+  // Reset Inventory & Products — clears all products and stock adjustments.
+  const handleResetInventory = async () => {
+    if (!confirm('Reset ALL inventory/products?\n\nThis permanently deletes every product and stock adjustment record. Sales history, customers and categories are kept.\n\nThis CANNOT be undone.')) return;
+
+    try {
+      await resetInventoryAndProducts();
+      recordAuditLog(
+        currentUser,
+        currentUserRole,
+        'Reset Inventory & Products',
+        'All products and stock adjustments were cleared (admin reset).'
+      );
+      setAuditLogs(loadAuditLogs());
+      onDataReset();
+      showToast('Inventory and products have been reset.', 'success');
+    } catch (error) {
+      console.error('Reset Inventory & Products failed', error);
+      showToast('Reset failed — please try again.', 'error');
+    }
+  };
+
+  // Full factory reset — requires typing RESET to confirm.
+  const handleFullReset = async () => {
+    if (resetConfirmText.trim().toUpperCase() !== 'RESET') {
+      showToast('Type "RESET" to confirm the full system reset.', 'error');
+      return;
+    }
+
+    try {
+      await resetAllSystemData();
+      recordAuditLog(
+        currentUser,
+        currentUserRole,
+        'Full System Reset',
+        'Factory reset completed: all business data cleared and categories restored to defaults (admin reset).'
+      );
+      setAuditLogs(loadAuditLogs());
+      setIsResetConfirmOpen(false);
+      setResetConfirmText('');
+      onDataReset();
+      // Make sure the audit log of the reset itself is durable too, then reload
+      // into the fresh (empty) system. Only reload AFTER everything is flushed
+      // so the old rows can never reappear.
+      await flushWrites();
+      showToast('Full system reset complete. The app is ready for fresh use — you will be logged out.', 'success');
+      setTimeout(() => window.location.reload(), 500);
+    } catch (error) {
+      console.error('Full system reset failed', error);
+      showToast('Reset failed — please try again.', 'error');
     }
   };
 
@@ -684,6 +805,18 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           >
             <Database className="w-4 h-4" />
             <span>SQLite DB & Backups</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('security')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${
+              activeTab === 'security'
+                ? 'bg-amber-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-[#21262d]'
+            }`}
+          >
+            <KeyRound className="w-4 h-4" />
+            <span>Security & Recovery</span>
           </button>
         </div>
       </div>
@@ -1177,6 +1310,91 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             </div>
           </div>
 
+          {/* Reset System Data Card (Admin-only) */}
+          <div className="bg-[#1a1114] border border-red-900/60 p-6 rounded-2xl shadow-xl space-y-4">
+            <div className="flex items-center gap-3 border-b border-red-900/40 pb-4">
+              <div className="p-3 bg-red-950 border border-red-800 text-red-400 rounded-xl">
+                <RotateCcw className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-white flex items-center gap-2">
+                  Reset System Data
+                  <span className="text-[9px] bg-red-900/60 text-red-300 px-2 py-0.5 rounded border border-red-700 font-mono">ADMIN ONLY</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Clears dummy/test records so the store can start fresh. User accounts, printer
+                  config and the login gate are always preserved.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 bg-[#0d1117] border border-[#30363d] rounded-xl space-y-2">
+                <div className="flex items-center gap-2 text-red-300 font-extrabold text-xs uppercase tracking-wide">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Sales & Reports</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Deletes every sale receipt and expense, and resets all customer balances, points
+                  and advance payments to zero. Products & users are kept.
+                </p>
+                <button
+                  onClick={handleResetSales}
+                  className="w-full py-2.5 rounded-xl bg-red-950/60 border border-red-800/60 text-red-300 font-bold text-xs uppercase tracking-wider transition hover:bg-red-900/60 flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Reset Sales & Reports
+                </button>
+              </div>
+
+              <div className="p-4 bg-[#0d1117] border border-[#30363d] rounded-xl space-y-2">
+                <div className="flex items-center gap-2 text-amber-300 font-extrabold text-xs uppercase tracking-wide">
+                  <Package className="w-4 h-4" />
+                  <span>Inventory</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Deletes every product and stock-adjustment record. Sales history, customers and
+                  categories are kept.
+                </p>
+                <button
+                  onClick={handleResetInventory}
+                  className="w-full py-2.5 rounded-xl bg-amber-950/50 border border-amber-800/60 text-amber-300 font-bold text-xs uppercase tracking-wider transition hover:bg-amber-900/50 flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Reset Inventory
+                </button>
+              </div>
+
+              <div className="p-4 bg-[#0d1117] border border-red-800/50 rounded-xl space-y-2">
+                <div className="flex items-center gap-2 text-red-400 font-extrabold text-xs uppercase tracking-wide">
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Full Reset (Factory)</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Wipes ALL business data (products, sales, customers, expenses, audit logs) and
+                  restores default categories. Accounts & login are kept.
+                </p>
+                <button
+                  onClick={() => setIsResetConfirmOpen(true)}
+                  className="w-full py-2.5 rounded-xl bg-red-700 hover:bg-red-600 text-white font-bold text-xs uppercase tracking-wider shadow-lg transition flex items-center justify-center gap-2"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Full System Reset
+                </button>
+              </div>
+            </div>
+
+            <div className="p-3 bg-[#0d1117] border border-[#30363d] rounded-lg text-[10px] text-amber-400/90 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <p>
+                Tip: If you only added dummy inventory/sales to test the software, use
+                "Reset Sales & Reports" and/or "Reset Inventory" to clear them. Use
+                "Full System Reset" to wipe everything and start properly — the app will
+                return to the login screen.
+              </p>
+            </div>
+          </div>
+
           {/* SQLite Schema & Go Backend Manager Card */}
           <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-2xl shadow-xl space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#30363d] pb-4">
@@ -1239,6 +1457,161 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                   <div className="text-[10px] text-slate-500 font-mono">{tbl.columns} columns</div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 5: Security & Recovery — 5 uncomfortable questions */}
+      {activeTab === 'security' && (
+        <div className="space-y-6">
+          <div className="bg-amber-950/30 border border-amber-800/60 p-6 rounded-2xl shadow-xl space-y-4">
+            <div className="flex items-center gap-3 border-b border-amber-800/30 pb-4">
+              <div className="p-3 bg-amber-950 border border-amber-700 text-amber-400 rounded-xl">
+                <KeyRound className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-black text-base text-white">ADMIN Password Recovery Vault</h3>
+                <p className="text-xs text-amber-200/70">
+                  Pick <strong>1 of 5</strong> private questions to protect the ADMIN account. After <strong>5 failed logins</strong>, your chosen question is asked (legacy 1.3.7 vaults with 5 will still ask one at random). A correct answer reveals the actual password for <strong>30 seconds</strong> or lets you set a new one. Never shown until the 5th failure — skip now and set it later if you prefer.
+                </p>
+              </div>
+              <span className={`ml-auto text-[10px] font-bold px-2.5 py-1 rounded-full border ${secHasVault ? 'bg-emerald-950 border-emerald-700 text-emerald-300' : 'bg-red-950 border-red-700 text-red-300'}`}>
+                {secHasVault ? 'Vault Active' : 'No Vault Yet'}
+              </span>
+            </div>
+
+            <div className="bg-[#0d1117] border border-amber-800/20 rounded-xl p-4 text-xs text-slate-300 leading-relaxed">
+              <p className="font-bold text-amber-300 mb-1">Why 5 uncomfortable questions?</p>
+              <p>They are private things only you know — not your phone number or staff ID that a colleague could guess. Example: your first crush, the exact date you met your partner, a nickname only family uses, an embarrassing teenage memory, a private fear. The recovery never displays unless you fail 5 times.</p>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!secSingleAnswer.trim()) {
+                  showToast('Please type your answer to the selected question.', 'error');
+                  return;
+                }
+                if (secSingleAnswer.trim().length < 2) {
+                  showToast('Answer too short.', 'error');
+                  return;
+                }
+                const pwdInput = (document.getElementById('sec-vault-password') as HTMLInputElement | null)?.value || '';
+                if (!pwdInput || pwdInput.length < 4) {
+                  showToast('Enter the current ADMIN plain password to lock the vault (min 4 chars).', 'error');
+                  return;
+                }
+                // verify it's actually the admin's current password
+                const usersNow = loadUsers();
+                const adminUser = usersNow.find((u) => u.username.toLowerCase() === 'admin' && u.role === 'System Admin') || usersNow.find((u) => u.username.toLowerCase() === 'admin');
+                if (!adminUser) {
+                  showToast('ADMIN account not found.', 'error');
+                  return;
+                }
+                // quick bcrypt check for plain pwd
+                try {
+                  const { default: bcrypt } = await import('bcryptjs');
+                  const isHashed = /^\$2[aby]\$\d{2}\$/.test(adminUser.password || '');
+                  let ok = false;
+                  if (isHashed) ok = await bcrypt.compare(pwdInput, adminUser.password as string);
+                  else ok = adminUser.password === pwdInput;
+                  if (!ok) {
+                    showToast('That ADMIN password does not match the current one.', 'error');
+                    return;
+                  }
+                } catch {}
+                setSecSaving(true);
+                try {
+                  const { createSingleRecoveryRecord } = await import('../utils/recovery');
+                  await createSingleRecoveryRecord(secSelectedIdx, secSingleAnswer, pwdInput);
+                  setSecHasVault(true);
+                  recordAuditLog(currentUser, currentUserRole, 'Updated ADMIN Recovery Vault', `Reconfigured the recovery question (1 of 5) for ADMIN password recovery.`);
+                  setAuditLogs(loadAuditLogs());
+                  showToast('Recovery vault saved — 1 question locked. Test by failing 5 logins.', 'success');
+                  setSecSingleAnswer('');
+                  const el = document.getElementById('sec-vault-password') as HTMLInputElement | null;
+                  if (el) el.value = '';
+                } catch (err) {
+                  console.error(err);
+                  showToast('Failed to save vault.', 'error');
+                } finally {
+                  setSecSaving(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-[11px] font-bold text-amber-300/90 uppercase tracking-wide mb-1">
+                  Select one security question (1 of 5) — for updates, the first previously saved question is pre-selected
+                </label>
+                <select
+                  value={secSelectedIdx}
+                  onChange={(e) => setSecSelectedIdx(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white text-xs outline-none focus:border-amber-600"
+                >
+                  {[
+                    'What is the full name of your first childhood crush (the first person you ever liked romantically)?',
+                    'On what exact date (DD/MM/YYYY) did you first meet your current partner or lover in person for the first time?',
+                    'What secret nickname does only your mother or closest family call you at home — one that no colleague or coworker knows?',
+                    'What is one deeply embarrassing thing you did as a teenager that you have hidden from everyone at work?',
+                    'What is a private fear or deep insecurity you have never shared with colleagues or customers?',
+                  ].map((q, idx) => (
+                    <option key={idx} value={idx}>
+                      {idx + 1}. {q}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-amber-300/90 uppercase tracking-wide mb-1">
+                  Your answer to the selected question
+                </label>
+                <input
+                  type="text"
+                  value={secSingleAnswer}
+                  onChange={(e) => setSecSingleAnswer(e.target.value)}
+                  placeholder="Type your private answer (required)"
+                  className="w-full px-3 py-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white text-xs outline-none focus:border-amber-600"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">Case-insensitive, never shown at login until 5 failed ADMIN attempts. Keep it private.</p>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wide mb-1">
+                  Confirm with current ADMIN plain password to encrypt the vault
+                </label>
+                <input
+                  id="sec-vault-password"
+                  type="password"
+                  placeholder="Type ADMIN plain password"
+                  onKeyUp={checkCapsSec}
+                  onKeyDown={checkCapsSec}
+                  className={`w-full px-3 py-2.5 rounded-xl border bg-[#0d1117] text-white text-xs outline-none focus:border-amber-600 ${capsSec ? 'border-amber-400' : 'border-amber-800/50'}`}
+                />
+                {capsSec && <p className="text-[10px] font-bold text-amber-400 mt-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Caps Lock is ON</p>}
+                <p className="text-[10px] text-slate-500 mt-1">We store the password obfuscated — it is only revealed after a correct security answer for 30 seconds. No one with DB access can read it without your answer.</p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={secSaving}
+                className="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-white font-black text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2"
+              >
+                {secSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                {secSaving ? 'Saving Vault...' : secHasVault ? 'Update Recovery Vault (1 Question)' : 'Create Recovery Vault (1 Question)'}
+              </button>
+            </form>
+
+            <div className="bg-[#0d1117] border border-[#30363d] rounded-xl p-4 text-xs">
+              <p className="font-bold text-slate-300 mb-2">Developer retrieval (older installs without a vault)</p>
+              <ol className="list-decimal list-inside space-y-1 text-slate-400 leading-relaxed">
+                <li>Open the login screen and press <code className="px-1 py-0.5 bg-black/30 rounded font-mono text-amber-300">Ctrl+Shift+Alt+D</code> to open the dev unlock.</li>
+                <li>Enter master code <code className="px-1 py-0.5 bg-black/30 rounded font-mono text-amber-300">JOAINAS-DEV-2026-DRONEBUG</code> — if a vault exists, the plain password is revealed without a question.</li>
+                <li>If no vault exists (v1.3.6 or earlier): close the app, locate the DB file shown in Admin → SQLite DB &amp; Backups (or <code className="font-mono">%APPDATA%\com.joainas.pos.desktop\db_path.txt</code>), open it with <code className="font-mono">sqlite3</code> or DB Browser, run <code className="font-mono">SELECT value FROM app_settings WHERE key='admin_recovery'</code> and <code className="font-mono">SELECT * FROM users WHERE username='admin'</code>. The <code className="font-mono">password_hash</code> is bcrypt — use <code className="font-mono">UPDATE users SET password_hash='' WHERE username='admin'</code> to clear it and set a new password via the app&apos;s “Set New Password” recovery, or copy the DB&apos;s <code className="font-mono">joainas_admin_recovery_v1</code> localStorage key and deobfuscate with the recovery utility.</li>
+              </ol>
+              <p className="text-[11px] text-slate-500 mt-3">Full guide: see <code className="font-mono">RECOVERY_GUIDE.md</code> in the install folder.</p>
             </div>
           </div>
         </div>
@@ -1421,16 +1794,19 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 
               <div>
                 <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
-                  Account Password:
+                  Account Password: {capsAddUser && <span className="ml-2 text-xs font-bold text-amber-400">Caps Lock ON</span>}
                 </label>
                 <input
                   type="password"
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
+                  onKeyUp={checkCapsAddUser}
+                  onKeyDown={checkCapsAddUser}
                   placeholder="••••••••"
-                  className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white outline-none focus:border-purple-500 font-mono"
+                  className={`w-full p-2.5 rounded-xl border bg-[#0d1117] text-white outline-none focus:border-purple-500 font-mono ${capsAddUser ? 'border-amber-400' : 'border-[#30363d]'}`}
                 />
+                {capsAddUser && <p className="text-xs font-bold text-amber-400 mt-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Caps Lock is ON</p>}
               </div>
 
               <div className="pt-3 flex gap-3">
@@ -1508,6 +1884,78 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                 className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold uppercase tracking-wider text-xs transition shadow-lg"
               >
                 Save Color
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    {/* Full System Reset Confirmation Modal */}
+      {isResetConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-[#161b22] border border-red-800 rounded-2xl shadow-2xl p-6 text-[#e2e8f0] space-y-4">
+            <div className="flex items-center gap-2 border-b border-red-800/50 pb-3">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              <h3 className="font-black text-sm text-white uppercase tracking-wide">
+                Confirm Full System Reset
+              </h3>
+              <button
+                onClick={() => {
+                  setIsResetConfirmOpen(false);
+                  setResetConfirmText('');
+                }}
+                className="ml-auto text-slate-400 hover:text-white text-xs font-bold px-2 py-1 rounded bg-[#21262d]"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="p-3 bg-red-950/40 border border-red-800/50 rounded-lg text-[11px] text-red-200 leading-relaxed space-y-1">
+              <p><strong>This will permanently delete:</strong></p>
+              <ul className="list-disc list-inside text-slate-300 space-y-0.5">
+                <li>All products &amp; stock adjustments</li>
+                <li>All sales receipts &amp; sale items</li>
+                <li>All customers &amp; ledger balances</li>
+                <li>All expenditures / reports data</li>
+                <li>All audit logs</li>
+                <li>Custom categories (restored to defaults)</li>
+              </ul>
+              <p className="text-slate-400 pt-1">
+                User accounts, printer/hardware config and your login are kept.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
+                Type <span className="text-red-400 font-mono">RESET</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={resetConfirmText}
+                onChange={(e) => setResetConfirmText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleFullReset();
+                }}
+                placeholder="Type RESET here"
+                className="w-full p-2.5 rounded-xl border border-red-800/60 bg-[#0d1117] text-white font-mono font-bold outline-none focus:border-red-500 placeholder:text-slate-500"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setIsResetConfirmOpen(false);
+                  setResetConfirmText('');
+                }}
+                className="w-full py-2.5 rounded-xl bg-[#0d1117] border border-[#30363d] text-slate-300 font-bold uppercase tracking-wider text-xs transition hover:bg-[#1f242d]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleFullReset}
+                disabled={resetConfirmText.trim().toUpperCase() !== 'RESET'}
+                className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold uppercase tracking-wider text-xs transition shadow-lg"
+              >
+                Wipe All Data
               </button>
             </div>
           </div>

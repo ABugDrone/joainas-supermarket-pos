@@ -110,6 +110,8 @@ export interface Customer {
   createdAt: string;
 }
 
+export type PaymentMethod = 'Cash' | 'Transfer' | 'POS/Card' | 'Cash + Transfer' | 'Store Credit / Account' | 'POS Transfer' | 'Split Payment';
+
 export interface SaleRecord {
   id: string;
   receiptNo: string;
@@ -118,7 +120,11 @@ export interface SaleRecord {
   totalAmount: number;
   advancePayment: number; // amount paid by cash/transfer
   balanceDue: number; // totalAmount - advancePayment
-  paymentMethod: 'Cash' | 'POS Transfer' | 'Store Credit / Account' | 'Split Payment';
+  paymentMethod: PaymentMethod;
+  // For Cash + Transfer split — manually entered by cashier
+  cashAmount?: number;
+  transferAmount?: number;
+  paymentNote?: string; // mini report, e.g. "Over-transfer N2,000 given as cash change"
   priceType: PriceType;
   customerId?: string;
   customerName?: string;

@@ -47,6 +47,7 @@ import { ThermalReceiptModal } from './components/ThermalReceiptModal';
 import { LoginModal } from './components/LoginModal';
 import { DeveloperModal } from './components/DeveloperModal';
 import { LicenseAgreement } from './components/LicenseAgreement';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { can } from './utils/permissions';
 
 function MainAppContent() {
@@ -100,7 +101,7 @@ function MainAppContent() {
   }, [showToast]);
 
   // Sync back to storage on updates
-  const handleCompleteSale = (newSale: SaleRecord) => {
+  const handleCompleteSale = (newSale: SaleRecord, opts?: { saveOnly?: boolean }) => {
     let updatedSales = [newSale, ...sales];
     setSales(updatedSales);
     saveSales(updatedSales);
@@ -122,11 +123,9 @@ function MainAppContent() {
       let updatedCustomers = customers.map((cust) => {
         if (cust.id === newSale.customerId) {
           let newBalance = cust.balance + newSale.balanceDue;
-          let newPoints = cust.points + newSale.pointsEarned;
           return {
             ...cust,
             balance: newBalance,
-            points: newPoints,
           };
         }
         return cust;
@@ -135,6 +134,10 @@ function MainAppContent() {
       saveCustomers(updatedCustomers);
     }
 
+    if (opts?.saveOnly) {
+      // Save only — do not auto-open print modal. Sale is in Sales Records for later PDF/PNG export or reprint.
+      return;
+    }
     setActiveReceiptSale(newSale);
     setIsReceiptModalOpen(true);
   };
@@ -354,6 +357,16 @@ function MainAppContent() {
             setCategories(cats);
             saveCategories(cats);
           }}
+          onDataReset={() => {
+            // Reload every data slice from storage so the whole UI reflects a
+            // freshly-reset database immediately (POS grid, sales, reports,
+            // customer ledger, categories and the header today-total).
+            setProducts(loadProducts());
+            setSales(loadSales());
+            setCustomers(loadCustomers());
+            setExpenditures(loadExpenditures());
+            setCategories(loadCategories());
+          }}
         />
       )}
 
@@ -430,17 +443,28 @@ export default function App() {
     );
   }
 
-  if (!isSetupDone) {
+  if (!isSetupDone || loadUsers().length === 0) {
+    // Show setup when the flag is missing OR when there are no user accounts
+    // at all. The second condition is a safety net for databases left broken
+    // by older builds (admin_setup_done=true but the users write never landed)
+    // — without it the user would be stuck at a login screen with no account
+    // to sign in with ("user admin not found"). Completing setup now persists
+    // the admin durably (writes are flushed before leaving the wizard), so the
+    // app will never re-run setup again after a successful first configuration.
     return (
       <ToastProvider>
-        <FirstTimeAdminSetup onSetupComplete={() => setIsSetupDone(true)} />
+        <ErrorBoundary>
+          <FirstTimeAdminSetup onSetupComplete={() => setIsSetupDone(true)} />
+        </ErrorBoundary>
       </ToastProvider>
     );
   }
 
   return (
     <ToastProvider>
-      <MainAppContent />
+      <ErrorBoundary>
+        <MainAppContent />
+      </ErrorBoundary>
     </ToastProvider>
   );
 }

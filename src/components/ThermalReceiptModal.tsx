@@ -132,10 +132,14 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
     text += `PAID (ADVANCE): ₦${sale.advancePayment.toLocaleString()}\n`;
     text += `BALANCE DUE:    ₦${sale.balanceDue.toLocaleString()}\n`;
     text += `PAYMENT METHOD: ${sale.paymentMethod}\n`;
-    text += `LOYALTY POINTS: +${sale.pointsEarned}\n`;
+    if ((sale as any).cashAmount !== undefined || (sale as any).transferAmount !== undefined) {
+      if ((sale as any).cashAmount !== undefined) text += `Cash: ${formatNaira((sale as any).cashAmount)}\n`;
+      if ((sale as any).transferAmount !== undefined) text += `Transfer: ${formatNaira((sale as any).transferAmount)}\n`;
+      if ((sale as any).paymentNote) text += `Note: ${(sale as any).paymentNote}\n`;
+    }
     text += `--------------------------------\n`;
     text += `${config.receiptFooterNote}\n`;
-    text += `Software by Dronebug Tech (+2347035716349)\n`;
+    text += `Software by Dronebug Tech\n`;
     text += `================================\n\n\n`;
     return text;
   };
@@ -215,14 +219,20 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             <span>{sale.items.length} items</span>
           </div>
 
-          {/* Receipt */}
+          {/* Receipt — preview widths match printable area (76mm for 80mm roll, 54mm for 58mm) to prevent RHS clipping seen on Xprinter. Print CSS centres 76mm/54mm on the page with hardware margins. */}
           <div
             id="printable-thermal-receipt"
             data-paper={config.paperWidth}
-            className={`bg-white text-black p-5 rounded-lg shadow-lg border border-gray-200 ${
-              config.paperWidth === '58mm' ? 'w-[240px]' : 'w-[330px]'
+            className={`bg-white text-black rounded-lg shadow-lg border border-gray-200 ${
+              config.paperWidth === '58mm' ? 'w-[54mm] max-w-[54mm]' : 'w-[76mm] max-w-[76mm]'
             }`}
-            style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: '14px', lineHeight: '1.45' }}
+            style={{
+              fontFamily: "'Courier New', Courier, monospace",
+              fontSize: config.paperWidth === '58mm' ? '10.5px' : '11.5px',
+              lineHeight: '1.35',
+              padding: config.paperWidth === '58mm' ? '2mm 1.5mm 2mm 1.5mm' : '2mm 2mm 2mm 2mm',
+              boxSizing: 'border-box',
+            }}
           >
             {/* Store Header */}
             <div className="text-center mb-3 pb-3 border-b-2 border-gray-700">
@@ -261,25 +271,31 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               </div>
             </div>
 
-            {/* Items */}
-            <table className="w-full text-left my-2 border-collapse">
+            {/* Items — fixed layout so 80mm/58mm never clips RHS amounts; Item column wraps, Rate/Amt stay on one line. */}
+            <table className="w-full text-left my-2 border-collapse" style={{ tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '48%' }} />
+                <col style={{ width: '21%' }} />
+                <col style={{ width: '21%' }} />
+              </colgroup>
               <thead>
-                <tr className="border-b-2 border-black text-[12px] font-black uppercase">
-                  <th className="py-1">Qty</th>
-                  <th className="py-1">Item</th>
+                <tr className="border-b-2 border-black text-[11px] font-black uppercase">
+                  <th className="py-1 text-left">Qty</th>
+                  <th className="py-1 text-left">Item</th>
                   <th className="py-1 text-right">Rate</th>
                   <th className="py-1 text-right">Amt</th>
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-gray-400">
+              <tbody className="divide-y divide-gray-400">
                 {sale.items.map((item, idx) => (
-                  <tr key={idx} className="text-[13px]">
-                    <td className="py-1.5 font-black align-top">{item.quantity}</td>
-                    <td className="py-1.5 pr-1 align-top break-words max-w-[110px] font-bold text-gray-900">
+                  <tr key={idx} className="text-[12px]">
+                    <td className="py-1.5 font-black align-top text-left">{item.quantity}</td>
+                    <td className="py-1.5 pr-1 align-top break-words font-bold text-gray-900" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                       {item.product.name}
                     </td>
-                    <td className="py-1.5 text-right align-top text-gray-800 font-semibold">{item.rate.toLocaleString()}</td>
-                    <td className="py-1.5 text-right font-black align-top text-black">
+                    <td className="py-1.5 text-right align-top text-gray-800 font-semibold" style={{ whiteSpace: 'nowrap' }}>{item.rate.toLocaleString()}</td>
+                    <td className="py-1.5 text-right font-black align-top text-black" style={{ whiteSpace: 'nowrap' }}>
                       {item.amount.toLocaleString()}
                     </td>
                   </tr>
@@ -299,19 +315,34 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               </div>
               {sale.balanceDue > 0 && (
                 <div className="flex justify-between font-black text-red-700">
-                  <span>Balance:</span>
+                  <span>Balance Due:</span>
                   <span>{formatNaira(sale.balanceDue)}</span>
+                </div>
+              )}
+              {sale.balanceDue < 0 && (
+                <div className="flex justify-between font-black text-emerald-700">
+                  <span>Change:</span>
+                  <span>{formatNaira(Math.abs(sale.balanceDue))}</span>
                 </div>
               )}
               <div className="flex justify-between text-xs text-gray-800 font-bold pt-1 border-t-2 border-gray-700">
                 <span>Method:</span>
                 <span className="font-black uppercase">{sale.paymentMethod}</span>
               </div>
-              {sale.pointsEarned > 0 && (
-                <div className="flex justify-between text-xs text-emerald-800 font-black bg-emerald-50 px-1 py-0.5 rounded border border-emerald-300">
-                  <span>Points Earned:</span>
-                  <span>+{sale.pointsEarned} pts</span>
+              {(sale as any).cashAmount !== undefined && (
+                <div className="flex justify-between text-xs text-gray-800 font-bold">
+                  <span>Cash:</span>
+                  <span>{formatNaira((sale as any).cashAmount)}</span>
                 </div>
+              )}
+              {(sale as any).transferAmount !== undefined && (
+                <div className="flex justify-between text-xs text-gray-800 font-bold">
+                  <span>Transfer:</span>
+                  <span>{formatNaira((sale as any).transferAmount)}</span>
+                </div>
+              )}
+              {(sale as any).paymentNote && (
+                <div className="text-xs text-gray-800 italic border border-gray-300 rounded px-1 py-0.5">Note: {(sale as any).paymentNote}</div>
               )}
             </div>
 

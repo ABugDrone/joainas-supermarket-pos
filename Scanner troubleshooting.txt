@@ -1,0 +1,25 @@
+Troubleshooting Steps
+
+Step 1: Switch to USB HID (Keyboard Emulation) Mode
+To type directly into text fields or Notepad without specialized software, the scanner must operate in USB HID Mode.
+
+Open the user manual or quick-start sheet that came with your IssyzonePOS device.
+
+Scan the barcode labeled "Restore Factory Defaults" or "Reset".
+
+Scan the barcode labeled "USB HID Mode" or "USB Keyboard Mode".
+
+Unplug the scanner, wait 5 seconds, plug it back in, and try scanning into Notepad.
+
+Step 2: Inspect Device Manager on the Target PC
+
+Press Win + X and open Device Manager.
+
+Unplug and replug the scanner while watching the list.
+
+If it appears under "Ports (COM & LPT)": It is operating in Serial Mode. You need to scan the USB HID barcode or install the scanner's official virtual COM drivers.
+
+If it appears under "Keyboards" or "Human Interface Devices": Ensure there are no yellow error exclamation marks (!).
+
+Step 3: Test Direct Rear USB Ports
+Front-panel USB ports or unpowered USB hubs can sometimes fail to negotiate power properly with scanners. Plug the scanner directly into one of the rear USB ports on the PC motherboard.

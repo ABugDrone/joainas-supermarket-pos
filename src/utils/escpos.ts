@@ -86,8 +86,11 @@ function naira(n: number): string {
 }
 
 // Build the full ESC/POS byte stream for a receipt.
+// Use a slightly narrower character width than the paper's max to leave a
+// hardware margin on Xprinter (≈2-3mm each side), so the rightmost digit
+// of RATE/AMT is never hidden (see photo: 25,000 clipped to 25,00).
 export function buildEscPos(sale: SaleRecord, config: ThermalPrinterConfig): Uint8Array {
-  const width = config.paperWidth === '58mm' ? 32 : 48;
+  const width = config.paperWidth === '58mm' ? 30 : 45;
   const out: number[] = [];
 
   out.push(...INIT, ...densityCommand(config.printDensity));
@@ -159,16 +162,22 @@ export function buildEscPos(sale: SaleRecord, config: ThermalPrinterConfig): Uin
   out.push(...BOLD_ON);
   out.push(...encodeLine(`Paid: ${naira(sale.advancePayment)}`));
   if (sale.balanceDue > 0) {
-    out.push(...encodeLine(`Balance: ${naira(sale.balanceDue)}`));
+    out.push(...encodeLine(`Balance Due: ${naira(sale.balanceDue)}`));
+  } else if (sale.balanceDue < 0) {
+    out.push(...encodeLine(`Change: ${naira(Math.abs(sale.balanceDue))}`));
   }
   out.push(...BOLD_OFF);
 
   out.push(...encodeLine(divider('-', width)));
   out.push(...encodeLine(`Method: ${sale.paymentMethod.toUpperCase()}`));
-  if (sale.pointsEarned > 0) {
-    out.push(...BOLD_ON);
-    out.push(...encodeLine(`Points Earned: +${sale.pointsEarned}`));
-    out.push(...BOLD_OFF);
+  if ((sale as any).cashAmount !== undefined) {
+    out.push(...encodeLine(`Cash: ${naira((sale as any).cashAmount)}`));
+  }
+  if ((sale as any).transferAmount !== undefined) {
+    out.push(...encodeLine(`Transfer: ${naira((sale as any).transferAmount)}`));
+  }
+  if ((sale as any).paymentNote) {
+    out.push(...encodeLine(`Note: ${(sale as any).paymentNote}`));
   }
 
   // Footer.
@@ -177,7 +186,7 @@ export function buildEscPos(sale: SaleRecord, config: ThermalPrinterConfig): Uin
   if (config.receiptFooterNote) {
     out.push(...BOLD_ON, ...encodeLine(centerLine(config.receiptFooterNote, width)), ...BOLD_OFF);
   }
-  out.push(...encodeLine('Software by Dronebug Tech (+2347035716349)'));
+  out.push(...encodeLine('Software by Dronebug Tech'));
 
   out.push(...FEED_3, ...CUT);
 

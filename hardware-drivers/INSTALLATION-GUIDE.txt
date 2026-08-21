@@ -108,6 +108,45 @@ TROUBLESHOOTING:
     search input field is focused (click on it or press the scan button).
   - If the scanner is not recognized, try a different USB port.
 
+SCANNER WORKS ON ONE PC BUT NOT ANOTHER (beeps / flashes but no typing):
+
+  The scanner "types" like a keyboard, so it needs three things to be true
+  on the target PC:
+
+  1. THE APP WINDOW MUST BE FOCUSED
+     Click anywhere on the Joainas POS window first, THEN scan. The scanner
+     sends keystrokes to whichever window Windows has active. If you scan
+     while another window is on top, the numbers go there instead.
+
+  2. THE SCANNER MUST BE RECOGNIZED AS A KEYBOARD
+     Open Device Manager (press Win+X, then "Device Manager"), expand
+     "Keyboards". The scanner should appear as a keyboard / HID device.
+     If there is a yellow warning icon, Windows could not finish installing
+     the device driver (common on PCs with a bad license or no internet,
+     because Windows Update cannot fetch drivers). Fix by:
+       - Unplugging and replugging the scanner into a different USB port.
+       - Plugging directly into the PC (not a hub/dock).
+       - Rebooting the PC once so Windows finishes pending device setup.
+     The scanner needs NO manual driver download.
+
+  3. THE WINDOWS KEYBOARD LAYOUT MUST BE ENGLISH (US)
+     Press Win+Space and set the keyboard layout to "English (United
+     States)". If a non-English layout is active, scanned digits can be
+     typed as letters/symbols and will never match product barcodes.
+
+  IN-APP LIVE TEST (fastest way to confirm):
+  Open the POS app -> Hardware Config (F7) -> Barcode Generator tab ->
+  expand "How to Connect Your Scanner" -> the Live Scanner Test box.
+  Keep the app focused and scan any barcode. If the code appears in the
+  test box, the scanner works and you can scan directly in Sell Service.
+
+  QUICK CHECKLIST:
+    [ ] POS app window is active/focused when scanning
+    [ ] Scanner visible under Device Manager -> Keyboards (no warning icon)
+    [ ] Keyboard layout set to English (US)
+    [ ] Scanner plugged directly into the PC (different USB port)
+    [ ] PC rebooted after first plug-in
+
 ================================================================================
   QUICK REFERENCE - JOAINAS POS APP HARDWARE SECTION
 ================================================================================
@@ -141,7 +180,6 @@ In the Joainas POS desktop app:
   For technical support, contact:
   Dronebug Technologies & Services
   Email: dronebugtechnologies@gmail.com
-  Phone: +2347035716349
 
   For Xprinter hardware issues, refer to the printer manual or visit:
   https://www.xprintertech.com/support
