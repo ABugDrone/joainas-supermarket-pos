@@ -4,6 +4,7 @@ import { Customer, SaleRecord, UserRole, User, CustomerAccountType } from '../ty
 import { formatNaira, recordAuditLog } from '../utils/storage';
 import { can } from '../utils/permissions';
 import { useToast } from './Toast';
+import { NumberInput } from './NumberInput';
 
 interface CustomerModuleProps {
   customers: Customer[];
@@ -410,12 +411,12 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
                 <label className="block font-bold text-slate-300 mb-1">
                   Payment Amount Received (₦):
                 </label>
-                <input
-                  type="number"
-                  min="1"
+                <NumberInput
+                  min={1}
                   required
+                  placeholder="0"
                   value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
+                  onValueChange={(n) => setPaymentAmount(n)}
                   className="w-full rounded border border-[#30363d] px-3 py-2 bg-[#0d1117] font-black text-sm text-cyan-400 outline-none focus:border-cyan-500"
                 />
               </div>

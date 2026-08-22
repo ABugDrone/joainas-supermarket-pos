@@ -4,6 +4,7 @@ import { Product, Customer, CartItem, SaleRecord, ThermalPrinterConfig, UserRole
 import { formatNaira, playPOSBeep, recordAuditLog } from '../utils/storage';
 import { useToast } from './Toast';
 import { CartPreviewModal } from './CartPreviewModal';
+import { NumberInput } from './NumberInput';
 
 interface POSModuleProps {
   products: Product[];
@@ -728,23 +729,21 @@ export const POSModule: React.FC<POSModuleProps> = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Cash Paid (₦)</label>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={0}
-                        value={cashAmount}
-                        onChange={(e) => setCashAmount(Math.max(0, Number(e.target.value) || 0))}
                         placeholder="0"
+                        value={cashAmount}
+                        onValueChange={(n) => setCashAmount(Math.max(0, n))}
                         className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-sm font-bold outline-none focus:border-emerald-500"
                       />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Transfer Paid (₦)</label>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={0}
-                        value={transferAmount}
-                        onChange={(e) => setTransferAmount(Math.max(0, Number(e.target.value) || 0))}
                         placeholder="0"
+                        value={transferAmount}
+                        onValueChange={(n) => setTransferAmount(Math.max(0, n))}
                         className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-sm font-bold outline-none focus:border-emerald-500"
                       />
                     </div>

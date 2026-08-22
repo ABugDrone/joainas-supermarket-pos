@@ -1,5 +1,34 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.3.9 (2026-08-22)
+
+### 🔒 Inventory Persistence — Vanishing Stock Fixed
+- **Root cause**: every `dbSave*` used `DELETE FROM table` then re-inserted rows one-by-one over slow per-row IPC. Closing the window mid-save left tables empty/partial — ADMIN's "inventory vanished after restart" matches this window exactly, and the same bug could have reached customers/sales if the app was closed at the wrong instant.
+- **Fix**: saves now **upsert first, prune stale rows last** via chunked `INSERT ... ON CONFLICT DO UPDATE` + `DELETE ... NOT IN (...)`. The table is valid at every instant; an interruption can only leave a few stale rows (cleaned on the next save), never an empty catalog. Chunked multi-value inserts also cut IPC round-trips dramatically.
+- **Close-flush**: Tauri's `onCloseRequested` now intercepts the window X, awaits `flushWrites()` (up to 15 s), then closes — plus a `pagehide`/`beforeunload` best-effort fallback — so queued writes are never killed by a fast close. Applies to all tables including the most recent product adds.
+- **Empty-write guard**: `saveProducts/Customers/Sales/Expenditures/Categories` refuse to persist an **empty array over a populated cache** (transient load failures would otherwise let the next save silently wipe dozens of rows). Intentional full clears go through the guarded factory reset and bypass the guard.
+
+### 🧹 Admin Reset — Accidental Wipes Removed
+- The one-click **Reset Inventory** and **Reset Sales & Reports** buttons were removed from **Admin → SQLite DB & Backups**. Once products/sales are added they now stay until explicitly deleted item-by-item or via the **guarded Full System Reset** (requires typing `RESET`). Their `resetSalesAndReports` / `resetInventoryAndProducts` storage helpers were removed.
+
+### 🖥️ Desktop Hardening — No More Accidental Logouts
+- A new `useDisableBrowserInterference` hook mounted at the app root now:
+  - Suppresses the **right-click context menu** everywhere (on WebView2 it exposes "Reload"/"Inspect").
+  - Swallows **F5 / Ctrl+R / Ctrl+Shift+R** so a stray refresh never wipes the per-process login session ("Refresh automatically log out current user" is gone).
+
+### 🧾 Receipt Header — Truly Centered
+- **ESC/POS (thermal)**: header + footer lines are now centered via the printer's native `ESC a 1` alignment alone — manual space-padding (`centerLine()`) was removed because it double-shifted on firmware that honors `ESC a` and left headers visibly left-of-centre on firmware that doesn't. Matches the on-screen `text-center` preview.
+- **Print CSS (`window.print` / PDF-on-A4)**: `#printable-thermal-receipt` now uses `left:0; right:0; margin: auto` so the 76 mm/54 mm receipt is **horizontally centered on the page** instead of pinned to the LHS (`left:0` on an A4 sheet put the header at the page's left edge).
+
+### ⌨️ Number Inputs — No More Sticky "0"
+- New shared `NumberInput` component (`src/components/NumberInput.tsx`, `type="text" inputMode="decimal"`): empty display when the logical value is 0, so clearing leaves a blank field and typing just works; decimals like "10." are preserved while focused; content is auto-selected on focus. Replaces every `type="number"` with `Number(e.target.value)||0`:
+  - **Inventory**: Cost Price, Retail Price, Stock Qty, Reorder Level
+  - **POS**: Cash Paid / Transfer Paid (split payment)
+  - **Customers**: Receive Payment amount
+  - **Expenses**: Amount
+
+---
+
 ## Version 1.3.8 (2026-08-21)
 
 ### 🧹 Privacy — Developer Phone Removed

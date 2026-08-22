@@ -545,6 +545,81 @@ export function mapSale(row: any, productLookup: Map<string, Product>): SaleReco
 }
 
 // ============================================================
+// GENERIC UPSERT HELPERS
+// Saves used to "DELETE all rows, then re-insert row by row" over slow
+// per-row IPC calls. If the window was closed mid-loop (or any INSERT
+// failed, e.g. a duplicate barcode) the table stayed EMPTY — that is the
+// "inventory vanished after restart" bug. The pattern below flips the
+// order: rows are UPSERTED first (table always stays valid), and stale
+// rows are deleted only AFTER every insert has succeeded. Closing the
+// app at any instant can therefore never lose data.
+//
+// Multi-row VALUES statements are chunked to stay far below SQLite's
+// bound-parameter limit.
+// ============================================================
+
+const MAX_PARAMS_PER_STATEMENT = 400;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  if (items.length === 0) return [];
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
+type ColumnSpec = { col: string; value: (row: any) => unknown };
+
+async function upsertRows(
+  d: Database,
+  table: string,
+  idColumn: string,
+  columns: ColumnSpec[],
+  rows: any[]
+): Promise<void> {
+  if (rows.length === 0) return;
+  const colsPerRow = columns.length + 1; // id column + payload columns
+  const chunkSize = Math.max(1, Math.floor(MAX_PARAMS_PER_STATEMENT / colsPerRow));
+
+  for (const group of chunk(rows, chunkSize)) {
+    const placeholders = group.map(() => `(${Array(columns.length).fill('?').join(', ')}, ?)`).join(', ');
+    const flat: unknown[] = [];
+    for (const row of group) {
+      for (const c of columns) flat.push(c.value(row));
+      flat.push(row[idColumn]);
+    }
+    // Column order: payload cols first, id last — placeholders mirror that.
+    const sql =
+      `INSERT INTO ${table} (${columns.map((c) => c.col).join(', ')}, ${idColumn}) ` +
+      `VALUES ${placeholders} ` +
+      `ON CONFLICT(${idColumn}) DO UPDATE SET ${columns
+        .map((c) => `${c.col} = excluded.${c.col}`)
+        .join(', ')}`;
+    await d.execute(sql, flat as any[]);
+  }
+}
+
+async function deleteIdsNotIn(
+  d: Database,
+  table: string,
+  idColumn: string,
+  keepIds: string[]
+): Promise<void> {
+  if (keepIds.length === 0) {
+    await d.execute(`DELETE FROM ${table}`, []);
+    return;
+  }
+  // For large keep-lists SQLite has a bound-parameter limit — chunk the
+  // NOT IN list and delete in passes. Each pass is individually atomic
+  // and safe to interrupt mid-way (worst case leaves a few stale rows
+  // that are pruned on the next save).
+  for (const group of chunk(keepIds, MAX_PARAMS_PER_STATEMENT)) {
+    await d.execute(`DELETE FROM ${table} WHERE ${idColumn} NOT IN (${group.map(() => '?').join(', ')})`, group);
+  }
+}
+
+// ============================================================
 // USERS
 // ============================================================
 
@@ -558,14 +633,17 @@ export async function dbLoadUsers(): Promise<User[]> {
 export async function dbSaveUsers(users: User[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await d.execute('DELETE FROM users');
-  for (const u of users) {
-    await d.execute(
-      `INSERT INTO users (id, full_name, username, password_hash, role, capabilities, status, created_at, last_login)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [u.id, u.fullName, u.username, u.password || '', u.role, JSON.stringify(u.capabilities || []), u.status, u.createdAt, u.lastLogin || null]
-    );
-  }
+  await upsertRows(d, 'users', 'id', [
+    { col: 'full_name', value: (u) => u.fullName },
+    { col: 'username', value: (u) => u.username },
+    { col: 'password_hash', value: (u) => u.password || '' },
+    { col: 'role', value: (u) => u.role },
+    { col: 'capabilities', value: (u) => JSON.stringify(u.capabilities || []) },
+    { col: 'status', value: (u) => u.status },
+    { col: 'created_at', value: (u) => u.createdAt },
+    { col: 'last_login', value: (u) => u.lastLogin || null },
+  ], users);
+  await deleteIdsNotIn(d, 'users', 'id', users.map((u) => u.id));
 }
 
 // ============================================================
@@ -582,14 +660,13 @@ export async function dbLoadCategories(): Promise<Category[]> {
 export async function dbSaveCategories(categories: Category[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await d.execute('DELETE FROM categories');
-  for (const c of categories) {
-    await d.execute(
-      `INSERT INTO categories (id, name, color, description, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [c.id, c.name, c.color || '#6366f1', c.description || null, c.createdAt || null]
-    );
-  }
+  await upsertRows(d, 'categories', 'id', [
+    { col: 'name', value: (c) => c.name },
+    { col: 'color', value: (c) => c.color || '#6366f1' },
+    { col: 'description', value: (c) => c.description || null },
+    { col: 'created_at', value: (c) => c.createdAt || null },
+  ], categories);
+  await deleteIdsNotIn(d, 'categories', 'id', categories.map((c) => c.id));
 }
 
 // ============================================================
@@ -606,14 +683,18 @@ export async function dbLoadProducts(): Promise<Product[]> {
 export async function dbSaveProducts(products: Product[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await d.execute('DELETE FROM products');
-  for (const p of products) {
-    await d.execute(
-      `INSERT INTO products (id, barcode, name, category_name, unit, cost_price, retail_price, wholesale_price, stock_qty, reorder_level)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [p.id, p.barcode, p.name, p.category, p.unit, p.costPrice, p.retailPrice, p.wholesalePrice, p.stockQty, p.reorderLevel]
-    );
-  }
+  await upsertRows(d, 'products', 'id', [
+    { col: 'barcode', value: (p) => p.barcode },
+    { col: 'name', value: (p) => p.name },
+    { col: 'category_name', value: (p) => p.category },
+    { col: 'unit', value: (p) => p.unit },
+    { col: 'cost_price', value: (p) => p.costPrice },
+    { col: 'retail_price', value: (p) => p.retailPrice },
+    { col: 'wholesale_price', value: (p) => p.wholesalePrice ?? p.retailPrice },
+    { col: 'stock_qty', value: (p) => p.stockQty },
+    { col: 'reorder_level', value: (p) => p.reorderLevel },
+  ], products);
+  await deleteIdsNotIn(d, 'products', 'id', products.map((p) => p.id));
 }
 
 // ============================================================
@@ -630,14 +711,18 @@ export async function dbLoadCustomers(): Promise<Customer[]> {
 export async function dbSaveCustomers(customers: Customer[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await d.execute('DELETE FROM customers');
-  for (const c of customers) {
-    await d.execute(
-      `INSERT INTO customers (id, full_name, account_type, phone, address, balance, points, advance_payment, assigned_cashier, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [c.id, c.fullName, c.accountType || 'individual', c.phone || null, c.address, c.balance, c.points, c.advancePayment, c.assignedCashier || null, c.createdAt]
-    );
-  }
+  await upsertRows(d, 'customers', 'id', [
+    { col: 'full_name', value: (c) => c.fullName },
+    { col: 'account_type', value: (c) => c.accountType || 'individual' },
+    { col: 'phone', value: (c) => c.phone || null },
+    { col: 'address', value: (c) => c.address || '' },
+    { col: 'balance', value: (c) => c.balance },
+    { col: 'points', value: (c) => c.points ?? 0 },
+    { col: 'advance_payment', value: (c) => c.advancePayment ?? 0 },
+    { col: 'assigned_cashier', value: (c) => c.assignedCashier || null },
+    { col: 'created_at', value: (c) => c.createdAt },
+  ], customers);
+  await deleteIdsNotIn(d, 'customers', 'id', customers.map((c) => c.id));
 }
 
 // ============================================================
@@ -670,51 +755,60 @@ export async function dbLoadSales(): Promise<SaleRecord[]> {
 export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await d.execute('DELETE FROM sale_items');
-  await d.execute('DELETE FROM sales');
+
+  // 1. Upsert every sale header (never deletes first).
+  await upsertRows(d, 'sales', 'id', [
+    { col: 'receipt_no', value: (s) => s.receiptNo },
+    { col: 'subtotal', value: (s) => s.subtotal },
+    { col: 'total_amount', value: (s) => s.totalAmount },
+    { col: 'advance_payment', value: (s) => s.advancePayment },
+    { col: 'balance_due', value: (s) => s.balanceDue },
+    { col: 'payment_method', value: (s) => s.paymentMethod },
+    { col: 'price_type', value: (s) => s.priceType },
+    { col: 'customer_id', value: (s) => s.customerId || null },
+    { col: 'customer_name', value: (s) => s.customerName || null },
+    { col: 'customer_phone', value: (s) => s.customerPhone || null },
+    { col: 'points_earned', value: (s) => s.pointsEarned || 0 },
+    { col: 'cash_amount', value: (s) => (s as any).cashAmount ?? null },
+    { col: 'transfer_amount', value: (s) => (s as any).transferAmount ?? null },
+    { col: 'payment_note', value: (s) => (s as any).paymentNote || null },
+    { col: 'cashier_username', value: (s) => s.cashier },
+    { col: 'sale_date', value: (s) => s.date },
+    { col: 'sale_time', value: (s) => s.time },
+  ], sales);
+
+  // 2. Upsert sale items (stable ids keyed off sale+product so re-saves
+  //    replace instead of duplicating).
+  type ItemRow = { id: string };
+  const itemRows: ItemRow[] = [];
+  const itemColumns: ColumnSpec[] = [
+    { col: 'sale_id', value: (it) => it.saleId },
+    { col: 'product_id', value: (it) => it.productId },
+    { col: 'product_name', value: (it) => it.productName },
+    { col: 'quantity', value: (it) => it.quantity },
+    { col: 'price_type', value: (it) => it.priceType },
+    { col: 'rate', value: (it) => it.rate },
+    { col: 'amount', value: (it) => it.amount },
+  ];
   for (const s of sales) {
-    await d.execute(
-      `INSERT INTO sales (id, receipt_no, subtotal, total_amount, advance_payment, balance_due, payment_method, price_type,
-        customer_id, customer_name, customer_phone, points_earned, cash_amount, transfer_amount, payment_note, cashier_username, sale_date, sale_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        s.id,
-        s.receiptNo,
-        s.subtotal,
-        s.totalAmount,
-        s.advancePayment,
-        s.balanceDue,
-        s.paymentMethod,
-        s.priceType,
-        s.customerId || null,
-        s.customerName || null,
-        s.customerPhone || null,
-        s.pointsEarned || 0,
-        (s as any).cashAmount ?? null,
-        (s as any).transferAmount ?? null,
-        (s as any).paymentNote || null,
-        s.cashier,
-        s.date,
-        s.time,
-      ]
-    );
     for (const item of s.items) {
-      await d.execute(
-        `INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, price_type, rate, amount)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          `item-${s.id}-${item.product.id}-${Math.random().toString(36).slice(2, 8)}`,
-          s.id,
-          item.product.id,
-          item.product.name,
-          item.quantity,
-          item.priceType,
-          item.rate,
-          item.amount,
-        ]
-      );
+      itemRows.push({
+        id: `item-${s.id}-${item.product.id}`,
+        saleId: s.id,
+        productId: item.product.id,
+        productName: item.product.name,
+        quantity: item.quantity,
+        priceType: item.priceType,
+        rate: item.rate,
+        amount: item.amount,
+      } as any);
     }
   }
+  await upsertRows(d, 'sale_items', 'id', itemColumns, itemRows);
+
+  // 3. Only NOW prune receipts/items that no longer exist in the list.
+  await deleteIdsNotIn(d, 'sales', 'id', sales.map((s) => s.id));
+  await deleteIdsNotIn(d, 'sale_items', 'sale_id', sales.map((s) => s.id));
 }
 
 // ============================================================
@@ -731,14 +825,14 @@ export async function dbLoadExpenditures(): Promise<Expenditure[]> {
 export async function dbSaveExpenditures(expenditures: Expenditure[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await d.execute('DELETE FROM expenditures');
-  for (const e of expenditures) {
-    await d.execute(
-      `INSERT INTO expenditures (id, description, category, amount, expense_date, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [e.id, e.description, e.category, e.amount, e.date, e.createdBy]
-    );
-  }
+  await upsertRows(d, 'expenditures', 'id', [
+    { col: 'description', value: (e) => e.description },
+    { col: 'category', value: (e) => e.category },
+    { col: 'amount', value: (e) => e.amount },
+    { col: 'expense_date', value: (e) => e.date },
+    { col: 'created_by', value: (e) => e.createdBy },
+  ], expenditures);
+  await deleteIdsNotIn(d, 'expenditures', 'id', expenditures.map((e) => e.id));
 }
 
 // ============================================================

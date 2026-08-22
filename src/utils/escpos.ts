@@ -96,23 +96,29 @@ export function buildEscPos(sale: SaleRecord, config: ThermalPrinterConfig): Uin
   out.push(...INIT, ...densityCommand(config.printDensity));
   out.push(...ALIGN_CENTER);
 
-  // Store header — always starts at the very top of the paper.
+  // Store header — centered via the printer's native ALIGN_CENTER command
+  // (no manual space-padding). Manual padding combined with ALIGN_CENTER
+  // double-shifted the text to the right on some firmware, and on printers
+  // that ignore alignment it still left the header visibly left-of-centre
+  // because the padded width (45) rarely matched the real printable width.
+  // Letting the firmware do the centering is the most reliable approach
+  // and matches the on-screen preview which uses text-center.
   if (config.showLogo) {
     out.push(...SIZE_DOUBLE_H, ...BOLD_ON);
-    out.push(...encodeLine(centerLine(config.storeName, width)));
+    out.push(...encodeLine(config.storeName));
     out.push(...SIZE_NORMAL, ...BOLD_OFF);
   } else {
-    out.push(...BOLD_ON, ...encodeLine(centerLine(config.storeName, width)), ...BOLD_OFF);
+    out.push(...BOLD_ON, ...encodeLine(config.storeName), ...BOLD_OFF);
   }
 
   if (config.tagline) {
-    out.push(...encodeLine(centerLine(config.tagline, width)));
+    out.push(...encodeLine(config.tagline));
   }
   if (config.address) {
-    out.push(...encodeLine(centerLine(config.address, width)));
+    out.push(...encodeLine(config.address));
   }
   if (config.phone) {
-    out.push(...encodeLine(centerLine(`Tel: ${config.phone}`, width)));
+    out.push(...encodeLine(`Tel: ${config.phone}`));
   }
 
   out.push(...ALIGN_LEFT);
@@ -180,11 +186,11 @@ export function buildEscPos(sale: SaleRecord, config: ThermalPrinterConfig): Uin
     out.push(...encodeLine(`Note: ${(sale as any).paymentNote}`));
   }
 
-  // Footer.
+  // Footer — also natively centered (see header note).
   out.push(...encodeLine(divider('-', width)));
   out.push(...ALIGN_CENTER);
   if (config.receiptFooterNote) {
-    out.push(...BOLD_ON, ...encodeLine(centerLine(config.receiptFooterNote, width)), ...BOLD_OFF);
+    out.push(...BOLD_ON, ...encodeLine(config.receiptFooterNote), ...BOLD_OFF);
   }
   out.push(...encodeLine('Software by Dronebug Tech'));
 

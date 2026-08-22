@@ -157,9 +157,10 @@ export async function initStorage(): Promise<void> {
     // first-time setup wizard. If the SQLite read fails for any reason the
     // app still lands on the login gate instead of the setup screen.
     cacheAdminSetupDone = setupDone === 'true' || lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false);
-    // No persisted active-user session: signing out or closing the app
-    // always requires a fresh login (per-process session).
-    cacheActiveUser = null;
+    // Restore any still-valid session from sessionStorage — this is what
+    // lets a browser refresh keep the user logged in while a full close
+    // clears it (sessionStorage is per-tab and dies with the window).
+    cacheActiveUser = readSessionUser();
 
     // Seed default category colors on a fresh database so the POS grid has
     // color-coded classification from the first launch. Existing data is kept.
@@ -176,7 +177,7 @@ export async function initStorage(): Promise<void> {
     cacheCategories = lsGet<Category[]>(LKEYS.CATEGORIES, []);
     cachePrinterConfig = lsGet<ThermalPrinterConfig | null>(LKEYS.PRINTER_CONFIG, null);
     cacheAdminSetupDone = lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false);
-    cacheActiveUser = lsGet<User | null>(LKEYS.ACTIVE_USER, null);
+    cacheActiveUser = readSessionUser() ?? lsGet<User | null>(LKEYS.ACTIVE_USER, null);
 
     if (cacheCategories.length === 0) {
       saveCategories(DEFAULT_CATEGORIES);
@@ -193,6 +194,16 @@ export const isStorageInitialized = (): boolean => initialized;
 export const loadProducts = (): Product[] => cacheProducts;
 
 export const saveProducts = (products: Product[]) => {
+  // Guard: transient load failures that left the cache empty (or stale)
+  // must never let an empty write silently wipe a populated catalog.
+  // Intentional full clears go through resetAllSystemData() which calls
+  // the DB layer directly and bypasses this guard. The single-item
+  // delete case (1 → 0) is allowed so the last product can still be
+  // removed; wiping dozens of rows by accident is blocked.
+  if (products.length === 0 && cacheProducts.length > 1) {
+    console.warn('Blocked accidental empty product save — keeping existing catalog.');
+    return;
+  }
   cacheProducts = products;
   if (isTauriRuntime()) {
     enqueueWrite(() => dbSaveProducts(products));
@@ -208,6 +219,10 @@ export const saveProducts = (products: Product[]) => {
 export const loadCustomers = (): Customer[] => cacheCustomers;
 
 export const saveCustomers = (customers: Customer[]) => {
+  if (customers.length === 0 && cacheCustomers.length > 1) {
+    console.warn('Blocked accidental empty customer save.');
+    return;
+  }
   cacheCustomers = customers;
   if (isTauriRuntime()) {
     enqueueWrite(() => dbSaveCustomers(customers));
@@ -223,6 +238,10 @@ export const saveCustomers = (customers: Customer[]) => {
 export const loadSales = (): SaleRecord[] => cacheSales;
 
 export const saveSales = (sales: SaleRecord[]) => {
+  if (sales.length === 0 && cacheSales.length > 1) {
+    console.warn('Blocked accidental empty sales save.');
+    return;
+  }
   cacheSales = sales;
   if (isTauriRuntime()) {
     enqueueWrite(() => dbSaveSales(sales));
@@ -238,6 +257,10 @@ export const saveSales = (sales: SaleRecord[]) => {
 export const loadExpenditures = (): Expenditure[] => cacheExpenditures;
 
 export const saveExpenditures = (expenditures: Expenditure[]) => {
+  if (expenditures.length === 0 && cacheExpenditures.length > 1) {
+    console.warn('Blocked accidental empty expenditure save.');
+    return;
+  }
   cacheExpenditures = expenditures;
   if (isTauriRuntime()) {
     enqueueWrite(() => dbSaveExpenditures(expenditures));
@@ -269,6 +292,10 @@ export const savePrinterConfig = (config: ThermalPrinterConfig) => {
 export const loadUsers = (): User[] => cacheUsers;
 
 export const saveUsers = (users: User[]) => {
+  if (users.length === 0 && cacheUsers.length > 0) {
+    console.warn('Blocked accidental empty user save — accounts would be lost.');
+    return;
+  }
   cacheUsers = users;
   if (isTauriRuntime()) {
     enqueueWrite(() => dbSaveUsers(users));
@@ -291,6 +318,49 @@ export const saveAuditLogs = (logs: AuditLog[]) => {
     lsSet(LKEYS.AUDIT_LOGS, logs);
   }
 };
+
+// ============================================================
+// WINDOW-CLOSE FLUSH — prevents data loss when the user
+// closes the app before queued SQLite writes have finished.
+// Tauri intercepts the window close, flushes every pending write,
+// then allows the close to proceed. A pagehide fallback covers
+// browser quits and hard kills.
+// ============================================================
+
+let closeFlushRegistered = false;
+
+export async function registerCloseFlush(): Promise<void> {
+  if (closeFlushRegistered) return;
+  closeFlushRegistered = true;
+
+  // Best-effort flush on pagehide / beforeunload (browser + WebView fallback).
+  const bestEffortFlush = () => {
+    void flushWrites(3000);
+  };
+  window.addEventListener('pagehide', bestEffortFlush);
+  window.addEventListener('beforeunload', bestEffortFlush);
+
+  if (!isTauriRuntime()) return;
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const win = getCurrentWindow();
+    let allowClose = false;
+    await win.onCloseRequested(async (event) => {
+      if (allowClose) return;
+      event.preventDefault();
+      try {
+        await flushWrites(15000);
+      } catch (e) {
+        console.error('Flush on close failed', e);
+      } finally {
+        allowClose = true;
+        await win.close();
+      }
+    });
+  } catch (e) {
+    console.error('Failed to register Tauri close handler', e);
+  }
+}
 
 export const recordAuditLog = (
   username: string,
@@ -354,15 +424,37 @@ export const setLicenseAccepted = (accepted: boolean = true) => {
 };
 
 // ============================================================
-// ACTIVE USER SESSION
+// ACTIVE USER SESSION — survives refresh, cleared only on close
 // ============================================================
+// Browser preview: the user asked that "refresh should not lead to log
+// out only close of app can automatically log out".  The old code kept
+// the active user only in memory, so any reload (F5 / browser refresh
+// button) wiped the session and forced a re-login.  We now mirror the
+// session into sessionStorage — it survives reloads/re-renders but is
+// automatically cleared when the tab/window (or Tauri WebView) is closed,
+// which is exactly the requested semantics.  Tauri desktop also gets this
+// behaviour; closing the app destroys the WebView and its sessionStorage.
 
-export const getActiveUser = (): User | null => cacheActiveUser;
+const readSessionUser = (): User | null => {
+  try {
+    const raw = sessionStorage.getItem(LKEYS.ACTIVE_USER);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+};
 
-// Per-process session: the signed-in user is kept only in memory. Signing
-// out or closing the app clears it, so every launch requires a fresh login.
+export const getActiveUser = (): User | null => cacheActiveUser ?? readSessionUser();
+
 export const setActiveUserStorage = (user: User | null) => {
   cacheActiveUser = user;
+  try {
+    if (user) {
+      sessionStorage.setItem(LKEYS.ACTIVE_USER, JSON.stringify(user));
+    } else {
+      sessionStorage.removeItem(LKEYS.ACTIVE_USER);
+    }
+  } catch {}
 };
 
 // ============================================================
@@ -372,6 +464,10 @@ export const setActiveUserStorage = (user: User | null) => {
 export const loadCategories = (): Category[] => cacheCategories;
 
 export const saveCategories = (categories: Category[]) => {
+  if (categories.length === 0 && cacheCategories.length > 1) {
+    console.warn('Blocked accidental empty category save.');
+    return;
+  }
   cacheCategories = categories;
   if (isTauriRuntime()) {
     enqueueWrite(() => dbSaveCategories(categories));
@@ -396,49 +492,6 @@ export const saveCategories = (categories: Category[]) => {
 const enqueueAndFlush = async (task: () => Promise<void>): Promise<void> => {
   enqueueWrite(task);
   await flushWrites();
-};
-
-// Clears all sales, sale items and expenditures, and resets every customer's
-// balance / points / advance payment to zero. Inventory and users are kept.
-// Returns a promise that resolves once the changes are durable on disk.
-export const resetSalesAndReports = async (): Promise<void> => {
-  const zeroedCustomers = cacheCustomers.map((c) => ({
-    ...c,
-    balance: 0,
-    points: 0,
-    advancePayment: 0,
-  }));
-  cacheSales = [];
-  cacheExpenditures = [];
-  cacheCustomers = zeroedCustomers;
-  if (isTauriRuntime()) {
-    // Run the writes SEQUENTIALLY on the shared connection. Running several
-    // execute() calls at once (Promise.all) on the sqlx pool can trip SQLite's
-    // write-lock with "database is locked", silently discarding the reset.
-    await enqueueAndFlush(async () => {
-      await dbSaveSales([]);
-      await dbSaveExpenditures([]);
-      await dbSaveCustomers(zeroedCustomers);
-    });
-    return;
-  }
-  lsSet(LKEYS.SALES, []);
-  lsSet(LKEYS.EXPENDITURES, []);
-  lsSet(LKEYS.CUSTOMERS, zeroedCustomers);
-};
-
-// Clears all products (and stock-adjustment audit rows). Sales, customers
-// and categories are kept. Returns a promise that resolves once durable.
-export const resetInventoryAndProducts = async (): Promise<void> => {
-  cacheProducts = [];
-  if (isTauriRuntime()) {
-    await enqueueAndFlush(async () => {
-      await dbSaveProducts([]);
-      await dbClearTable('inventory_adjustments');
-    });
-    return;
-  }
-  lsSet(LKEYS.PRODUCTS, []);
 };
 
 // Full factory reset: clears every business table, restores the default

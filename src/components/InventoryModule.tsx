@@ -3,6 +3,7 @@ import { Package, Plus, Search, AlertTriangle, Edit3, Trash2, FolderPlus } from 
 import { Product, UserRole, Category } from '../types';
 import { formatNaira, recordAuditLog, loadCategories, saveCategories } from '../utils/storage';
 import { useToast } from './Toast';
+import { NumberInput } from './NumberInput';
 
 interface InventoryModuleProps {
   products: Product[];
@@ -373,23 +374,22 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 mb-1">Cost Price (₦):</label>
-                  <input
-                    type="number"
-                    required
-                    value={formData.costPrice}
-                    onChange={(e) => setFormData({ ...formData, costPrice: parseFloat(e.target.value) || 0 })}
+                  <label className="block text-slate-300 mb-1">Cost Price (₦) <span className="text-slate-500 font-normal normal-case">(optional)</span>:</label>
+                  <NumberInput
+                    placeholder="0 — leave blank if not set"
+                    value={formData.costPrice ?? 0}
+                    onValueChange={(n) => setFormData({ ...formData, costPrice: n })}
                     className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-slate-300 mb-1">Retail Price (₦):</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     required
-                    value={formData.retailPrice}
-                    onChange={(e) => setFormData({ ...formData, retailPrice: parseFloat(e.target.value) || 0 })}
+                    placeholder="0"
+                    value={formData.retailPrice ?? 0}
+                    onValueChange={(n) => setFormData({ ...formData, retailPrice: n })}
                     className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-cyan-400 font-extrabold outline-none focus:border-cyan-500"
                   />
                 </div>
@@ -414,22 +414,24 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
 
                 <div>
                   <label className="block text-slate-300 mb-1">Stock Quantity:</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     required
-                    value={formData.stockQty}
-                    onChange={(e) => setFormData({ ...formData, stockQty: parseInt(e.target.value) || 0 })}
+                    integer
+                    placeholder="0"
+                    value={formData.stockQty ?? 0}
+                    onValueChange={(n) => setFormData({ ...formData, stockQty: Math.max(0, Math.trunc(n)) })}
                     className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-slate-300 mb-1">Reorder Alert Level:</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     required
-                    value={formData.reorderLevel}
-                    onChange={(e) => setFormData({ ...formData, reorderLevel: parseInt(e.target.value) || 0 })}
+                    integer
+                    placeholder="5"
+                    value={formData.reorderLevel ?? 5}
+                    onValueChange={(n) => setFormData({ ...formData, reorderLevel: Math.max(0, Math.trunc(n)) })}
                     className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500"
                   />
                 </div>

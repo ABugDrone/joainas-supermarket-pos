@@ -21,6 +21,7 @@ import {
   loadPrinterConfig,
   savePrinterConfig,
   isAdminSetupCompleted,
+  getActiveUser,
   setActiveUserStorage,
   loadUsers,
   saveUsers,
@@ -49,6 +50,7 @@ import { DeveloperModal } from './components/DeveloperModal';
 import { LicenseAgreement } from './components/LicenseAgreement';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { can } from './utils/permissions';
+import { useDisableBrowserInterference } from './hooks/useDisableBrowserInterference';
 
 function MainAppContent() {
   const { showToast } = useToast();
@@ -65,10 +67,9 @@ function MainAppContent() {
   const [users, setUsers] = useState<User[]>(() => loadUsers());
   const [categories, setCategories] = useState<Category[]>(() => loadCategories());
 
-  // Current logged in user — always starts as null. Per-process session:
-  // the app never auto-logs-in; a fresh login is required every launch
-  // and after every sign-out.
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // Current logged in user — restored from sessionStorage so a browser
+  // refresh keeps the session (only closing the tab/window clears it).
+  const [currentUser, setCurrentUser] = useState<User | null>(() => getActiveUser());
 
   // Modals state
   const [activeReceiptSale, setActiveReceiptSale] = useState<SaleRecord | null>(null);
@@ -235,14 +236,22 @@ function MainAppContent() {
     showToast('Signed out. Please authenticate to continue.', 'info');
   };
 
+  // Keep React state and sessionStorage in sync — LoginModal already
+  // writes to sessionStorage, but the in-app re-login path (LoginModal
+  // opened from DesktopShell) only called setCurrentUser before.
+  const persistLogin = (user: User) => {
+    setActiveUserStorage(user);
+    setCurrentUser(user);
+  };
+
   // Full-screen login gate: rendered instead of the POS shell whenever the
-  // per-process session has no signed-in user.
+  // session has no signed-in user.
   if (!currentUser) {
     return (
       <LoginModal
         isOpen
         onClose={() => {}}
-        onLoginSuccess={(user) => setCurrentUser(user)}
+        onLoginSuccess={persistLogin}
         fullScreen
       />
     );
@@ -381,7 +390,7 @@ function MainAppContent() {
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
-        onLoginSuccess={(user) => setCurrentUser(user)}
+        onLoginSuccess={persistLogin}
       />
 
       <DeveloperModal
@@ -393,6 +402,8 @@ function MainAppContent() {
 }
 
 export default function App() {
+  useDisableBrowserInterference();
+
   const [isSetupDone, setIsSetupDone] = useState<boolean>(() => isAdminSetupCompleted());
   const [licenseAccepted, setLicenseAcceptedState] = useState<boolean>(() => isLicenseAccepted());
   const [licenseAction, setLicenseAction] = useState<'agree' | 'decline' | null>(null);

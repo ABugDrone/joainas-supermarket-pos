@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-import { initStorage } from './utils/storage.ts';
+import { initStorage, registerCloseFlush } from './utils/storage.ts';
 import {
   getSavedTheme,
   applyThemeToDocument,
@@ -20,6 +20,12 @@ async function bootstrap() {
   } catch (e) {
     console.error('Storage initialization failed — continuing with empty caches.', e);
   }
+
+  // Register a window-close interceptor that flushes every pending SQLite
+  // write before the app is allowed to exit — this is what prevents
+  // "inventory vanished after restart" when the user closes the window
+  // right after adding products (the queued write would otherwise die).
+  void registerCloseFlush();
 
   // Immediately apply saved UI theme & typography settings on script boot
   applyThemeToDocument(getSavedTheme());

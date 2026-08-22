@@ -3,6 +3,7 @@ import { DollarSign, Trash2 } from 'lucide-react';
 import { Expenditure, UserRole } from '../types';
 import { formatNaira, recordAuditLog } from '../utils/storage';
 import { useToast } from './Toast';
+import { NumberInput } from './NumberInput';
 
 interface ExpenseModuleProps {
   expenditures: Expenditure[];
@@ -145,12 +146,12 @@ export const ExpenseModule: React.FC<ExpenseModuleProps> = ({
               <label className="block text-slate-300 mb-1">
                 Amount (₦):
               </label>
-              <input
-                type="number"
-                min="1"
+              <NumberInput
+                min={1}
                 required
-                value={amount || ''}
-                onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
+                placeholder="0"
+                value={amount}
+                onValueChange={(n) => setAmount(n)}
                 className="w-full rounded-lg border border-[#30363d] p-2.5 bg-[#0d1117] text-emerald-400 text-sm font-black outline-none focus:border-cyan-500"
               />
             </div>

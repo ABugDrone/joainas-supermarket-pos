@@ -26,8 +26,6 @@ import {
   writeBackupFile,
   pickBackupFile,
   readBackupFile,
-  resetSalesAndReports,
-  resetInventoryAndProducts,
   resetAllSystemData,
   flushWrites,
 } from '../utils/storage';
@@ -59,7 +57,6 @@ import {
   Code2,
   RotateCcw,
   KeyRound,
-  Package,
 } from 'lucide-react';
 
 interface AdminModuleProps {
@@ -490,7 +487,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     try {
       const backupData = {
         app: 'JOAINAS MART POS SYSTEM',
-        version: '1.3.8',
+        version: '1.3.9',
         timestamp: new Date().toISOString(),
         products: loadProducts(),
         customers: loadCustomers(),
@@ -647,52 +644,6 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     } catch (err) {
       console.error('Failed to restore native backup', err);
       showToast('Error reading backup JSON file!', 'error');
-    }
-  };
-
-  // Reset Sales & Reports — clears test sales, expenditures and customer
-  // balances so financial records start from zero. Keeps inventory & users.
-  const handleResetSales = async () => {
-    if (!confirm('Reset ALL sales records, reports and customer balances?\n\nThis permanently deletes every sale receipt and expense, and sets all customer balances/points/advance payments back to zero. Products and user accounts are kept.\n\nThis CANNOT be undone — make a backup first if unsure.')) return;
-
-    try {
-      // Await the DB write so the cleared tables are durable BEFORE the UI
-      // updates — otherwise the old rows would come straight back on refresh
-      // or re-login.
-      await resetSalesAndReports();
-      recordAuditLog(
-        currentUser,
-        currentUserRole,
-        'Reset Sales & Reports',
-        'All sales records, expenditures and customer balances were reset to zero (admin reset).'
-      );
-      setAuditLogs(loadAuditLogs());
-      onDataReset();
-      showToast('Sales, reports and customer balances have been reset.', 'success');
-    } catch (error) {
-      console.error('Reset Sales & Reports failed', error);
-      showToast('Reset failed — please try again.', 'error');
-    }
-  };
-
-  // Reset Inventory & Products — clears all products and stock adjustments.
-  const handleResetInventory = async () => {
-    if (!confirm('Reset ALL inventory/products?\n\nThis permanently deletes every product and stock adjustment record. Sales history, customers and categories are kept.\n\nThis CANNOT be undone.')) return;
-
-    try {
-      await resetInventoryAndProducts();
-      recordAuditLog(
-        currentUser,
-        currentUserRole,
-        'Reset Inventory & Products',
-        'All products and stock adjustments were cleared (admin reset).'
-      );
-      setAuditLogs(loadAuditLogs());
-      onDataReset();
-      showToast('Inventory and products have been reset.', 'success');
-    } catch (error) {
-      console.error('Reset Inventory & Products failed', error);
-      showToast('Reset failed — please try again.', 'error');
     }
   };
 
@@ -1310,7 +1261,11 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             </div>
           </div>
 
-          {/* Reset System Data Card (Admin-only) */}
+          {/* Danger Zone Card (Admin-only) — single guarded factory reset.
+              Per-store request, the one-click "Reset Inventory" and
+              "Reset Sales & Reports" buttons were REMOVED so inventory and
+              sales can never be wiped by accident: once products/sales are
+              added they stay until a deliberate, typed-confirmation reset. */}
           <div className="bg-[#1a1114] border border-red-900/60 p-6 rounded-2xl shadow-xl space-y-4">
             <div className="flex items-center gap-3 border-b border-red-900/40 pb-4">
               <div className="p-3 bg-red-950 border border-red-800 text-red-400 rounded-xl">
@@ -1318,79 +1273,43 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-white flex items-center gap-2">
-                  Reset System Data
+                  Danger Zone — Full System Reset
                   <span className="text-[9px] bg-red-900/60 text-red-300 px-2 py-0.5 rounded border border-red-700 font-mono">ADMIN ONLY</span>
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Clears dummy/test records so the store can start fresh. User accounts, printer
+                  Inventory and sales records are permanent once added — there is no one-click
+                  reset for them anymore. The ONLY way to clear business data is the full factory
+                  reset below, which requires typing RESET to confirm. User accounts, printer
                   config and the login gate are always preserved.
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 bg-[#0d1117] border border-[#30363d] rounded-xl space-y-2">
-                <div className="flex items-center gap-2 text-red-300 font-extrabold text-xs uppercase tracking-wide">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>Sales & Reports</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Deletes every sale receipt and expense, and resets all customer balances, points
-                  and advance payments to zero. Products & users are kept.
-                </p>
-                <button
-                  onClick={handleResetSales}
-                  className="w-full py-2.5 rounded-xl bg-red-950/60 border border-red-800/60 text-red-300 font-bold text-xs uppercase tracking-wider transition hover:bg-red-900/60 flex items-center justify-center gap-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Reset Sales & Reports
-                </button>
+            <div className="p-4 bg-[#0d1117] border border-red-800/50 rounded-xl space-y-3">
+              <div className="flex items-center gap-2 text-red-400 font-extrabold text-xs uppercase tracking-wide">
+                <RotateCcw className="w-4 h-4" />
+                <span>Full Reset (Factory)</span>
               </div>
-
-              <div className="p-4 bg-[#0d1117] border border-[#30363d] rounded-xl space-y-2">
-                <div className="flex items-center gap-2 text-amber-300 font-extrabold text-xs uppercase tracking-wide">
-                  <Package className="w-4 h-4" />
-                  <span>Inventory</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Deletes every product and stock-adjustment record. Sales history, customers and
-                  categories are kept.
-                </p>
-                <button
-                  onClick={handleResetInventory}
-                  className="w-full py-2.5 rounded-xl bg-amber-950/50 border border-amber-800/60 text-amber-300 font-bold text-xs uppercase tracking-wider transition hover:bg-amber-900/50 flex items-center justify-center gap-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Reset Inventory
-                </button>
-              </div>
-
-              <div className="p-4 bg-[#0d1117] border border-red-800/50 rounded-xl space-y-2">
-                <div className="flex items-center gap-2 text-red-400 font-extrabold text-xs uppercase tracking-wide">
-                  <RotateCcw className="w-4 h-4" />
-                  <span>Full Reset (Factory)</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Wipes ALL business data (products, sales, customers, expenses, audit logs) and
-                  restores default categories. Accounts & login are kept.
-                </p>
-                <button
-                  onClick={() => setIsResetConfirmOpen(true)}
-                  className="w-full py-2.5 rounded-xl bg-red-700 hover:bg-red-600 text-white font-bold text-xs uppercase tracking-wider shadow-lg transition flex items-center justify-center gap-2"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  Full System Reset
-                </button>
-              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Wipes ALL business data (products/inventory, sales, customers, expenses, audit logs)
+                and restores default categories. Accounts &amp; login are kept. Use this only when you
+                truly want to start the store from zero.
+              </p>
+              <button
+                onClick={() => setIsResetConfirmOpen(true)}
+                className="py-2.5 px-6 rounded-xl bg-red-700 hover:bg-red-600 text-white font-bold text-xs uppercase tracking-wider shadow-lg transition flex items-center justify-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Full System Reset
+              </button>
             </div>
 
             <div className="p-3 bg-[#0d1117] border border-[#30363d] rounded-lg text-[10px] text-amber-400/90 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <p>
-                Tip: If you only added dummy inventory/sales to test the software, use
-                "Reset Sales & Reports" and/or "Reset Inventory" to clear them. Use
-                "Full System Reset" to wipe everything and start properly — the app will
-                return to the login screen.
+                Tip: To remove individual items, use Inventory → Delete on each product, or Sales
+                Records for receipts. A complete backup (JSON) is always recommended before any
+                destructive action.
               </p>
             </div>
           </div>
