@@ -36,6 +36,9 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
   const [storeCategories, setStoreCategories] = React.useState<Category[]>(
     () => categoriesProp ?? loadCategories()
   );
+  React.useEffect(() => {
+    if (categoriesProp) setStoreCategories(categoriesProp);
+  }, [categoriesProp]);
   const [newCategoryInput, setNewCategoryInput] = React.useState('');
   const [isAddingCategory, setIsAddingCategory] = React.useState(false);
 

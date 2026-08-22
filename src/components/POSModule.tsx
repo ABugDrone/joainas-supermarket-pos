@@ -243,21 +243,22 @@ export const POSModule: React.FC<POSModuleProps> = ({
       showToast(`${prod.name} is OUT OF STOCK. Add inventory before selling.`, 'error');
       return;
     }
-    // Cap total quantity across the cart at the available stock.
-    const alreadyInCart = cart.find((i) => i.product.id === prod.id)?.quantity || 0;
-    if (alreadyInCart + qty > prod.stockQty) {
-      showToast(`Only ${prod.stockQty} unit(s) of ${prod.name} in stock (${alreadyInCart} already on the bill). Restock inventory to sell more.`, 'warning');
-      return;
-    }
-
     let rate = prod.retailPrice;
     playPOSBeep();
 
+    let didAdd = false;
+    let blockedReason: string | null = null;
     setCart((prev) => {
-      let existingIdx = prev.findIndex((item) => item.product.id === prod.id);
+      const alreadyInCart = prev.find((i) => i.product.id === prod.id)?.quantity || 0;
+      if (alreadyInCart + qty > prod.stockQty) {
+        blockedReason = `Only ${prod.stockQty} unit(s) of ${prod.name} in stock (${alreadyInCart} already on the bill). Restock inventory to sell more.`;
+        return prev;
+      }
+      didAdd = true;
+      const existingIdx = prev.findIndex((item) => item.product.id === prod.id);
       if (existingIdx > -1) {
-        let updated = [...prev];
-        let newQty = updated[existingIdx].quantity + qty;
+        const updated = [...prev];
+        const newQty = updated[existingIdx].quantity + qty;
         updated[existingIdx] = {
           ...updated[existingIdx],
           quantity: newQty,
@@ -277,8 +278,12 @@ export const POSModule: React.FC<POSModuleProps> = ({
         ];
       }
     });
-
-    showToast(`Added ${qty} ${prod.unit} of ${prod.name} to cart.`, 'success');
+    // Defer toasts to next tick so state update is flushed first; avoids stale cart reads on burst scan.
+    if (blockedReason) {
+      setTimeout(() => showToast(blockedReason!, 'warning'), 0);
+    } else if (didAdd) {
+      showToast(`Added ${qty} ${prod.unit} of ${prod.name} to cart.`, 'success');
+    }
   };
 
   const removeItemFromCart = (index: number) => {
@@ -294,22 +299,26 @@ export const POSModule: React.FC<POSModuleProps> = ({
       removeItemFromCart(index);
       return;
     }
-    // Never exceed available stock — same rule as adding: restock to sell more.
-    const item = cart[index];
-    if (item && newQty > item.product.stockQty) {
-      showToast(`Only ${item.product.stockQty} unit(s) of ${item.product.name} in stock. Restock inventory to sell more.`, 'warning');
-      return;
-    }
+    let blocked = false;
+    let blockedMsg = '';
     setCart((prev) => {
-      let updated = [...prev];
-      let item = updated[index];
+      const item = prev[index];
+      if (item && newQty > item.product.stockQty) {
+        blocked = true;
+        blockedMsg = `Only ${item.product.stockQty} unit(s) of ${item.product.name} in stock. Restock inventory to sell more.`;
+        return prev;
+      }
+      const updated = [...prev];
+      const cur = updated[index];
+      if (!cur) return prev;
       updated[index] = {
-        ...item,
+        ...cur,
         quantity: newQty,
-        amount: newQty * item.rate,
+        amount: newQty * cur.rate,
       };
       return updated;
     });
+    if (blocked) setTimeout(() => showToast(blockedMsg, 'warning'), 0);
   };
 
   // Open Sales Cart Preview Modal
@@ -378,7 +387,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
       customerPhone: selectedCustomer?.phone || 'N/A',
       pointsEarned: 0,
       cashier: currentUser,
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toLocaleDateString('en-CA'),
       time: new Date().toLocaleTimeString('en-GB'),
       timestamp: Date.now(),
     };

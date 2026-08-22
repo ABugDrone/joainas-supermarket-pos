@@ -11,7 +11,8 @@ build/
 
 # Tauri build artifacts
 src-tauri/target/
-src-tauri/Cargo.lock
+# Cargo.lock is committed for reproducible builds (binary app)
+# src-tauri/Cargo.lock
 
 # Environment variables
 .env

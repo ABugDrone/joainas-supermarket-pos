@@ -1,5 +1,34 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.4.0 (2026-08-22)
+
+### 🔒 Backup / Restore — Complete & Old-File Compatible
+- **Categories now included** in export (`categories` added to `backupData` with `schemaVersion: 2`). Old `v1.3.8`/`v1.3.9` files without `categories` still import — legacy files keep existing categories as-is (best option, preserves custom colors) with toast "Legacy backup — categories kept."
+- **BACKUP folder actually seeds dialogs** — `pickBackupSavePath`/`pickBackupFile` now pre-fill with `getBackupFolderPath()` so the native save/open dialogs start in the configured folder.
+- **Browser fallback via Blob** — replaces `data:` URL+`encodeURIComponent` (2 MB limit) with `Blob`+`URL.createObjectURL` for reliable downloads on large DBs.
+- **Durability race fixed** — browser `handleImportBackup` now `await flushWrites()` before reload (was `void flush... 1.2s` fire-and-forget); both paths validate `Array.isArray` for optional tables and abort before any `save*` on malformed file.
+
+### 🐛 Persistence — Chunked NOT IN Wipe Fixed
+- `deleteIdsNotIn` used chunked `NOT IN (40 ids)` — 800 rows split into 20 chunks wiped 760 rows after first chunk. Fixed to single `DELETE WHERE id NOT IN (SELECT value FROM json_each(?))` via `JSON.stringify(keepIds)`. Added `PRAGMA busy_timeout=5000` at `openDb`.
+
+### 🔐 Auth Hardening
+- **Empty-hash bypass closed** — `LoginModal` no longer `passwordOk=true` on empty `password_hash`; blank hash now rejects (guide updated to delete user not blank).
+- **Last active admin cannot be suspended** — `AdminModule:handleToggleUserStatus` blocks suspending the sole active `admin` cap holder or self-suspend when last.
+- **Session password stripped** — `setActiveUserStorage` now stores `{...user without password}` to `sessionStorage` (XSS exposure).
+
+### 🛒 Frontend Robustness
+- **Sale race** — `App.handleCompleteSale` + `handleAddProduct/Update` now use functional `setState(prev=>)` to avoid stale closures on rapid checkout.
+- **POS oversell** — stock cap checks moved inside `setCart(prev=>)` (burst scanner + tap no longer bypasses).
+- **Category resync** — `InventoryModule`/`AdminModule` `useEffect` syncs `categoriesProp` → local state; `ThermalPrinterSettings` syncs `config` → `formData`.
+- **Dates** — `todayStr` and sale `date` now `toLocaleDateString('en-CA')` (local, not UTC) fixing WAT off-by-one.
+- **Setup gate** — `App: isStorageInitialized()` added to prevent flashing setup before `initStorage` completes.
+- **Cost Price optional** — label "(optional)" and no `required` (kept from 1.3.9).
+
+### 🔧 Build Reproducibility
+- `src-tauri/Cargo.lock` now committed (removed from `.gitignore`) for deterministic Rust builds.
+
+---
+
 ## Version 1.3.9 (2026-08-22)
 
 ### 🔒 Inventory Persistence — Vanishing Stock Fixed

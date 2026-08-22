@@ -31,6 +31,7 @@ import {
   getDatabaseMigrationNote,
   loadCategories,
   saveCategories,
+  isStorageInitialized,
 } from './utils/storage';
 
 import { ToastProvider, useToast } from './components/Toast';
@@ -101,59 +102,64 @@ function MainAppContent() {
     };
   }, [showToast]);
 
-  // Sync back to storage on updates
+  // Sync back to storage on updates — functional updaters avoid stale-closure
+  // races on rapid double-click Print & Save.
   const handleCompleteSale = (newSale: SaleRecord, opts?: { saveOnly?: boolean }) => {
-    let updatedSales = [newSale, ...sales];
-    setSales(updatedSales);
-    saveSales(updatedSales);
-
-    let updatedProducts = products.map((prod) => {
-      let soldItem = newSale.items.find((item) => item.product.id === prod.id);
-      if (soldItem) {
-        return {
-          ...prod,
-          stockQty: Math.max(0, prod.stockQty - soldItem.quantity),
-        };
-      }
-      return prod;
+    setSales((prev) => {
+      const updated = [newSale, ...prev];
+      saveSales(updated);
+      return updated;
     });
-    setProducts(updatedProducts);
-    saveProducts(updatedProducts);
+
+    setProducts((prev) =>
+      (() => {
+        const updated = prev.map((prod) => {
+          const soldItem = newSale.items.find((item) => item.product.id === prod.id);
+          if (soldItem) {
+            return { ...prod, stockQty: Math.max(0, prod.stockQty - soldItem.quantity) };
+          }
+          return prod;
+        });
+        saveProducts(updated);
+        return updated;
+      })()
+    );
 
     if (newSale.customerId) {
-      let updatedCustomers = customers.map((cust) => {
-        if (cust.id === newSale.customerId) {
-          let newBalance = cust.balance + newSale.balanceDue;
-          return {
-            ...cust,
-            balance: newBalance,
-          };
-        }
-        return cust;
+      setCustomers((prev) => {
+        const updated = prev.map((cust) => {
+          if (cust.id === newSale.customerId) {
+            return { ...cust, balance: cust.balance + newSale.balanceDue };
+          }
+          return cust;
+        });
+        saveCustomers(updated);
+        return updated;
       });
-      setCustomers(updatedCustomers);
-      saveCustomers(updatedCustomers);
     }
 
     if (opts?.saveOnly) {
-      // Save only — do not auto-open print modal. Sale is in Sales Records for later PDF/PNG export or reprint.
       return;
     }
     setActiveReceiptSale(newSale);
     setIsReceiptModalOpen(true);
   };
 
-  // Product CRUD
+  // Product CRUD — functional updaters to avoid stale closures
   const handleAddProduct = (newProd: Product) => {
-    let updated = [newProd, ...products];
-    setProducts(updated);
-    saveProducts(updated);
+    setProducts((prev) => {
+      const updated = [newProd, ...prev];
+      saveProducts(updated);
+      return updated;
+    });
   };
 
   const handleUpdateProduct = (updatedProd: Product) => {
-    let updated = products.map((p) => (p.id === updatedProd.id ? updatedProd : p));
-    setProducts(updated);
-    saveProducts(updated);
+    setProducts((prev) => {
+      const updated = prev.map((p) => (p.id === updatedProd.id ? updatedProd : p));
+      saveProducts(updated);
+      return updated;
+    });
   };
 
   const handleDeleteProduct = (id: string) => {
@@ -208,8 +214,8 @@ function MainAppContent() {
     savePrinterConfig(newConfig);
   };
 
-  // Today Sales Total Calculation
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Today Sales Total Calculation — use local date (not UTC) to avoid off-by-one in WAT (UTC+1).
+  const todayStr = new Date().toLocaleDateString('en-CA');
   const todaySalesTotal = useMemo(() => {
     return sales
       .filter((s) => s.date === todayStr)
@@ -454,14 +460,14 @@ export default function App() {
     );
   }
 
-  if (!isSetupDone || loadUsers().length === 0) {
+  if (!isSetupDone || (isStorageInitialized() && loadUsers().length === 0)) {
     // Show setup when the flag is missing OR when there are no user accounts
-    // at all. The second condition is a safety net for databases left broken
-    // by older builds (admin_setup_done=true but the users write never landed)
-    // — without it the user would be stuck at a login screen with no account
-    // to sign in with ("user admin not found"). Completing setup now persists
-    // the admin durably (writes are flushed before leaving the wizard), so the
-    // app will never re-run setup again after a successful first configuration.
+    // at all (but only once storage has actually finished loading — otherwise
+    // a refresh before initStorage completes would flash the setup wizard).
+    // Without the second condition the user would be stuck at a login screen
+    // with no account to sign in with ("user admin not found"). Completing
+    // setup now persists the admin durably (writes are flushed before leaving
+    // the wizard), so the app will never re-run setup again after success.
     return (
       <ToastProvider>
         <ErrorBoundary>

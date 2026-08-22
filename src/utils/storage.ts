@@ -450,7 +450,9 @@ export const setActiveUserStorage = (user: User | null) => {
   cacheActiveUser = user;
   try {
     if (user) {
-      sessionStorage.setItem(LKEYS.ACTIVE_USER, JSON.stringify(user));
+      // Strip password hash before persisting to sessionStorage (XSS exposure).
+      const { password: _pw, ...safe } = user as User & { password?: unknown };
+      sessionStorage.setItem(LKEYS.ACTIVE_USER, JSON.stringify(safe));
     } else {
       sessionStorage.removeItem(LKEYS.ACTIVE_USER);
     }
@@ -603,13 +605,19 @@ export async function pickBackupFolder(): Promise<string | null> {
 }
 
 // Open a native save dialog for the backup file. Returns chosen path or null.
+// Now seeds the dialog with the configured BACKUP folder (best option — admin
+// picks folder once in Admin → DB & Backups, then every export starts there).
 export async function pickBackupSavePath(defaultFileName: string): Promise<string | null> {
   const dialog = await loadDialogPlugin();
   if (!dialog) return null;
   try {
+    const backupFolder = getBackupFolderPath();
+    const defaultPath = backupFolder
+      ? `${backupFolder.replace(/[/\\]+$/, '')}\\${defaultFileName}`
+      : defaultFileName;
     const selected = await dialog.save({
       title: 'Save System Backup',
-      defaultPath: defaultFileName,
+      defaultPath,
       filters: [{ name: 'JSON Backup', extensions: ['json'] }],
     });
     return typeof selected === 'string' ? selected : null;
@@ -661,14 +669,17 @@ export async function writeBinaryFile(path: string, data: Uint8Array): Promise<v
 }
 
 // Open a native file picker to locate an existing backup file. Returns its path or null.
+// Seeds the open dialog in the configured BACKUP folder when available.
 export async function pickBackupFile(): Promise<string | null> {
   const dialog = await loadDialogPlugin();
   if (!dialog) return null;
   try {
+    const backupFolder = getBackupFolderPath();
     const selected = await dialog.open({
       title: 'Select Backup File to Restore',
       multiple: false,
       filters: [{ name: 'JSON Backup', extensions: ['json'] }],
+      defaultPath: backupFolder || undefined,
     });
     return typeof selected === 'string' ? selected : null;
   } catch (e) {

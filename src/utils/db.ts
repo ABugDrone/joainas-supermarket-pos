@@ -52,6 +52,11 @@ export async function openDb(url: string): Promise<Database | null> {
   } catch (e) {
     console.error('Failed to enable foreign keys', e);
   }
+  try {
+    await next.execute('PRAGMA busy_timeout = 5000');
+  } catch (e) {
+    console.error('Failed to set busy timeout', e);
+  }
   // The schema is bootstrapped idempotently on every connection instead of via
   // sqlx migrations — older builds edited migration v1's SQL which broke the
   // checksum/dirty checks on existing databases and even on fresh installs.
@@ -610,13 +615,14 @@ async function deleteIdsNotIn(
     await d.execute(`DELETE FROM ${table}`, []);
     return;
   }
-  // For large keep-lists SQLite has a bound-parameter limit — chunk the
-  // NOT IN list and delete in passes. Each pass is individually atomic
-  // and safe to interrupt mid-way (worst case leaves a few stale rows
-  // that are pruned on the next save).
-  for (const group of chunk(keepIds, MAX_PARAMS_PER_STATEMENT)) {
-    await d.execute(`DELETE FROM ${table} WHERE ${idColumn} NOT IN (${group.map(() => '?').join(', ')})`, group);
-  }
+  // Single atomic statement via json_each — avoids the chunked NOT IN wipe
+  // bug where 800 keepIds split into 20 chunks would delete 760 rows after
+  // the first chunk (everything not in that 40). json_each is available in
+  // SQLite 3.38+ (bundled with Tauri) and is unbounded.
+  await d.execute(
+    `DELETE FROM ${table} WHERE ${idColumn} NOT IN (SELECT value FROM json_each(?))`,
+    [JSON.stringify(keepIds)]
+  );
 }
 
 // ============================================================

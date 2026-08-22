@@ -29,6 +29,9 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
   const { showToast } = useToast();
   const [subTab, setSubTab] = React.useState<'receipt' | 'barcode'>('receipt');
   const [formData, setFormData] = React.useState<ThermalPrinterConfig>({ ...config });
+  React.useEffect(() => {
+    setFormData({ ...config });
+  }, [config]);
   const [savedSuccess, setSavedSuccess] = React.useState(false);
   const [showPrinterGuide, setShowPrinterGuide] = React.useState(false);
   const [showScannerGuide, setShowScannerGuide] = React.useState(false);

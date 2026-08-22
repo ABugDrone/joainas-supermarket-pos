@@ -70,12 +70,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
       // Verify the stored credential, auto-migrating legacy plaintext rows
       // to a bcrypt hash on their first successful login (seamless upgrade).
       let passwordOk = false;
-      if (isHashed(matched.password)) {
+      if (!matched.password) {
+        // Empty hash must NOT bypass — attacker blanked hash via DB edit.
+        // Guide now says to delete the user and re-create via setup.
+        passwordOk = false;
+      } else if (isHashed(matched.password)) {
         passwordOk = await bcrypt.compare(password, matched.password as string);
-      } else if (matched.password) {
-        passwordOk = matched.password === password;
       } else {
-        passwordOk = true;
+        passwordOk = matched.password === password;
       }
 
       if (!passwordOk) {

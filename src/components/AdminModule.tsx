@@ -245,6 +245,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const [categories, setCategories] = useState<Category[]>(
     () => categoriesProp ?? loadCategories()
   );
+  React.useEffect(() => {
+    if (categoriesProp) setCategories(categoriesProp);
+  }, [categoriesProp]);
   const [newCatName, setNewCatName] = useState('');
   const [newCatDesc, setNewCatDesc] = useState('');
   const [newCatColor, setNewCatColor] = useState('#6366f1');
@@ -439,9 +442,21 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     setIsAddUserOpen(false);
   };
 
-  // Toggle user active / suspended status
+  // Toggle user active / suspended status — blocks suspending the last active admin (would lock the store).
   const handleToggleUserStatus = (user: User) => {
     let nextStatus: 'active' | 'suspended' = user.status === 'active' ? 'suspended' : 'active';
+    if (nextStatus === 'suspended') {
+      const activeAdminCount = users.filter((u) => u.status === 'active' && (u.capabilities || []).includes('admin')).length;
+      const isTargetAdmin = (user.capabilities || []).includes('admin') || user.role === 'System Admin';
+      if (isTargetAdmin && activeAdminCount <= 1) {
+        showToast('Cannot suspend the last active System Administrator — at least one active admin must remain.', 'error');
+        return;
+      }
+      if (user.username.toLowerCase() === currentUser.toLowerCase() && activeAdminCount <= 1) {
+        showToast('You cannot suspend your own account when you are the last active admin.', 'error');
+        return;
+      }
+    }
     let updatedUsers = users.map((u) => (u.id === user.id ? { ...u, status: nextStatus } : u));
 
     onUpdateUsers(updatedUsers);
@@ -487,12 +502,14 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     try {
       const backupData = {
         app: 'JOAINAS MART POS SYSTEM',
-        version: '1.3.9',
+        version: '1.4.0',
+        schemaVersion: 2,
         timestamp: new Date().toISOString(),
         products: loadProducts(),
         customers: loadCustomers(),
         sales: loadSales(),
         expenditures: loadExpenditures(),
+        categories: loadCategories(),
         printerConfig: loadPrinterConfig(),
         users: loadUsers(),
         auditLogs: loadAuditLogs(),
@@ -526,14 +543,16 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         return;
       }
 
-      // Browser fallback: standard download.
-      const dataUrl = 'data:text/json;charset=utf-8,' + encodeURIComponent(dataStr);
+      // Browser fallback: Blob URL (no 2 MB data: URL limit, no double-encode).
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const blobUrl = URL.createObjectURL(blob);
       const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute('href', dataUrl);
+      downloadAnchor.setAttribute('href', blobUrl);
       downloadAnchor.setAttribute('download', fileName);
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
 
       recordAuditLog(
         currentUser,
@@ -554,24 +573,42 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     }
   };
 
-  // Import System Backup File (JSON)
+  // Import System Backup File (JSON) — supports both v1.3.8 (no categories)
+  // and v1.4.0+ (with categories). Old files keep existing categories as-is.
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        if (!parsed.products || !parsed.customers || !parsed.sales) {
+        if (!Array.isArray(parsed.products) || !Array.isArray(parsed.customers) || !Array.isArray(parsed.sales)) {
           showToast('Invalid backup file format! Missing required database tables.', 'error');
           return;
+        }
+        // Validate optional tables when present — abort before any save if malformed.
+        const optArrays: Array<[string, unknown]> = [
+          ['expenditures', parsed.expenditures],
+          ['categories', parsed.categories],
+          ['users', parsed.users],
+          ['auditLogs', parsed.auditLogs],
+        ];
+        for (const [key, val] of optArrays) {
+          if (val !== undefined && !Array.isArray(val)) {
+            showToast(`Invalid backup — "${key}" is malformed.`, 'error');
+            return;
+          }
         }
 
         if (parsed.products) saveProducts(parsed.products);
         if (parsed.customers) saveCustomers(parsed.customers);
         if (parsed.sales) saveSales(parsed.sales);
         if (parsed.expenditures) saveExpenditures(parsed.expenditures);
+        // Categories: new backups have it, old 1.3.8 backups don't — keep existing as-is for old files (best option).
+        if (Array.isArray(parsed.categories)) {
+          saveCategories(parsed.categories);
+        }
         if (parsed.printerConfig) savePrinterConfig(parsed.printerConfig);
         if (parsed.users) {
           saveUsers(parsed.users);
@@ -579,31 +616,44 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         }
         if (parsed.auditLogs) saveAuditLogs(parsed.auditLogs);
 
+        const isLegacy = !Array.isArray(parsed.categories);
         recordAuditLog(
           currentUser,
           currentUserRole,
           'Restored System Backup',
-          `Restored database tables from backup file "${file.name}".`
+          isLegacy
+            ? `Restored database tables from legacy backup "${file.name}" (categories kept as-is).`
+            : `Restored database tables from backup file "${file.name}".`
         );
 
-        showToast('Database backup restored successfully! Reloading system...', 'success');
-        // Make sure every restored table (especially users) is durable on disk
-        // before the reload, otherwise the app could restart with no accounts.
-        void flushWrites().finally(() => {
-          setTimeout(() => {
-            window.location.reload();
-          }, 1200);
-        });
+        showToast(
+          isLegacy
+            ? 'Legacy backup restored! Categories kept as-is. Reloading...'
+            : 'Database backup restored successfully! Reloading system...',
+          'success'
+        );
+        // Durable before reload — await, not fire-and-forget (fixes browser race).
+        try {
+          await flushWrites();
+        } catch (flushErr) {
+          console.error('Flush after restore failed', flushErr);
+          showToast('Restore written but flush timed out — reload may need a retry.', 'error');
+        }
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
       } catch (err) {
         console.error('Failed to import backup', err);
         showToast('Error reading backup JSON file!', 'error');
       }
     };
     reader.readAsText(file);
+    // Clear input so same file can be re-selected after a failure.
+    e.target.value = '';
   };
 
   // Native restore picker — point directly at the folder/file where the
-  // backup was originally saved during export.
+  // backup was originally saved during export. Handles 1.3.8 legacy files.
   const handleNativeRestore = async () => {
     try {
       const path = await pickBackupFile();
@@ -611,15 +661,30 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 
       const contents = await readBackupFile(path);
       const parsed = JSON.parse(contents);
-      if (!parsed.products || !parsed.customers || !parsed.sales) {
+      if (!Array.isArray(parsed.products) || !Array.isArray(parsed.customers) || !Array.isArray(parsed.sales)) {
         showToast('Invalid backup file format! Missing required database tables.', 'error');
         return;
+      }
+      const optArrays: Array<[string, unknown]> = [
+        ['expenditures', parsed.expenditures],
+        ['categories', parsed.categories],
+        ['users', parsed.users],
+        ['auditLogs', parsed.auditLogs],
+      ];
+      for (const [key, val] of optArrays) {
+        if (val !== undefined && !Array.isArray(val)) {
+          showToast(`Invalid backup — "${key}" is malformed.`, 'error');
+          return;
+        }
       }
 
       if (parsed.products) saveProducts(parsed.products);
       if (parsed.customers) saveCustomers(parsed.customers);
       if (parsed.sales) saveSales(parsed.sales);
       if (parsed.expenditures) saveExpenditures(parsed.expenditures);
+      if (Array.isArray(parsed.categories)) {
+        saveCategories(parsed.categories);
+      }
       if (parsed.printerConfig) savePrinterConfig(parsed.printerConfig);
       if (parsed.users) {
         saveUsers(parsed.users);
@@ -627,14 +692,22 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       }
       if (parsed.auditLogs) saveAuditLogs(parsed.auditLogs);
 
+      const isLegacyNative = !Array.isArray(parsed.categories);
       recordAuditLog(
         currentUser,
         currentUserRole,
         'Restored System Backup',
-        `Restored database tables from backup file "${path}".`
+        isLegacyNative
+          ? `Restored database tables from legacy backup "${path}" (categories kept as-is).`
+          : `Restored database tables from backup file "${path}".`
       );
 
-      showToast('Database backup restored successfully! Reloading system...', 'success');
+      showToast(
+        isLegacyNative
+          ? 'Legacy backup restored! Categories kept as-is. Reloading...'
+          : 'Database backup restored successfully! Reloading system...',
+        'success'
+      );
       // Make sure every restored table (especially users) is durable on disk
       // before the reload, otherwise the app could restart with no accounts.
       await flushWrites();
