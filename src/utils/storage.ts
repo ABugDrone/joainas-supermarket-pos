@@ -438,7 +438,36 @@ export const setLicenseAccepted = (accepted: boolean = true) => {
 const readSessionUser = (): User | null => {
   try {
     const raw = sessionStorage.getItem(LKEYS.ACTIVE_USER);
-    return raw ? (JSON.parse(raw) as User) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as User;
+    // Old/broken sessions may have capabilities === undefined (JSON drops undefined)
+    // or === [] (previous fix stored empty). Hydrate to avoid blank UI.
+    const caps = (parsed as any).capabilities;
+    if (!Array.isArray(caps) || caps.length === 0) {
+      const full = cacheUsers.find((u) => u.id === (parsed as any).id || u.username === (parsed as any).username);
+      if (full && Array.isArray(full.capabilities) && full.capabilities.length > 0) {
+        (parsed as any).capabilities = full.capabilities;
+      } else if ((parsed as any).role === 'System Admin') {
+        (parsed as any).capabilities = ['admin','sell','inventory','view_sales','customers','view_reports','expenses','printer_settings','receipts'];
+      } else if (!Array.isArray(caps)) {
+        (parsed as any).capabilities = [];
+      }
+      // Persist the healed caps so next refresh doesn't stay blank.
+      try {
+        sessionStorage.setItem(LKEYS.ACTIVE_USER, JSON.stringify(parsed));
+      } catch {}
+    }
+    // If still empty and not admin, force re-login instead of blank UI.
+    if (Array.isArray((parsed as any).capabilities) && (parsed as any).capabilities.length === 0 && (parsed as any).role !== 'System Admin') {
+      // Non-admin with no caps is likely a stale entry — require fresh login.
+      // Keep as-is but don't treat as logged-in if no permissions at all?
+      // Returning the user still lets them see "no access" — better to fall through to login gate.
+      // So if non-admin and zero caps, consider session invalid.
+      // However keep admin case above. For others, return null to show login.
+      const maybeFull = cacheUsers.find((u) => u.username === (parsed as any).username);
+      if (!maybeFull) return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -452,7 +481,16 @@ export const setActiveUserStorage = (user: User | null) => {
     if (user) {
       // Strip password hash before persisting to sessionStorage (XSS exposure).
       const { password: _pw, ...safe } = user as User & { password?: unknown };
-      sessionStorage.setItem(LKEYS.ACTIVE_USER, JSON.stringify(safe));
+      let caps: unknown = (safe as any).capabilities;
+      if (!Array.isArray(caps) || (caps as unknown[]).length === 0) {
+        if ((safe as any).role === 'System Admin') {
+          caps = ['admin','sell','inventory','view_sales','customers','view_reports','expenses','printer_settings','receipts'];
+        } else {
+          caps = Array.isArray(caps) ? caps : [];
+        }
+      }
+      const safeWithCaps = { ...safe, capabilities: caps };
+      sessionStorage.setItem(LKEYS.ACTIVE_USER, JSON.stringify(safeWithCaps));
     } else {
       sessionStorage.removeItem(LKEYS.ACTIVE_USER);
     }

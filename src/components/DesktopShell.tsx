@@ -220,7 +220,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   return (
     <div className="flex h-screen bg-[var(--bg-app)] text-[var(--text-primary)] font-sans select-none overflow-hidden">
       {/* ===== LEFT SIDEBAR ===== */}
-      <aside className="w-[72px] lg:w-[220px] bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] flex flex-col items-center lg:items-stretch py-4 gap-1 shrink-0">
+      <aside className="w-[72px] lg:w-[240px] bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] flex flex-col items-center lg:items-stretch py-4 gap-1 shrink-0">
         {/* Logo at top of sidebar */}
         <div className="flex items-center justify-center lg:justify-start lg:px-4 py-3 mb-2 gap-2.5">
           <img
@@ -262,8 +262,8 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
                     isActive ? 'text-white' : 'text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]'
                   }`}
                 />
-                <span className="hidden lg:inline">{label}</span>
-                <span className={`hidden lg:inline ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                <span className="hidden lg:inline whitespace-nowrap">{label}</span>
+                <span className={`hidden lg:inline ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
                   isActive
                     ? 'bg-white/20 text-white'
                     : 'bg-[var(--bg-app)] text-[var(--text-muted)]'
@@ -472,7 +472,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v1.3.8 • Dronebug Technologies
+            v1.4.0 • Dronebug Technologies
           </div>
         </footer>
       </div>
