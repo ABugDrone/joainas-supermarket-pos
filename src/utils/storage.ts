@@ -58,7 +58,22 @@ let cacheActiveUser: User | null = null;
 // Serialized write queue — keeps DB writes in order.
 let writeQueue: Promise<void> = Promise.resolve();
 function enqueueWrite(task: () => Promise<void>): void {
-  writeQueue = writeQueue.then(task).catch((e) => console.error('SQLite write failed', e));
+  const withRetry = async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await task();
+        return;
+      } catch (e) {
+        console.error(`SQLite write failed attempt ${attempt + 1}`, e);
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        } else {
+          throw e;
+        }
+      }
+    }
+  };
+  writeQueue = writeQueue.then(withRetry).catch((e) => console.error('SQLite write failed after retries', e));
 }
 
 // Wait until every queued SQLite write has completed. Critical before
@@ -333,12 +348,21 @@ export async function registerCloseFlush(): Promise<void> {
   if (closeFlushRegistered) return;
   closeFlushRegistered = true;
 
-  // Best-effort flush on pagehide / beforeunload (browser + WebView fallback).
+  // Best-effort flush on pagehide / beforeunload / visibility hidden.
   const bestEffortFlush = () => {
     void flushWrites(3000);
   };
   window.addEventListener('pagehide', bestEffortFlush);
   window.addEventListener('beforeunload', bestEffortFlush);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') bestEffortFlush();
+  });
+  // Periodic safety net: if the OS kills the app (task manager, power loss
+  // during restart) without firing close, this keeps the WAL checkpointed.
+  // Interval is harmless when queue is idle.
+  setInterval(() => {
+    void flushWrites(3000);
+  }, 15000);
 
   if (!isTauriRuntime()) return;
   try {

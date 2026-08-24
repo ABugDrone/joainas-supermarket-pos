@@ -905,14 +905,16 @@ export async function dbLoadAuditLogs(): Promise<AuditLog[]> {
 export async function dbSaveAuditLogs(logs: AuditLog[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await d.execute('DELETE FROM audit_logs');
-  for (const l of logs) {
-    await d.execute(
-      `INSERT INTO audit_logs (id, username, user_role, action, details, log_timestamp, log_date, log_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [l.id, l.username, l.userRole, l.action, l.details, l.timestamp, l.date, l.time]
-    );
-  }
+  await upsertRows(d, 'audit_logs', 'id', [
+    { col: 'username', value: (l: AuditLog) => l.username },
+    { col: 'user_role', value: (l: AuditLog) => l.userRole },
+    { col: 'action', value: (l: AuditLog) => l.action },
+    { col: 'details', value: (l: AuditLog) => l.details },
+    { col: 'log_timestamp', value: (l: AuditLog) => l.timestamp },
+    { col: 'log_date', value: (l: AuditLog) => l.date },
+    { col: 'log_time', value: (l: AuditLog) => l.time },
+  ], logs);
+  await deleteIdsNotIn(d, 'audit_logs', 'id', logs.map((l) => l.id));
 }
 
 // ============================================================
