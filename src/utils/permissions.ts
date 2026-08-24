@@ -4,11 +4,12 @@ import { Capability, CAPABILITY_PRESETS, UserRole, User } from '../types';
 // Everyone else can only ever see/do what their capabilities allow.
 
 export const isAdmin = (user: Pick<User, 'capabilities' | 'role'> | null | undefined): boolean =>
-  !!user && (user.capabilities || []).includes('admin');
+  !!user && ((user as any).role === 'System Admin' || (user.capabilities || []).includes('admin'));
 
-export const can = (user: Pick<User, 'capabilities'> | null | undefined, cap: Capability): boolean => {
+export const can = (user: Pick<User, 'capabilities' | 'role'> | null | undefined, cap: Capability): boolean => {
   if (!user) return false;
-  const caps = user.capabilities || [];
+  if ((user as any).role === 'System Admin') return true;
+  const caps = (user as any).capabilities || [];
   if (caps.includes('admin')) return true;
   return caps.includes(cap);
 };

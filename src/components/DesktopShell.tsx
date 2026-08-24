@@ -153,10 +153,14 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   }, [lowStockProducts.length, showToast]);
 
   // Capability-based filtering: admin sees all; everyone else only the
-  // modules their granted capabilities allow.
+  // modules their granted capabilities allow. Also treat System Admin role
+  // as admin even if capabilities array was stale/empty (fixes blank panel
+  // list after session heal).
+  const isAdminRole = currentUserRole === 'System Admin';
+  const caps = currentUserCapabilities || [];
   const visibleItems = NAV_ITEMS.filter((item) => {
-    if (currentUserCapabilities.includes('admin')) return true;
-    return currentUserCapabilities.includes(NAV_CAPABILITY[item.id]);
+    if (isAdminRole || caps.includes('admin')) return true;
+    return caps.includes(NAV_CAPABILITY[item.id]);
   });
 
   // If the current active tab is no longer visible (e.g. role change),
