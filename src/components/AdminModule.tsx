@@ -502,7 +502,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     try {
       const backupData = {
         app: 'JOAINAS MART POS SYSTEM',
-        version: '1.4.0',
+        version: '1.4.1',
         schemaVersion: 2,
         timestamp: new Date().toISOString(),
         products: loadProducts(),

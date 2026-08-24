@@ -1,5 +1,18 @@
 # Joainas Mart POS System - Changelog
 
+## Version 1.4.1 (2026-08-22)
+
+### 🖥️ Sidebar — Hardware Config Alignment
+- Kept `Hardware Config` label (not shortened) — increased `aside` `lg:w-[220px]` → `lg:w-[240px]` and `label` `whitespace-nowrap` + `shortcut shrink-0` so button stays single-line, same `py-3` height as `Inventory`/`Reports` — fixes red-highlighted wrapping/centering.
+
+### 🐛 Blank UI After Refresh — Fixed
+- `permissions.ts:6` defensive `(capabilities||[]).includes`; `storage.ts:438` hydrates stale empty `capabilities` from `cacheUsers` or full admin caps and persists healed caps, plus `storage.ts:462` ensures `System Admin` never stored as `[]` — no more blank `Sell Service` container after refresh. Requires one re-login to clear old `sessionStorage`.
+
+### 🔒 Hardening (from 1.4.0 audit)
+- `db.ts:905` `audit_logs` now upsert via `json_each` (was `DELETE+loop`); `storage.ts:60` write queue 3× retry with backoff; `storage.ts:347` `visibilitychange` + 15s interval periodic flush for hard-kill/power-loss safety. `busy_timeout=5000` kept.
+
+---
+
 ## Version 1.4.0 (2026-08-22)
 
 ### 🔒 Backup / Restore — Complete & Old-File Compatible

@@ -472,7 +472,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v1.4.0 • Dronebug Technologies
+            v1.4.1 • Dronebug Technologies
           </div>
         </footer>
       </div>
