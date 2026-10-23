@@ -51,7 +51,7 @@ export const HeaderLogo: React.FC<HeaderLogoProps> = ({
           : 'items-center gap-3'
       }`}
     >
-      {/* Real Joainas Mart Logo */}
+      {/* Joainas Mart logo */}
       <img
         src="/logo.png"
         alt="Joainas Mart Logo"
@@ -62,20 +62,13 @@ export const HeaderLogo: React.FC<HeaderLogoProps> = ({
       <div className={`flex flex-col ${layout === 'vertical' ? 'items-center text-center' : 'items-start text-left'}`}>
         <div className="flex items-center gap-1.5 leading-none">
           <span className={`tracking-tight font-extrabold text-[var(--text-primary)] ${textClasses}`}>
-            JOAINAS
-          </span>
-          <span
-            className={`font-extrabold rounded-md bg-gradient-to-r from-[var(--accent-orange)] to-[var(--accent-orange-hover)] px-2 py-0.5 text-white tracking-wider uppercase shadow-sm ${
-              size === 'sm' ? 'text-[11px]' : size === 'md' ? 'text-xs' : size === 'lg' ? 'text-sm' : 'text-base'
-            }`}
-          >
-            MART
+            Joainas Mart
           </span>
         </div>
 
         {showSubtext && (
           <span className={`font-semibold text-[var(--accent-color)] tracking-wide uppercase mt-0.5 ${subtextClasses}`}>
-            Seafoods • Frozen Foods • Groceries
+            Inventory • Sales • Records
           </span>
         )}
 

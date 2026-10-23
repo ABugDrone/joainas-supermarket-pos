@@ -17,10 +17,14 @@ import {
   BellRing,
   AlertTriangle,
   PackagePlus,
+  BarChart3,
+  Lock,
 } from 'lucide-react';
 import { HeaderLogo } from './HeaderLogo';
+import { ClockFlashAlert } from './ClockFlashAlert';
 import { playLowStockAlert } from '../utils/storage';
 import { Capability, UserRole, Product } from '../types';
+import type { ClockOverrideAlert } from '../utils/clockOverride';
 import { useToast } from './Toast';
 import {
   getSavedTheme,
@@ -35,10 +39,11 @@ import {
   FontFamilyId,
 } from '../utils/theme';
 import { ThemeSelectorModal } from './ThemeSelectorModal';
+import { EDITION } from '../config/edition';
 
 interface DesktopShellProps {
-  activeTab: 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'admin';
-  setActiveTab: (tab: 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'admin') => void;
+  activeTab: 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'analytics' | 'admin';
+  setActiveTab: (tab: 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'analytics' | 'admin') => void;
   currentUser: string;
   currentUserRole: UserRole;
   currentUserCapabilities: Capability[];
@@ -47,10 +52,13 @@ interface DesktopShellProps {
   onOpenLoginModal: () => void;
   onLogout?: () => void;
   onOpenDevModal: () => void;
+  /** v2.0.6 persistent FLASHALERT entries (empty for ADMIN sessions). */
+  clockAlerts?: ClockOverrideAlert[];
+  onVerifyClock?: () => void;
   children: React.ReactNode;
 }
 
-type TabId = 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'admin';
+type TabId = 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'analytics' | 'admin';
 
 // The capability required to see each module. 'admin' capability implies all.
 const NAV_CAPABILITY: Record<TabId, Capability> = {
@@ -61,6 +69,7 @@ const NAV_CAPABILITY: Record<TabId, Capability> = {
   expenses: 'expenses',
   financials: 'view_reports',
   printer: 'printer_settings',
+  analytics: 'admin',
   admin: 'admin',
 };
 
@@ -78,7 +87,8 @@ const NAV_ITEMS: {
   { id: 'expenses', icon: DollarSign, label: 'Expenses', shortcut: 'F5', activeColor: 'bg-rose-600 text-white' },
   { id: 'financials', icon: FileSpreadsheet, label: 'Reports', shortcut: 'F6', activeColor: 'bg-violet-600 text-white' },
   { id: 'printer', icon: Printer, label: 'Hardware Config', shortcut: 'F7', activeColor: 'bg-indigo-600 text-white' },
-  { id: 'admin', icon: ShieldCheck, label: 'Admin', shortcut: 'F8', activeColor: 'bg-purple-600 text-white' },
+  { id: 'analytics', icon: BarChart3, label: 'Analytics', shortcut: 'F8', activeColor: 'bg-sky-600 text-white' },
+  { id: 'admin', icon: ShieldCheck, label: 'Admin', shortcut: 'F9', activeColor: 'bg-purple-600 text-white' },
 ];
 
 export const DesktopShell: React.FC<DesktopShellProps> = ({
@@ -91,6 +101,8 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   onOpenLoginModal,
   onLogout,
   onOpenDevModal,
+  clockAlerts = [],
+  onVerifyClock,
   children,
 }) => {
   const { showToast } = useToast();
@@ -204,12 +216,12 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
     };
   }, []);
 
-  // Keyboard shortcut listener (F1 to F8) — only for visible modules.
+  // Keyboard shortcut listener (F1 to F9) — only for visible modules.
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const keyMap: Record<string, TabId> = {
         F1: 'pos', F2: 'inventory', F3: 'sales', F4: 'customers',
-        F5: 'expenses', F6: 'financials', F7: 'printer', F8: 'admin',
+        F5: 'expenses', F6: 'financials', F7: 'printer', F8: 'analytics', F9: 'admin',
       };
       if (keyMap[e.key] && visibleItems.some((i) => i.id === keyMap[e.key])) {
         e.preventDefault();
@@ -234,12 +246,9 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
           />
           <div className="hidden lg:block leading-tight">
             <div className="flex items-center gap-1">
-              <span className="font-extrabold text-sm text-[var(--text-primary)]">JOAINAS</span>
-              <span className="font-extrabold text-[10px] rounded bg-gradient-to-r from-[var(--accent-orange)] to-[var(--accent-orange-hover)] px-1.5 py-0.5 text-white uppercase">
-                MART
-              </span>
+              <span className="font-extrabold text-sm text-[var(--text-primary)]">Joainas Mart</span>
             </div>
-            <div className="text-[11px] text-[var(--text-muted)] font-medium -mt-0.5">POS Terminal</div>
+            <div className="text-[11px] text-[var(--text-muted)] font-medium -mt-0.5">Inventory Management System</div>
           </div>
         </div>
 
@@ -250,22 +259,28 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
         <nav className="flex flex-col gap-1 w-full px-2 lg:px-3 flex-1">
           {visibleItems.map(({ id, icon: Icon, label, shortcut, activeColor }) => {
             const isActive = safeActiveTab === id;
+            const isLockedTab = EDITION.isOpenSource && (id === 'financials' || id === 'analytics');
             return (
               <button
                 key={id}
                 onClick={() => setActiveTab(id)}
-                title={`${label} (${shortcut})`}
+                title={isLockedTab ? `${label} (Premium — Locked)` : `${label} (${shortcut})`}
                 className={`group flex items-center gap-3 px-3 lg:px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-150 ${
                   isActive
                     ? `${activeColor} shadow-md`
                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                <Icon
-                  className={`w-5 h-5 shrink-0 ${
-                    isActive ? 'text-white' : 'text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]'
-                  }`}
-                />
+                <span className="relative shrink-0">
+                  <Icon
+                    className={`w-5 h-5 ${
+                      isActive ? 'text-white' : 'text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]'
+                    }`}
+                  />
+                  {isLockedTab && (
+                    <Lock className="w-3 h-3 absolute -bottom-1 -right-1 text-amber-400 bg-black/60 rounded-full p-[1px]" />
+                  )}
+                </span>
                 <span className="hidden lg:inline whitespace-nowrap">{label}</span>
                 <span className={`hidden lg:inline ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
                   isActive
@@ -303,24 +318,31 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
         </button>
 
         {/* Logout Button */}
-        <button
-          onClick={onLogout || onOpenLoginModal}
-          className="flex items-center justify-center lg:justify-start gap-3 px-3 lg:px-4 py-3 mx-2 mb-2 rounded-xl text-sm font-semibold text-[var(--error)] hover:bg-[var(--error-bg)] transition"
-          title="Log Out"
-        >
-          <LogOut className="w-5 h-5 shrink-0" />
-          <span className="hidden lg:inline">Log Out</span>
-        </button>
+        {!EDITION.isOpenSource && (
+          <button
+            onClick={onLogout || onOpenLoginModal}
+            className="flex items-center justify-center lg:justify-start gap-3 px-3 lg:px-4 py-3 mx-2 mb-2 rounded-xl text-sm font-semibold text-[var(--error)] hover:bg-[var(--error-bg)] transition"
+            title="Log Out"
+          >
+            <LogOut className="w-5 h-5 shrink-0" />
+            <span className="hidden lg:inline">Log Out</span>
+          </button>
+        )}
       </aside>
 
       {/* ===== MAIN CONTENT AREA ===== */}
       <div className="flex flex-col flex-1 min-w-0">
+        {/* v2.0.6: persistent FLASHALERT sits above every module/header. It
+            survives logout and restart and has no dismiss control. */}
+        {clockAlerts && clockAlerts.length > 0 && (
+          <ClockFlashAlert alerts={clockAlerts} onVerify={onVerifyClock || (() => {})} />
+        )}
         {/* Top Header Bar */}
         <header className="h-14 bg-[var(--bg-header)] border-b border-[var(--border-color)] flex items-center justify-between px-6 shrink-0">
           {/* Mobile Logo (visible only on small screens) */}
           <div className="flex items-center gap-2 lg:hidden">
             <img src="/logo.png" alt="Joainas Mart" className="w-8 h-8 rounded object-contain" />
-            <span className="font-extrabold text-sm text-[var(--text-primary)]">JOAINAS MART</span>
+            <span className="font-extrabold text-sm text-[var(--text-primary)]">Joainas Mart</span>
           </div>
 
           {/* Breadcrumb / Current Tab label */}
@@ -467,7 +489,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
         {/* Bottom Status Bar */}
         <footer className="bg-[var(--bg-header)] border-t border-[var(--border-color)] px-6 py-2 flex items-center justify-between text-xs shrink-0">
           <div className="flex items-center gap-4 text-[var(--text-muted)]">
-            <span>Joainas Mart POS • SQLite Synced</span>
+            <span>Joainas Mart • Inventory Management • SQLite Synced</span>
             <button
               onClick={onOpenDevModal}
               className="text-[var(--accent-color)] hover:underline font-medium transition"
@@ -476,7 +498,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v1.4.1 • Dronebug Technologies
+            v{EDITION.version} {EDITION.editionLabel} • Joainas Mart
           </div>
         </footer>
       </div>

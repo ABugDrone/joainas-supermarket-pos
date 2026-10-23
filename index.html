@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Joainas Seafoods & Groceries POS</title>
+    <title>Joainas Mart — Inventory Management System</title>
     <style>
       /* Instant boot splash — replaced by React as soon as the app mounts. */
-      #joainas-splash {
+      #senior-splash {
         position: fixed;
         inset: 0;
         z-index: 99999;
@@ -19,31 +19,31 @@
         color: #e2e8f0;
         font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
       }
-      #joainas-splash .logo {
+      #senior-splash .logo {
         width: 84px;
         height: 84px;
         object-fit: contain;
       }
-      #joainas-splash .title {
+      #senior-splash .title {
         font-weight: 800;
         font-size: 20px;
         letter-spacing: 0.5px;
         color: #ffffff;
       }
-      #joainas-splash .subtitle {
+      #senior-splash .subtitle {
         font-size: 12px;
         color: #94a3b8;
         margin-top: -8px;
       }
-      #joainas-splash .spinner {
+      #senior-splash .spinner {
         width: 34px;
         height: 34px;
         border: 3px solid #1e293b;
         border-top-color: #0052d4;
         border-radius: 50%;
-        animation: joainas-spin 0.9s linear infinite;
+        animation: senior-spin 0.9s linear infinite;
       }
-      @keyframes joainas-spin {
+      @keyframes senior-spin {
         to {
           transform: rotate(360deg);
         }
@@ -52,10 +52,10 @@
   </head>
   <body class="bg-[#0c0e12] text-[#e2e8f0]">
     <div id="root">
-      <div id="joainas-splash">
+      <div id="senior-splash">
         <img src="/logo.png" alt="Joainas Mart" class="logo" />
-        <div class="title">JOAINAS MART</div>
-        <div class="subtitle">POS Terminal &middot; Loading…</div>
+        <div class="title">Joainas Mart</div>
+        <div class="subtitle">Inventory Management System &middot; Loading…</div>
         <div class="spinner"></div>
       </div>
     </div>

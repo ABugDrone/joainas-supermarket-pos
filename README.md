@@ -1,8 +1,8 @@
-# 🛒 Joainas Supermarket & Coldstore - POS System
+# 🛒 Joainas Mart - POS & Inventory Management
 
 A modern, full-featured **Point of Sale (POS) and Inventory Management System** built specifically for supermarkets and coldstores. This desktop application combines the power of **React**, **TypeScript**, and **Tauri** to deliver a fast, secure, and user-friendly business management solution.
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.6-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 

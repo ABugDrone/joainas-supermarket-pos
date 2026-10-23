@@ -9,13 +9,25 @@ import {
   UserRole,
   Category,
 } from '../types';
-import { INITIAL_PRINTER_CONFIG, DEFAULT_CATEGORIES } from '../data/initialData';
+import { INITIAL_PRINTER_CONFIG, DEFAULT_CATEGORIES, LEGACY_DEFAULT_CATEGORIES } from '../data/initialData';
+import {
+  isValidBackupPayload,
+  mergeBackupProducts,
+  normalizeLegacyBackup,
+} from './backup';
 import {
   isTauriRuntime,
   dbLoadProducts,
   dbSaveProducts,
   dbLoadCustomers,
   dbSaveCustomers,
+  dbLoadContracts,
+  dbSaveContracts,
+  dbLoadMicroPayments,
+  dbRecordMicroPayment,
+  dbDeleteMicroPayment,
+  dbSetMicroRemitted,
+  dbSetContractDownRemitted,
   dbLoadSales,
   dbSaveSales,
   dbLoadExpenditures,
@@ -33,8 +45,27 @@ import {
   dbDeleteSetting,
   dbClearTable,
   getDbInfo,
+  getDbUrl,
   relocateDatabaseTo,
 } from './db';
+import {
+  hydrateAnchor as hydrateTimeAnchor,
+  checkWallClock,
+  touchClock,
+  validateNewSale,
+  advanceForSale,
+  reanchor as reanchorClockAnchor,
+  getAnchor as getTimeAnchor,
+  getEffectiveGate,
+  validateStartupTime,
+  reportStartupTamper,
+  clearStartupTamper,
+  refreshGate,
+  acceptStartupTime,
+  type ClockGate,
+} from './trustedTime';
+import { hasActiveClockOverride } from './clockOverride';
+import { formatMoney, hydrateCurrency } from './currency';
 
 // ============================================================
 // IN-MEMORY CACHE — source of truth for the running session.
@@ -46,6 +77,8 @@ let initialized = false;
 
 let cacheProducts: Product[] = [];
 let cacheCustomers: Customer[] = [];
+let cacheContracts: any[] = [];
+let cacheMicroPayments: any[] = [];
 let cacheSales: SaleRecord[] = [];
 let cacheExpenditures: Expenditure[] = [];
 let cacheUsers: User[] = [];
@@ -54,6 +87,41 @@ let cacheCategories: Category[] = [];
 let cachePrinterConfig: ThermalPrinterConfig | null = null;
 let cacheAdminSetupDone = false;
 let cacheActiveUser: User | null = null;
+
+// ============================================================
+// ON-DEVICE DEBUG LOG (v1.4.9)
+// Ring buffer (cap 200) mirrored to Documents\Backup\pos-debug.log (or the
+// live DB folder) so startup mysteries are readable on the shop PC without
+// devtools. Best-effort only — never throws.
+// ============================================================
+
+const DEBUG_RING: string[] = [];
+let debugDir: string | null = null;
+
+export function debugLog(msg: string): void {
+  try {
+    const line = `[${new Date().toISOString()}] ${msg}`;
+    DEBUG_RING.push(line);
+    if (DEBUG_RING.length > 200) DEBUG_RING.splice(0, DEBUG_RING.length - 200);
+    console.info('[pos-debug]', msg);
+    if (!isTauriRuntime()) return;
+    void (async () => {
+      try {
+        if (!debugDir) {
+          const info = await getDbInfo().catch(() => null);
+          debugDir = info?.folder || null;
+          if (!debugDir) return;
+        }
+        const fs = await loadFsPlugin().catch(() => null);
+        if (!fs) return;
+        await (fs as any).writeTextFile(
+          `${debugDir.replace(/[/\\]+$/, '')}\\pos-debug.log`,
+          DEBUG_RING.join('\n')
+        );
+      } catch {}
+    })();
+  } catch {}
+}
 
 // Serialized write queue — keeps DB writes in order.
 let writeQueue: Promise<void> = Promise.resolve();
@@ -97,18 +165,623 @@ export async function flushWrites(timeoutMs: number = 15000): Promise<void> {
 
 // Browser fallback keys (only used when running outside Tauri).
 const LKEYS = {
-  PRODUCTS: 'joainas_products_v1',
-  CUSTOMERS: 'joainas_customers_v1',
-  SALES: 'joainas_sales_v1',
-  EXPENDITURES: 'joainas_expenditures_v1',
-  PRINTER_CONFIG: 'joainas_printer_config_v1',
-  USERS: 'joainas_users_v1',
-  AUDIT_LOGS: 'joainas_audit_logs_v1',
-  CATEGORIES: 'joainas_categories_v1',
-  ADMIN_SETUP_DONE: 'joainas_admin_setup_done_v1',
-  ACTIVE_USER: 'joainas_active_user_v1',
-  LICENSE_ACCEPTED: 'joainas_license_accepted_v1',
+  PRODUCTS: 'senior_citizen_accessories_products_v1',
+  CUSTOMERS: 'senior_citizen_accessories_customers_v1',
+  SALES: 'senior_citizen_accessories_sales_v1',
+  EXPENDITURES: 'senior_citizen_accessories_expenditures_v1',
+  PRINTER_CONFIG: 'senior_citizen_accessories_printer_config_v1',
+  USERS: 'senior_citizen_accessories_users_v1',
+  AUDIT_LOGS: 'senior_citizen_accessories_audit_logs_v1',
+  CATEGORIES: 'senior_citizen_accessories_categories_v1',
+  CONTRACTS: 'senior_citizen_accessories_contracts_v1',
+  MICRO_PAYMENTS: 'senior_citizen_accessories_micropayments_v1',
+  ADMIN_SETUP_DONE: 'senior_citizen_accessories_admin_setup_done_v1',
+  ACTIVE_USER: 'senior_citizen_accessories_active_user_v1',
+  LICENSE_ACCEPTED: 'senior_citizen_accessories_license_accepted_v1',
 };
+
+// Legacy (pre-1.4.5, Joainas-branded) localStorage keys. The 1.4.5 rebrand
+// renamed every key, which orphaned license/setup/vault/snapshot data on
+// upgrade and made the app look wiped. Migrate once, then the new keys win.
+const LEGACY_KEYS: Record<string, string> = {
+  senior_citizen_accessories_products_v1: 'joainas_products_v1',
+  senior_citizen_accessories_customers_v1: 'joainas_customers_v1',
+  senior_citizen_accessories_sales_v1: 'joainas_sales_v1',
+  senior_citizen_accessories_expenditures_v1: 'joainas_expenditures_v1',
+  senior_citizen_accessories_printer_config_v1: 'joainas_printer_config_v1',
+  senior_citizen_accessories_users_v1: 'joainas_users_v1',
+  senior_citizen_accessories_audit_logs_v1: 'joainas_audit_logs_v1',
+  senior_citizen_accessories_categories_v1: 'joainas_categories_v1',
+  senior_citizen_accessories_admin_setup_done_v1: 'joainas_admin_setup_done_v1',
+  senior_citizen_accessories_active_user_v1: 'joainas_active_user_v1',
+  senior_citizen_accessories_license_accepted_v1: 'joainas_license_accepted_v1',
+  senior_citizen_accessories_backup_folder_path: 'joainas_backup_folder_path',
+  senior_citizen_accessories_admin_recovery_v1: 'joainas_admin_recovery_v1',
+  senior_citizen_accessories_autosave_snapshot_v1: 'joainas_autosave_snapshot_v1',
+  senior_citizen_accessories_app_theme_v2: 'joainas_app_theme_v2',
+};
+const LEGACY_THEME_IDS: Record<string, string> = {
+  'joainas-light': 'emerald-fresh',
+  'joainas-dark': 'SENIOR_CITIZEN-dark',
+};
+
+// ============================================================
+// SIBLING-DATABASE UNITE (v1.4.8)
+// Runs first in the Tauri branch, before any table is read: every known
+// database location other than the live file is ATTACH-merged into it
+// (see dbMergeFromFile — idempotent, never overwrites). This heals all
+// strandings: stale pointers to empty files, rebrand orphans, relocated
+// folders. A notice is surfaced when rows were actually recovered.
+// ============================================================
+
+function normDbPath(p: string): string {
+  return String(p || '')
+    .replace(/^sqlite:/i, '')
+    .replace(/\//g, '\\')
+    .replace(/\\+$/, '')
+    .toLowerCase();
+}
+
+export async function tryMergeSiblingDatabases(): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  try {
+    const { dbMergeFromFile } = await import('./db');
+    const url = await getDbUrl();
+    const live = normDbPath(url);
+    const fs = await loadFsPlugin();
+    if (!fs) return null;
+    const fmod = fs as any;
+    const names = ['senior_citizen_accessories.db', 'joainas_pos.db'];
+    const candidates = new Map<string, string>(); // norm -> display
+    const pushCand = (p: string) => {
+      if (!p) return;
+      const n = normDbPath(p);
+      if (!n || n === live || candidates.has(n)) return;
+      candidates.set(n, p);
+    };
+    const stripFile = (p: string) => String(p || '').replace(/[/\\]+$/, '');
+    // Live folder, its parent, and parent\Backup (covers Documents vs
+    // Documents\Backup splits in either direction).
+    try {
+      const info = await getDbInfo();
+      if (info?.folder) {
+        const f = stripFile(info.folder);
+        const parent = f.replace(/[/\\]+[^/\\]+$/, '');
+        for (const n of names) pushCand(`${f}\\${n}`);
+        if (parent && parent !== f) {
+          for (const n of names) pushCand(`${parent}\\${n}`);
+        }
+        if (/backup$/i.test(f)) {
+          for (const n of names) pushCand(`${parent}\\${n}`);
+        } else {
+          for (const n of names) pushCand(`${f}\\Backup\\${n}`);
+        }
+      }
+    } catch {}
+    // Legacy + current %APPDATA% pointer targets (old and new app ids) —
+    // these often name the true previous home, including user-relocated DBs.
+    try {
+      const pathMod = await import('@tauri-apps/api/path').catch(() => null);
+      if (pathMod?.appDataDir && fmod?.readTextFile) {
+        const base = await pathMod.appDataDir().catch(() => '');
+        if (base) {
+          const thisDir = stripFile(String(base).replace(/[/\\]+$/, ''));
+          const parentDir = thisDir.replace(/[/\\]+[^/\\]+$/, '');
+          for (const appId of ['com.seniorcitizen.accessories.desktop', 'com.joainas.pos.desktop']) {
+            const sibling = parentDir ? `${parentDir}\\${appId}` : '';
+            if (sibling) {
+              for (const n of names) pushCand(`${sibling}\\${n}`);
+              try {
+                const target = (await fmod.readTextFile(`${sibling}\\db_path.txt`).catch(() => '')).trim();
+                if (target) pushCand(target);
+              } catch {}
+            }
+          }
+        }
+      }
+    } catch {}
+    const recovered: Array<{ file: string; users: number; sales: number }> = [];
+    for (const [, display] of candidates) {
+      try {
+        let exists = false;
+        try {
+          exists = await fmod.exists(display);
+        } catch {
+          exists = true; // blind attempt — ATTACH fails safe
+        }
+        if (!exists) continue;
+        const added = await dbMergeFromFile(display);
+        const u = added['users'] || 0;
+        const s = added['sales'] || 0;
+        if (u > 0 || s > 0 || Object.values(added).some((n) => n > 0)) {
+          recovered.push({ file: display.split(/[/\\]/).pop() || display, users: u, sales: s });
+        }
+      } catch (e) {
+        console.error('Sibling merge failed for', display, e);
+      }
+    }
+    if (recovered.length > 0) {
+      const parts = recovered.map((r) => {
+        const bits: string[] = [];
+        if (r.users > 0) bits.push(`${r.users} account${r.users === 1 ? '' : 's'}`);
+        if (r.sales > 0) bits.push(`${r.sales} receipt${r.sales === 1 ? '' : 's'}`);
+        return `${bits.join(' + ') || 'records'} from ${r.file}`;
+      });
+      const msg = `Recovered ${parts.join('; ')}. All databases are now united — please restart the app.`;
+      recoveryNotice = msg;
+      console.info(msg);
+      return msg;
+    }
+  } catch (e) {
+    console.error('Sibling database unite failed', e);
+  }
+  return null;
+}
+
+function migrateLegacyKeys(): void {
+  try {
+    for (const [next, prev] of Object.entries(LEGACY_KEYS)) {
+      if (localStorage.getItem(next) == null) {
+        const old = localStorage.getItem(prev);
+        if (old != null) {
+          localStorage.setItem(next, old);
+        }
+      }
+    }
+    // Remap a saved Joainas theme id to its Senior Citizen equivalent.
+    try {
+      const t = localStorage.getItem('senior_citizen_accessories_app_theme_v2');
+      if (t && LEGACY_THEME_IDS[t]) {
+        localStorage.setItem('senior_citizen_accessories_app_theme_v2', LEGACY_THEME_IDS[t]);
+      }
+    } catch {}
+  } catch (e) {
+    console.error('Legacy key migration failed', e);
+  }
+}
+
+// Local calendar date (YYYY-MM-DD) — sales are recorded in LOCAL time, so
+// every picker default and "today" comparison must use this (UTC via
+// toISOString is off-by-one in WAT and hides today's records).
+export const todayLocal = (): string => new Date().toLocaleDateString('en-CA');
+
+// Historical-sale snapshot backfill. Products are NEVER given a minPrice here
+// — a legacy single price is a maximum, not a floor. Past sale items without
+// floor/ceiling snapshots are regarded as their own single price so old
+// receipts stay readable.
+function backfillMinPrices(): boolean {
+  let changed = false;
+  try {
+    // Normalize stored dates to YYYY-MM-DD (older rows may carry time parts
+    // that break picker/range comparisons).
+    cacheSales = cacheSales.map((s) => {
+      const d = typeof s.date === 'string' && s.date.length > 10 ? s.date.slice(0, 10) : s.date;
+      return d === s.date ? s : { ...s, date: d };
+    });
+
+    let salesChanged = false;
+    cacheSales = cacheSales.map((s) => {
+      let dirty = false;
+      const items = (s.items || []).map((it) => {
+        if ((it.floorAtSale === undefined || it.floorAtSale === null) && Number.isFinite(it.rate)) {
+          dirty = true;
+          return { ...it, floorAtSale: it.rate, ceilingAtSale: it.ceilingAtSale ?? it.rate };
+        }
+        if ((it.ceilingAtSale === undefined || it.ceilingAtSale === null) && Number.isFinite(it.rate)) {
+          dirty = true;
+          return { ...it, ceilingAtSale: it.rate };
+        }
+        return it;
+      });
+      if (dirty) {
+        salesChanged = true;
+        return { ...s, items };
+      }
+      return s;
+    });
+    if (salesChanged) changed = true;
+  } catch (e) {
+    console.error('Sale snapshot backfill failed', e);
+  }
+  return changed;
+}
+
+// SINGLE-FILE localStorage cache (v1.4.8 architecture).
+// Business data lives HERE first: every mutation updates the in-memory
+// caches and REPLACES this one file (no pile-up, storage stays ~constant).
+// SQLite is the durable vault, written ONLY at session boundaries
+// (logout, window close, pagehide/shutdown, periodic dirty check) via
+// persistAllToDatabase(). LocalStorage keeps business going; the vault
+// catches up in one replace — no per-keystroke redundancies.
+const AUTOSAVE_KEY = 'senior_citizen_accessories_autosave_snapshot_v1';
+
+interface AutosaveSnapshot {
+  products: Product[];
+  sales: SaleRecord[];
+  customers: Customer[];
+  expenditures: Expenditure[];
+  users?: User[];
+  categories?: Category[];
+  printerConfig?: ThermalPrinterConfig | null;
+  timestamp: number;
+  version: number;
+  appName?: string;
+  appVersion?: string;
+}
+
+export function saveAutosaveSnapshot(): void {
+  try {
+    const snap: AutosaveSnapshot = {
+      products: cacheProducts,
+      sales: cacheSales,
+      customers: cacheCustomers,
+      expenditures: cacheExpenditures,
+      users: cacheUsers,
+      categories: cacheCategories,
+      printerConfig: cachePrinterConfig,
+      timestamp: Date.now(),
+      version: 1,
+      appName: 'Joainas Mart',
+      appVersion: '2.0.6',
+    };
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snap));
+  } catch (e) {
+    console.error('Autosave snapshot failed', e);
+  }
+  markDirty();
+}
+
+export function loadAutosaveSnapshot(): AutosaveSnapshot | null {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AutosaveSnapshot;
+    if (!parsed || !Array.isArray(parsed.products) || !Array.isArray(parsed.sales)) return null;
+    if (parsed.customers && !Array.isArray(parsed.customers)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAutosaveSnapshot(): void {
+  try {
+    localStorage.removeItem(AUTOSAVE_KEY);
+  } catch {}
+}
+
+// ============================================================
+// DIRTY FLAG + VAULT FLUSH (v1.4.8)
+// Every mutation marks the vault stale. persistAllToDatabase() writes ALL
+// tables from the caches in one sequential pass and runs ONLY at session
+// boundaries (logout, close, shutdown, periodic check) — or when forced.
+// Skipped entirely when nothing changed, so idle boundaries cost nothing.
+// ============================================================
+
+let vaultDirty = false;
+let persistRunning = false;
+
+export function markDirty(): void {
+  vaultDirty = true;
+}
+
+export function isVaultDirty(): boolean {
+  return vaultDirty;
+}
+
+export async function persistAllToDatabase(force: boolean = false, timeoutMs: number = 12000): Promise<boolean> {
+  if (!isTauriRuntime()) return true;
+  if (!force && !vaultDirty) return true;
+  if (persistRunning) return true; // a flush is already in flight — no stacking
+  persistRunning = true;
+  let ok = true;
+  const step = async (label: string, task: () => Promise<void>) => {
+    try {
+      await task();
+    } catch (e) {
+      ok = false;
+      console.error(`Vault flush failed: ${label}`, e);
+    }
+  };
+  const run = (async () => {
+    await step('products', () => dbSaveProducts([...cacheProducts]));
+    await step('sales', () => dbSaveSales([...cacheSales]));
+    await step('customers', () => dbSaveCustomers([...cacheCustomers]));
+    await step('expenditures', () => dbSaveExpenditures([...cacheExpenditures]));
+    await step('users', () => dbSaveUsers([...cacheUsers]));
+    await step('categories', () => dbSaveCategories([...cacheCategories]));
+    await step('audit', () => dbSaveAuditLogs([...cacheAuditLogs]));
+    if (cachePrinterConfig) {
+      await step('printer', () => dbSavePrinterConfig({ ...cachePrinterConfig as ThermalPrinterConfig }));
+    }
+    await step('setup-flag', () => dbSetSetting('admin_setup_done', String(cacheAdminSetupDone)));
+    await flushWrites(3000);
+  })();
+  try {
+    await Promise.race([
+      run,
+      new Promise<void>((_, reject) => setTimeout(() => reject(new Error('vault flush timeout')), timeoutMs)),
+    ]);
+  } catch (e) {
+    ok = false;
+    console.error('Vault flush timed out', e);
+  }
+  persistRunning = false;
+  if (ok) vaultDirty = false;
+  return ok;
+}
+
+// Pending one-time notice for the UI (e.g. "Recovered 132 old receipts").
+let recoveryNotice: string | null = null;
+export function consumeRecoveryNotice(): string | null {
+  const n = recoveryNotice;
+  recoveryNotice = null;
+  return n;
+}
+
+// ============================================================
+// JSON BACKUP AUTO-RECOVERY (v1.4.7)
+// The 1.4.5 rebrand orphaned data for shops whose only surviving copy is a
+// JSON backup file (no legacy .db to copy). When the live database has NO
+// sales at all, scan the live DB folder for *backup*.json files, validate
+// the Joainas/Senior Citizen schema, and merge sales + items + missing
+// products/customers (dedupe by id — never duplicates, never overwrites).
+// Users are imported ONLY when the live DB has zero accounts, and then the
+// setup flag is set so the shop is not forced through setup again.
+// Runs at most once per backup file (marker in app_settings).
+// ============================================================
+
+// Merge a validated backup payload into the live caches (dedupe by id AND
+// barcode, never overwrites). Returns genuinely-new counts. Legacy payloads
+// are normalized first: every item becomes a Product, categories move under
+// Products, and single prices become maximums. Live stock is never touched.
+// Shared by auto-recovery and the manual login-screen recovery panel.
+export function adoptBackupPayload(parsed: any): { sales: number; users: number; products: number } {
+  let sales = 0;
+  let users = 0;
+  let products = 0;
+  try {
+    const payload = normalizeLegacyBackup(parsed);
+    const bSales: SaleRecord[] = Array.isArray(payload.sales) ? payload.sales : [];
+    const bProducts: Product[] = Array.isArray(payload.products) ? payload.products : [];
+    const bCustomers: Customer[] = Array.isArray(payload.customers) ? payload.customers : [];
+    const bExpenditures: Expenditure[] = Array.isArray(payload.expenditures) ? payload.expenditures : [];
+    const bCategories: Category[] = Array.isArray(payload.categories) ? payload.categories : [];
+
+    // Defensive snapshot: no existing product's stock may change.
+    const liveStockBefore = new Map(cacheProducts.map((p) => [p.id, p.stockQty]));
+
+    const mergedProducts = mergeBackupProducts(cacheProducts, bProducts);
+    if (mergedProducts.added.length > 0) {
+      cacheProducts = mergedProducts.products;
+      products = mergedProducts.added.length;
+    }
+
+    const haveC = new Set(cacheCustomers.map((c) => c.id));
+    const newCustomers = bCustomers.filter((c) => c && c.id && !haveC.has(c.id));
+    if (newCustomers.length > 0) cacheCustomers = [...cacheCustomers, ...newCustomers];
+
+    if (bExpenditures.length > 0 && cacheExpenditures.length === 0) {
+      cacheExpenditures = bExpenditures;
+    }
+
+    const haveS = new Set(cacheSales.map((s) => s.id));
+    const newSales = bSales.filter((s) => s && s.id && !haveS.has(s.id));
+    if (newSales.length > 0) {
+      cacheSales = [...newSales, ...cacheSales];
+      sales = newSales.length;
+    }
+
+    // Categories are additive; never replace the live category list.
+    if (bCategories.length > 0) {
+      const catIds = new Set(cacheCategories.map((c) => c.id));
+      const catNames = new Set(cacheCategories.map((c) => c.name.toLowerCase()));
+      const newCategories = bCategories.filter(
+        (c) => c && c.id && !catIds.has(c.id) && !catNames.has(String(c.name).toLowerCase())
+      );
+      if (newCategories.length > 0) cacheCategories = [...cacheCategories, ...newCategories];
+    }
+
+    const bUsers: User[] = Array.isArray(payload.users) ? payload.users : [];
+    if (cacheUsers.length === 0 && bUsers.length > 0) {
+      cacheUsers = bUsers;
+      users = bUsers.length;
+      cacheAdminSetupDone = true;
+      lsSet(LKEYS.ADMIN_SETUP_DONE, true);
+      markDirty();
+    }
+    if (payload.printerConfig && !cachePrinterConfig) {
+      cachePrinterConfig = payload.printerConfig;
+    }
+
+    // Defensive assertion: merge must never modify live stock.
+    for (const p of cacheProducts) {
+      const before = liveStockBefore.get(p.id);
+      if (before !== undefined && p.stockQty !== before) {
+        console.error(`Backup merge altered live stock for ${p.id} (${before} → ${p.stockQty}); restoring.`);
+        p.stockQty = before;
+      }
+    }
+  } catch (e) {
+    console.error('Backup payload adopt failed', e);
+  }
+  return { sales, users, products };
+}
+
+// Evidence of a prior installation on this machine/profile. Fresh installs
+// have NONE of these; updates always have at least one — so the setup
+// wizard (a one-way latch) can never reappear on an update.
+export async function hasInstallEvidence(): Promise<boolean> {
+  try {
+    if (cacheAdminSetupDone) return true;
+    if (lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false)) return true;
+    if (cacheUsers.length > 0) return true;
+    if (loadUsers().length > 0) return true;
+    const snap = loadAutosaveSnapshot();
+    if (
+      snap &&
+      ((snap.users?.length ?? 0) > 0 || snap.sales.length > 0 || snap.products.length > 0)
+    ) {
+      return true;
+    }
+    try {
+      if (localStorage.getItem('senior_citizen_accessories_admin_recovery_v1')) return true;
+    } catch {}
+    try {
+      if (localStorage.getItem('senior_citizen_accessories_backup_folder_path')) return true;
+    } catch {}
+    if (isTauriRuntime()) {
+      const fs = await loadFsPlugin().catch(() => null);
+      if (fs) {
+        const fmod = fs as any;
+        // Any database, backup JSON, or pointer file on disk = prior install.
+        const looksLikeData = (n: string) => {
+          const l = n.toLowerCase();
+          return l.endsWith('.db') || l.endsWith('.json') || l.endsWith('.txt');
+        };
+        const scanDir = async (dir: string): Promise<boolean> => {
+          try {
+            const entries = await fmod.readDir(dir);
+            return (entries || []).some((e: any) => {
+              const n = String(typeof e === 'string' ? e : e.name || e.path || '').split(/[/\\]/).pop() || '';
+              return looksLikeData(n);
+            });
+          } catch {
+            return false;
+          }
+        };
+        try {
+          const info = await getDbInfo().catch(() => null);
+          if (info?.folder) {
+            const f = info.folder.replace(/[/\\]+$/, '');
+            if (await scanDir(f)) return true;
+            const parent = f.replace(/[/\\]+[^/\\]+$/, '');
+            if (parent && parent !== f && (await scanDir(parent))) return true;
+            if (!/backup$/i.test(f) && (await scanDir(`${f}\\Backup`))) return true;
+          }
+        } catch {}
+        try {
+          const pathMod = await import('@tauri-apps/api/path').catch(() => null);
+          if (pathMod?.appDataDir) {
+            const base = await pathMod.appDataDir().catch(() => '');
+            if (base) {
+              const thisDir = String(base).replace(/[/\\]+$/, '');
+              const parentDir = thisDir.replace(/[/\\]+[^/\\]+$/, '');
+              for (const appId of ['com.dronebug.dirms.desktop', 'com.seniorcitizen.accessories.desktop', 'com.joainas.pos.desktop']) {
+                if (await scanDir(`${parentDir}\\${appId}`)) return true;
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return false;
+}
+
+export async function tryRecoverFromJsonBackup(force: boolean = false): Promise<{ sales: number; file: string } | null> {
+  if (!isTauriRuntime()) return null;
+  // Update rule: an existing installation must land on LOGIN, never setup.
+  // Only skip when the live DB already has BOTH receipts and accounts.
+  if (!force && cacheSales.length > 0 && cacheUsers.length > 0) return null;
+  try {
+    const info = await getDbInfo();
+    const dir = info?.folder;
+    if (!dir) return null;
+    const fs = await loadFsPlugin();
+    if (!fs) return null;
+    let entries: any[] = [];
+    try {
+      entries = await (fs as any).readDir(dir);
+    } catch {
+      return null;
+    }
+    const candidates = (entries || [])
+      .map((e: any) => (typeof e === 'string' ? e : e.name || e.path || ''))
+      .map((n: string) => String(n).split(/[/\\]/).pop() || '')
+      .filter((n: string) => n.toLowerCase().includes('backup') && n.toLowerCase().endsWith('.json'))
+      .sort()
+      .reverse()
+      .slice(0, 10);
+    for (const file of candidates) {
+      try {
+        const marker = force ? null : await dbGetSetting(`json_auto_recovery_${file}`);
+        if (marker) continue; // already attempted for this file
+        const fullPath = `${dir.replace(/[/\\]+$/, '')}\\${file}`;
+        const text: string = await (fs as any).readTextFile(fullPath);
+        if (!text || text.length > 50 * 1024 * 1024) {
+          await dbSetSetting(`json_auto_recovery_${file}`, 'skipped');
+          continue;
+        }
+        const parsed = JSON.parse(text);
+        if (!isValidBackupPayload(parsed)) {
+          await dbSetSetting(`json_auto_recovery_${file}`, 'invalid');
+          continue;
+        }
+        // Merge-only via the shared adopter (never replaces newer live rows).
+        const adopted = adoptBackupPayload(parsed);
+        // Single-file cache replaces old file; vault catches up at boundary.
+        saveAutosaveSnapshot();
+        await dbSetSetting(`json_auto_recovery_${file}`, new Date().toISOString());
+        // Stop after the FIRST file that yields any data (sales, products or
+        // users). Continuing through every backup caused stock corruption.
+        const yielded = adopted.sales + adopted.products + adopted.users;
+        if (yielded > 0) {
+          const parts: string[] = [];
+          if (adopted.sales > 0) parts.push(`${adopted.sales} receipt${adopted.sales === 1 ? '' : 's'}`);
+          if (adopted.products > 0) parts.push(`${adopted.products} product${adopted.products === 1 ? '' : 's'}`);
+          if (adopted.users > 0) parts.push(`${adopted.users} user${adopted.users === 1 ? '' : 's'}`);
+          recoveryNotice = `Recovered ${parts.join(', ')} from backup ${file}. Past records (Sept 10 & earlier) show the single sold price.`;
+          console.info(recoveryNotice);
+          return { sales: adopted.sales, file };
+        }
+        // Valid file but nothing new — still marked so we don't rescan it.
+      } catch (e) {
+        console.error('JSON backup recovery failed for candidate', file, e);
+      }
+    }
+  } catch (e) {
+    console.error('JSON backup auto-recovery failed', e);
+  }
+  return null;
+}
+
+// Manual import of a backup JSON's text (login-screen recovery panel,
+// Admin button). Validates, merges via the shared adopter, consolidates
+// the snapshot, and flushes the vault when something was adopted.
+export function importBackupText(text: string): { sales: number; users: number; products: number } | null {
+  try {
+    if (!text || text.length > 50 * 1024 * 1024) return null;
+    const parsed = JSON.parse(text);
+    if (!isValidBackupPayload(parsed)) return null;
+    const res = adoptBackupPayload(parsed);
+    saveAutosaveSnapshot();
+    if (res.sales > 0 || res.users > 0 || res.products > 0) {
+      void persistAllToDatabase(true);
+    }
+    return res;
+  } catch {
+    return null;
+  }
+}
+
+let autosaveHooksRegistered = false;
+function registerAutosaveHooks(): void {
+  if (autosaveHooksRegistered) return;
+  autosaveHooksRegistered = true;
+  const doSave = () => {
+    try {
+      saveAutosaveSnapshot();
+    } catch {}
+  };
+  // Synchronous localStorage writes survive pagehide/beforeunload even when SQLite queue is lost
+  window.addEventListener('beforeunload', doSave);
+  window.addEventListener('pagehide', doSave);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') doSave();
+  });
+  // Also on sign-out explicit path calls saveAutosaveSnapshot directly
+}
 
 function lsGet<T>(key: string, fallback: T): T {
   try {
@@ -136,10 +809,44 @@ export async function initStorage(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
+  // Migrate pre-1.4.5 Joainas keys BEFORE any read so upgrades keep data.
+  migrateLegacyKeys();
+
   if (isTauriRuntime()) {
+    // FIRST: unite sibling database files into the live one (stale pointer
+    // to an empty file, rebrand orphans, relocated folders). Idempotent —
+    // rows are only ever added, never overwritten. Must run before reads.
+    try {
+      const merged = await tryMergeSiblingDatabases();
+      debugLog(`init: sibling unite done (${merged ? 'recovered: ' + merged : 'nothing new'})`);
+    } catch (e) {
+      debugLog(`init: sibling unite threw: ${e instanceof Error ? e.message : String(e)}`);
+      console.error('Sibling unite hook failed', e);
+    }
+
+    debugLog('init: storage bootstrap begin');
+
+    // Per-table guards: ONE bad table (locked file, partial schema, corrupt
+    // row) must never empty every other cache — that failure mode parked the
+    // app at the setup wizard with a full database on disk.
+    const guarded = async <T,>(label: string, fallback: T, task: () => Promise<T>): Promise<T> => {
+      const t0 = Date.now();
+      try {
+        const v = await task();
+        const n = Array.isArray(v) ? `${(v as unknown[]).length} rows` : v == null ? 'null' : 'value';
+        debugLog(`init: ${label} ok (${n}, ${Date.now() - t0}ms)`);
+        return v;
+      } catch (e) {
+        debugLog(`init: ${label} FAILED, fallback used: ${e instanceof Error ? e.message : String(e)}`);
+        return fallback;
+      }
+    };
+
     const [
       products,
       customers,
+      contracts,
+      microPayments,
       sales,
       expenditures,
       users,
@@ -148,19 +855,23 @@ export async function initStorage(): Promise<void> {
       printerConfig,
       setupDone,
     ] = await Promise.all([
-      dbLoadProducts(),
-      dbLoadCustomers(),
-      dbLoadSales(),
-      dbLoadExpenditures(),
-      dbLoadUsers(),
-      dbLoadAuditLogs(),
-      dbLoadCategories(),
-      dbLoadPrinterConfig(),
-      dbGetSetting('admin_setup_done'),
+      guarded('products', [] as Product[], () => dbLoadProducts()),
+      guarded('customers', [] as Customer[], () => dbLoadCustomers()),
+      guarded('contracts', [] as any[], () => dbLoadContracts()),
+      guarded('micro-payments', [] as any[], () => dbLoadMicroPayments()),
+      guarded('sales', [] as SaleRecord[], () => dbLoadSales()),
+      guarded('expenditures', [] as Expenditure[], () => dbLoadExpenditures()),
+      guarded('users', [] as User[], () => dbLoadUsers()),
+      guarded('auditLogs', [] as AuditLog[], () => dbLoadAuditLogs()),
+      guarded('categories', [] as Category[], () => dbLoadCategories()),
+      guarded('printerConfig', null as ThermalPrinterConfig | null, () => dbLoadPrinterConfig()),
+      guarded('setup-flag', null as string | null, () => dbGetSetting('admin_setup_done')),
     ]);
 
     cacheProducts = products;
     cacheCustomers = customers;
+    cacheContracts = contracts;
+    cacheMicroPayments = microPayments;
     cacheSales = sales;
     cacheExpenditures = expenditures;
     cacheUsers = users;
@@ -172,6 +883,73 @@ export async function initStorage(): Promise<void> {
     // first-time setup wizard. If the SQLite read fails for any reason the
     // app still lands on the login gate instead of the setup screen.
     cacheAdminSetupDone = setupDone === 'true' || lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false);
+    debugLog(
+      `init: caches ready — products=${cacheProducts.length} sales=${cacheSales.length} ` +
+      `users=${cacheUsers.length} setupFlag=${cacheAdminSetupDone} (db=${setupDone})`
+    );
+    // v2.0.6 trusted-clock anchor: merge the vault + local high-water mark,
+    // then verify the OS clock. Only a BACKWARD rollback blocks; a forward
+    // difference is normal downtime after a shutdown and is accepted (this
+    // is what used to cause the false warning after every restart).
+    // v1.6.0 display currency: hydrate alongside (vault wins, else mirror).
+    try {
+      await hydrateCurrency().catch(() => null);
+    } catch {}
+    try {
+      const anchor = await hydrateTimeAnchor();
+      const gate = checkWallClock(Date.now(), anchor);
+      if (!gate.ok) {
+        recordAuditLog(
+          'System',
+          'System Admin',
+          'System Clock Tamper Detected',
+          `OS clock appears to have moved backwards by more than 30 minutes at startup. Last verified: ${new Date(gate.lastGoodMs).toLocaleString()}; ` +
+          `current system time: ${new Date(gate.nowMs).toLocaleString()}. Sign-in remains available; non-admin sessions carry a FLASHALERT and sales are tagged until an ADMIN verifies the clock.`
+        );
+      } else {
+        // A forward gap is normal time passage while the app was closed.
+        // Raise the high-water mark so the live monitor does not keep
+        // comparing against a stale pre-shutdown time.
+        if (gate.forwardJump) {
+          debugLog(
+            `init: clock is >24h ahead of the last anchor (normal after a long shutdown) — accepting ${new Date(gate.nowMs).toLocaleString()}`
+          );
+        }
+        touchClock(Date.now());
+      }
+    } catch (e) {
+      console.error('Trusted-clock boot check failed', e);
+    }
+    // v1.5.2 startup-time validation (Rust backend): catches OS-clock
+    // rollbacks performed while the app was CLOSED — invisible to the anchor
+    // above whenever the anchor stores were wiped or restored from an old
+    // backup. Fail-open (null): a backend/disk error must never brick sales;
+    // the anchor + live monitor still protect the session.
+    try {
+      const v = await validateStartupTime();
+      if (v && !v.ok) {
+        const lastGoodMs = v.last_trusted_unix > 0 ? v.last_trusted_unix * 1000 : 0;
+        const nowMs = v.current_unix > 0 ? v.current_unix * 1000 : Date.now();
+        recordAuditLog(
+          'System',
+          'System Admin',
+          'System Clock Tamper Detected',
+          `${v.reason} Last trusted boot: ${lastGoodMs > 0 ? new Date(lastGoodMs).toLocaleString() : 'unknown'}. ` +
+          `Sign-in remains available; non-admin sessions carry a FLASHALERT and sales are tagged until an ADMIN verifies the clock.`
+        );
+        reportStartupTamper(
+          `${v.reason} Sign-in remains available with a FLASHALERT; an ADMIN must verify the clock (or correct the date/time and restart).`,
+          lastGoodMs,
+          nowMs
+        );
+      } else if (v && v.reason) {
+        // Backend self-healed (e.g. corrupt stamp file re-initialized) —
+        // worth a forensic trail, but not a block.
+        debugLog(`init: startup-time note: ${v.reason}`);
+      }
+    } catch (e) {
+      console.error('Startup-time boot check failed', e);
+    }
     // Restore any still-valid session from sessionStorage — this is what
     // lets a browser refresh keep the user logged in while a full close
     // clears it (sessionStorage is per-tab and dies with the window).
@@ -182,21 +960,175 @@ export async function initStorage(): Promise<void> {
     if (categories.length === 0) {
       saveCategories(DEFAULT_CATEGORIES);
     }
+
+    // LOCAL-FIRST restore: the single snapshot file is the primary store.
+    // Adopt every slice where it beats the vault; the vault (just united)
+    // wins wherever the snapshot is empty or stale. Extended fields (users,
+    // categories, printerConfig) included. Legacy per-table keys fill any
+    // remaining gaps one-time for pre-1.4.8 profiles.
+    try {
+      const snap = loadAutosaveSnapshot();
+      const fresh = snap && snap.timestamp && Date.now() - snap.timestamp < 7 * 24 * 3600 * 1000 ? snap : null;
+      if (fresh) {
+        if (fresh.sales.length > cacheSales.length) cacheSales = fresh.sales;
+        if (fresh.products.length > cacheProducts.length) cacheProducts = fresh.products;
+        if (Array.isArray(fresh.customers) && fresh.customers.length > cacheCustomers.length) {
+          cacheCustomers = fresh.customers;
+        }
+        if (Array.isArray(fresh.expenditures) && fresh.expenditures.length > cacheExpenditures.length) {
+          cacheExpenditures = fresh.expenditures;
+        }
+        if (Array.isArray(fresh.users) && fresh.users.length > cacheUsers.length) {
+          cacheUsers = fresh.users;
+        }
+        if (Array.isArray(fresh.categories) && fresh.categories.length > cacheCategories.length) {
+          cacheCategories = fresh.categories;
+        }
+        if (fresh.printerConfig && !cachePrinterConfig) {
+          cachePrinterConfig = fresh.printerConfig;
+        }
+      }
+      if (cacheProducts.length === 0) {
+        const v = lsGet<Product[]>(LKEYS.PRODUCTS, []);
+        if (v.length > 0) cacheProducts = v;
+      }
+      if (cacheSales.length === 0) {
+        const v = lsGet<SaleRecord[]>(LKEYS.SALES, []);
+        if (v.length > 0) cacheSales = v;
+      }
+      if (cacheCustomers.length === 0) {
+        const v = lsGet<Customer[]>(LKEYS.CUSTOMERS, []);
+        if (v.length > 0) cacheCustomers = v;
+      }
+      if (cacheExpenditures.length === 0) {
+        const v = lsGet<Expenditure[]>(LKEYS.EXPENDITURES, []);
+        if (v.length > 0) cacheExpenditures = v;
+      }
+      if (cacheUsers.length === 0) {
+        const v = lsGet<User[]>(LKEYS.USERS, []);
+        if (v.length > 0) cacheUsers = v;
+      }
+      if (cacheCategories.length === 0) {
+        const v = lsGet<Category[]>(LKEYS.CATEGORIES, []);
+        if (v.length > 0) cacheCategories = v;
+      }
+      if (!cachePrinterConfig) {
+        const v = lsGet<ThermalPrinterConfig | null>(LKEYS.PRINTER_CONFIG, null);
+        if (v) cachePrinterConfig = v;
+      }
+      const logs = lsGet<AuditLog[]>(LKEYS.AUDIT_LOGS, []);
+      if (logs.length > cacheAuditLogs.length) cacheAuditLogs = logs;
+      // Re-consolidate everything back into the single file.
+      saveAutosaveSnapshot();
+    } catch (e) {
+      console.error('Local-first restore failed', e);
+    }
+
+    // JSON backup auto-recovery: if the live DB has no sales at all, merge
+    // them back from a *backup*.json in the DB folder (the 1.4.5 rebrand
+    // orphaned shops whose only surviving copy is JSON). Runs before the
+    // backfill so recovered rows get min-price treatment too.
+    try {
+      await tryRecoverFromJsonBackup();
+    } catch (e) {
+      console.error('JSON recovery hook failed', e);
+    }
+
+    // v1.5.0: swap untouched legacy default categories for Products/Services
+    // BEFORE the snapshot/vault consolidation below, so the fix persists.
+    try {
+      migrateLegacyDefaultCategories();
+    } catch (e) {
+      console.error('Category migration failed', e);
+    }
+    // v2.0.5: move legacy inventory categories under Products and convert
+    // legacy single prices to maximums (safe, one-time).
+    try {
+      migrateLegacyInventoryToProducts();
+    } catch (e) {
+      console.error('Inventory migration failed', e);
+    }
+    // v1.5.0: replace the legacy frozen-foods receipt footer with the
+    // generic default — but only if the user never customized it.
+    try {
+      migrateLegacyReceiptFooter();
+    } catch (e) {
+      console.error('Receipt footer migration failed', e);
+    }
+    // Existing inventory prices are assumed minimum prices; past sale records
+    // are regarded as their own minimums. Backfill once per launch, then
+    // consolidate + push the united state to the vault (startup boundary).
+    try {
+      backfillMinPrices();
+    } catch (e) {
+      console.error('Min-price backfill failed', e);
+    }
+    try {
+      saveAutosaveSnapshot();
+    } catch {}
+    try {
+      await persistAllToDatabase(true);
+    } catch (e) {
+      console.error('Startup vault sync failed', e);
+    }
+
+    registerAutosaveHooks();
   } else {
-    cacheProducts = lsGet<Product[]>(LKEYS.PRODUCTS, []);
-    cacheCustomers = lsGet<Customer[]>(LKEYS.CUSTOMERS, []);
-    cacheSales = lsGet<SaleRecord[]>(LKEYS.SALES, []);
-    cacheExpenditures = lsGet<Expenditure[]>(LKEYS.EXPENDITURES, []);
-    cacheUsers = lsGet<User[]>(LKEYS.USERS, []);
+    // Browser: snapshot file first, legacy per-table keys as fallback.
+    const snap0 = loadAutosaveSnapshot();
+    if (snap0 && Array.isArray(snap0.products) && Array.isArray(snap0.sales)) {
+      cacheProducts = snap0.products;
+      cacheSales = snap0.sales;
+      if (Array.isArray(snap0.customers)) cacheCustomers = snap0.customers;
+      if (Array.isArray(snap0.expenditures)) cacheExpenditures = snap0.expenditures;
+      if (Array.isArray(snap0.users)) cacheUsers = snap0.users;
+      if (Array.isArray(snap0.categories)) cacheCategories = snap0.categories;
+      if (snap0.printerConfig) cachePrinterConfig = snap0.printerConfig;
+    } else {
+      cacheProducts = lsGet<Product[]>(LKEYS.PRODUCTS, []);
+      cacheCustomers = lsGet<Customer[]>(LKEYS.CUSTOMERS, []);
+      cacheSales = lsGet<SaleRecord[]>(LKEYS.SALES, []);
+      cacheExpenditures = lsGet<Expenditure[]>(LKEYS.EXPENDITURES, []);
+      cacheUsers = lsGet<User[]>(LKEYS.USERS, []);
+      cacheCategories = lsGet<Category[]>(LKEYS.CATEGORIES, []);
+      cachePrinterConfig = lsGet<ThermalPrinterConfig | null>(LKEYS.PRINTER_CONFIG, null);
+    }
     cacheAuditLogs = lsGet<AuditLog[]>(LKEYS.AUDIT_LOGS, []);
-    cacheCategories = lsGet<Category[]>(LKEYS.CATEGORIES, []);
-    cachePrinterConfig = lsGet<ThermalPrinterConfig | null>(LKEYS.PRINTER_CONFIG, null);
     cacheAdminSetupDone = lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false);
     cacheActiveUser = readSessionUser() ?? lsGet<User | null>(LKEYS.ACTIVE_USER, null);
 
     if (cacheCategories.length === 0) {
       saveCategories(DEFAULT_CATEGORIES);
+    } else {
+      // v1.5.0: swap untouched legacy default categories for Products/Services.
+      try {
+        migrateLegacyDefaultCategories();
+      } catch {}
     }
+    // v2.0.5: move legacy inventory categories under Products and convert
+    // legacy single prices to maximums (safe, one-time).
+    try {
+      migrateLegacyInventoryToProducts();
+    } catch {}
+    // v1.5.0: replace the legacy frozen-foods receipt footer with the
+    // generic default — but only if the user never customized it.
+    try {
+      migrateLegacyReceiptFooter();
+    } catch {}
+
+    try {
+      backfillMinPrices();
+    } catch {}
+
+    // v1.5.1 trusted clock: hydrate the anchor mirror even in browser dev.
+    try {
+      await hydrateTimeAnchor();
+      await hydrateCurrency().catch(() => null);
+      touchClock(Date.now());
+    } catch {}
+
+    registerAutosaveHooks();
+    saveAutosaveSnapshot();
   }
 }
 
@@ -220,11 +1152,9 @@ export const saveProducts = (products: Product[]) => {
     return;
   }
   cacheProducts = products;
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSaveProducts(products));
-  } else {
-    lsSet(LKEYS.PRODUCTS, products);
-  }
+  // Auto-save single-file cache (replaces old) — survives sign-out / crash.
+  // Vault catches up at the next session boundary.
+  saveAutosaveSnapshot();
 };
 
 // ============================================================
@@ -239,11 +1169,94 @@ export const saveCustomers = (customers: Customer[]) => {
     return;
   }
   cacheCustomers = customers;
+  saveAutosaveSnapshot();
+};
+
+// ---- StoreBox PRO installment ledger (contracts + micro-payments) ----
+export const loadContracts = (): any[] => cacheContracts;
+export const loadMicroPayments = (): any[] => cacheMicroPayments;
+export const saveContracts = (contracts: any[]) => {
+  cacheContracts = contracts;
+  try {
+    if (isTauriRuntime()) void dbSaveContracts([...contracts]);
+    else localStorage.setItem(LKEYS.CONTRACTS, JSON.stringify(contracts));
+  } catch {}
+  saveAutosaveSnapshot();
+};
+export const recordMicroPayment = async (p: { contractId: string; customerId: string; amount: number; receiptNote?: string; remitted?: boolean; createdBy?: string }): Promise<any | null> => {
   if (isTauriRuntime()) {
-    enqueueWrite(() => dbSaveCustomers(customers));
-  } else {
-    lsSet(LKEYS.CUSTOMERS, customers);
+    try {
+      const r = await dbRecordMicroPayment(p);
+      cacheMicroPayments = await dbLoadMicroPayments().catch(() => cacheMicroPayments);
+      cacheContracts = await dbLoadContracts().catch(() => cacheContracts);
+      cacheCustomers = await dbLoadCustomers().catch(() => cacheCustomers);
+      saveAutosaveSnapshot();
+      return r;
+    } catch (e) {
+      console.error('recordMicroPayment failed', e);
+      return null;
+    }
   }
+  const entry: any = { id: `mpay-${Date.now()}`, collectedAt: Date.now(), remitted: !!p.remitted, ...p };
+  cacheMicroPayments = [...cacheMicroPayments, entry];
+  cacheContracts = cacheContracts.map((c) => {
+    if (c.id !== p.contractId) return c;
+    const totalPaid = (c.totalPaid || 0) + p.amount;
+    const pending = Math.max(0, (c.totalPrice || 0) - totalPaid);
+    return { ...c, totalPaid, pendingBalance: pending, status: pending <= 0.005 ? 'COMPLETED' : 'INSTALLMENT_ACTIVE' };
+  });
+  try { localStorage.setItem(LKEYS.MICRO_PAYMENTS, JSON.stringify(cacheMicroPayments)); } catch {}
+  saveAutosaveSnapshot();
+  return entry;
+};
+export const deleteMicroPayment = async (paymentId: string): Promise<boolean> => {
+  if (isTauriRuntime()) {
+    const ok = await dbDeleteMicroPayment(paymentId).catch(() => false);
+    cacheMicroPayments = await dbLoadMicroPayments().catch(() => cacheMicroPayments);
+    cacheContracts = await dbLoadContracts().catch(() => cacheContracts);
+    cacheCustomers = await dbLoadCustomers().catch(() => cacheCustomers);
+    saveAutosaveSnapshot();
+    return ok;
+  }
+  const target = cacheMicroPayments.find((m) => m.id === paymentId);
+  cacheMicroPayments = cacheMicroPayments.filter((m) => m.id !== paymentId);
+  if (target) {
+    cacheContracts = cacheContracts.map((c) => {
+      if (c.id !== target.contractId) return c;
+      const totalPaid = Math.max(0, (c.totalPaid || 0) - target.amount);
+      const pending = Math.max(0, (c.totalPrice || 0) - totalPaid);
+      return { ...c, totalPaid, pendingBalance: pending, status: pending <= 0.005 ? 'COMPLETED' : 'INSTALLMENT_ACTIVE' };
+    });
+  }
+  saveAutosaveSnapshot();
+  return true;
+};
+export const setMicroRemitted = async (paymentId: string, remitted: boolean): Promise<void> => {
+  cacheMicroPayments = cacheMicroPayments.map((m) => (m.id === paymentId ? { ...m, remitted } : m));
+  if (isTauriRuntime()) { try { await dbSetMicroRemitted(paymentId, remitted); } catch {} }
+  saveAutosaveSnapshot();
+};
+export const setContractDownRemitted = async (contractId: string, remitted: boolean): Promise<void> => {
+  cacheContracts = cacheContracts.map((c) => (c.id === contractId ? { ...c, downRemitted: remitted } : c));
+  if (isTauriRuntime()) { try { await dbSetContractDownRemitted(contractId, remitted); } catch {} }
+  try { if (!isTauriRuntime()) localStorage.setItem(LKEYS.CONTRACTS, JSON.stringify(cacheContracts)); else void dbSaveContracts([...cacheContracts]); } catch {}
+  saveAutosaveSnapshot();
+};
+export const clearDemoLedgerData = async (): Promise<void> => {
+  cacheContracts = [];
+  cacheMicroPayments = [];
+  if (isTauriRuntime()) {
+    try { await dbSaveContracts([]); } catch {}
+    try {
+      const { getDb } = await import('./db');
+      const d = await getDb();
+      if (d) await d.execute('DELETE FROM micro_payments', []);
+    } catch {}
+    cacheCustomers = await dbLoadCustomers().catch(() => cacheCustomers);
+  } else {
+    try { localStorage.removeItem(LKEYS.CONTRACTS); localStorage.removeItem(LKEYS.MICRO_PAYMENTS); } catch {}
+  }
+  saveAutosaveSnapshot();
 };
 
 // ============================================================
@@ -252,17 +1265,133 @@ export const saveCustomers = (customers: Customer[]) => {
 
 export const loadSales = (): SaleRecord[] => cacheSales;
 
+// NOTE (v1.4.8 architecture): every save below writes caches + the SINGLE
+// localStorage snapshot file and marks the vault dirty. SQLite is written
+// ONLY by persistAllToDatabase() at session boundaries (logout, close,
+// shutdown, periodic dirty check). No per-action DB writes, no redundancies.
+
 export const saveSales = (sales: SaleRecord[]) => {
   if (sales.length === 0 && cacheSales.length > 1) {
     console.warn('Blocked accidental empty sales save.');
     return;
   }
   cacheSales = sales;
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSaveSales(sales));
-  } else {
-    lsSet(LKEYS.SALES, sales);
+  // Single-file cache replaces old snapshot — vault catches up at boundary.
+  saveAutosaveSnapshot();
+};
+
+// Checkout path: caches + single snapshot only. Stock/sale durability comes
+// from the snapshot immediately and the vault at the next boundary —
+// no dual-write that could half-fail on close.
+//
+// v2.0.6: non-admin sessions signed in under a clock warning carry a runtime
+// override. Those sales are ALLOWED and recorded normally so the shop keeps
+// trading; the persistent FLASHALERT + per-sale audit entry tell the ADMIN to
+// reconcile stock/cash when they return. Without an override, a sale built
+// under a manipulated OS clock is still refused.
+export const recordSaleWithStockUpdate = async (sale: SaleRecord, updatedProducts: Product[]): Promise<boolean> => {
+  try {
+    const now = Date.now();
+    const anchor = getTimeAnchor();
+    const gate = getEffectiveGate(now, anchor);
+    const overrideActive = hasActiveClockOverride();
+    if (!gate.ok && !overrideActive) {
+      console.warn('Sale refused — system clock tamper detected.', gate.reason);
+      return false;
+    }
+    // Under an override, skip only the monotonic high-water check (a backward
+    // clock legitimately produces earlier timestamps). Date/time-window checks
+    // still run so the row is internally consistent.
+    const validationAnchor = overrideActive ? { ...anchor, lastSeenWallMs: 0 } : anchor;
+    const valid = validateNewSale(sale, now, validationAnchor);
+    if (!valid.ok) {
+      console.warn('Sale refused — invalid sale timestamp.', valid.reason);
+      return false;
+    }
+  } catch (e) {
+    console.error('Sale clock validation failed', e);
+    return false;
   }
+  // Update caches synchronously so UI reflects new stock immediately
+  cacheSales = [sale, ...cacheSales];
+  cacheProducts = updatedProducts;
+  // Also update customer balance in cache if sale has customer
+  if (sale.customerId) {
+    cacheCustomers = cacheCustomers.map((c) =>
+      c.id === sale.customerId ? { ...c, balance: c.balance + sale.balanceDue } : c
+    );
+  }
+  // Raise the trusted high-water mark + bump the monotonic sale sequence.
+  try {
+    advanceForSale(Date.now());
+  } catch {}
+  // Single-file autosave — replaces old snapshot, survives abrupt closure
+  saveAutosaveSnapshot();
+  return true;
+};
+
+// ============================================================
+// TRUSTED-CLOCK UI HELPERS (v1.5.1)
+// Synchronous gate for POS checkout + ADMIN re-anchor action.
+// ============================================================
+
+/**
+ * Do we know of ANY accounts without waiting for initStorage? Checks the
+ * live cache first, then the synchronous localStorage snapshot mirror. Used
+ * by the setup gate so a slow/failed init can never fake "zero accounts"
+ * (which would loop a healthy install back to the setup wizard).
+ */
+export const hasLocalAccountsSync = (): boolean => {
+  if (cacheUsers.length > 0) return true;
+  try {
+    const snap = loadAutosaveSnapshot();
+    const n = (snap?.users as unknown[] | undefined)?.length ?? 0;
+    if (n > 0) return true;
+  } catch {}
+  return false;
+};
+
+/** Setup-done flag from cache or its synchronous localStorage mirror. */
+export const isSetupDoneSync = (): boolean => {
+  if (cacheAdminSetupDone) return true;
+  return lsGet<boolean>(LKEYS.ADMIN_SETUP_DONE, false);
+};
+
+/**
+ * Current wall-clock verdict (cheap, synchronous — safe to call on render).
+ * Session-effective: a latched startup-tamper (rollback while closed) wins
+ * over the anchor check.
+ */
+export const getClockGate = (): ClockGate => getEffectiveGate(Date.now(), getTimeAnchor());
+
+/** Last verified legitimate wall-clock time (0 = none recorded yet). */
+export const getLastVerifiedClockMs = (): number => getTimeAnchor().lastSeenWallMs;
+
+/**
+ * ADMIN-only: accept the current OS time as the new anchor after a genuine
+ * clock fix. Always writes an audit entry with the admin, old/new times and
+ * the stated reason — this is the ONLY way to lower the high-water mark.
+ */
+export const reanchorClock = (adminUsername: string, adminRole: UserRole, reason: string): ClockGate => {
+  const before = getTimeAnchor().lastSeenWallMs;
+  const now = Date.now();
+  // An ADMIN-verified re-anchor also lifts the boot-time tamper latch, so a
+  // clock that Windows/Internet time sync already corrected no longer needs
+  // an app restart — the gate clears the moment the password is accepted.
+  clearStartupTamper();
+  reanchorClockAnchor(now);
+  // v2.0.6: rewrite the native startup stamp too. Without this the Rust
+  // check keeps the old/future value and re-blocks the next launch even
+  // though the ADMIN already accepted the corrected clock.
+  void acceptStartupTime();
+  recordAuditLog(
+    adminUsername || 'System',
+    adminRole || 'System Admin',
+    'System Clock Re-anchored',
+    `ADMIN re-anchored the trusted clock. Previous verified time: ${before > 0 ? new Date(before).toLocaleString() : 'none recorded'}; ` +
+    `accepted system time: ${new Date(now).toLocaleString()}. Reason: ${reason}`
+  );
+  return refreshGate(now); // broadcast now — UI unblocks without waiting for the 2s tick
 };
 
 // ============================================================
@@ -277,11 +1406,7 @@ export const saveExpenditures = (expenditures: Expenditure[]) => {
     return;
   }
   cacheExpenditures = expenditures;
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSaveExpenditures(expenditures));
-  } else {
-    lsSet(LKEYS.EXPENDITURES, expenditures);
-  }
+  saveAutosaveSnapshot();
 };
 
 // ============================================================
@@ -293,10 +1418,24 @@ export const loadPrinterConfig = (): ThermalPrinterConfig =>
 
 export const savePrinterConfig = (config: ThermalPrinterConfig) => {
   cachePrinterConfig = config;
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSavePrinterConfig(config));
-  } else {
-    lsSet(LKEYS.PRINTER_CONFIG, config);
+  saveAutosaveSnapshot();
+};
+
+// v1.5.0 one-time migration: the legacy frozen-foods footer becomes the
+// generic default. A customized footer is left exactly as-is.
+const LEGACY_RECEIPT_FOOTER = 'Thank you for shopping with us! No refund on frozen items after 24 hrs.';
+export const migrateLegacyReceiptFooter = (): boolean => {
+  try {
+    if (!cachePrinterConfig || cachePrinterConfig.receiptFooterNote !== LEGACY_RECEIPT_FOOTER) {
+      return false;
+    }
+    savePrinterConfig({
+      ...cachePrinterConfig,
+      receiptFooterNote: INITIAL_PRINTER_CONFIG.receiptFooterNote,
+    });
+    return true;
+  } catch {
+    return false;
   }
 };
 
@@ -312,11 +1451,7 @@ export const saveUsers = (users: User[]) => {
     return;
   }
   cacheUsers = users;
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSaveUsers(users));
-  } else {
-    lsSet(LKEYS.USERS, users);
-  }
+  saveAutosaveSnapshot();
 };
 
 // ============================================================
@@ -327,11 +1462,8 @@ export const loadAuditLogs = (): AuditLog[] => cacheAuditLogs;
 
 export const saveAuditLogs = (logs: AuditLog[]) => {
   cacheAuditLogs = logs;
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSaveAuditLogs(logs));
-  } else {
-    lsSet(LKEYS.AUDIT_LOGS, logs);
-  }
+  lsSet(LKEYS.AUDIT_LOGS, logs);
+  markDirty();
 };
 
 // ============================================================
@@ -348,20 +1480,23 @@ export async function registerCloseFlush(): Promise<void> {
   if (closeFlushRegistered) return;
   closeFlushRegistered = true;
 
-  // Best-effort flush on pagehide / beforeunload / visibility hidden.
-  const bestEffortFlush = () => {
-    void flushWrites(3000);
+  // Boundary flushes: the single snapshot file is already current (every
+  // mutation replaces it synchronously); these move the vault to match.
+  const boundaryFlush = () => {
+    try {
+      saveAutosaveSnapshot();
+    } catch {}
+    void persistAllToDatabase();
   };
-  window.addEventListener('pagehide', bestEffortFlush);
-  window.addEventListener('beforeunload', bestEffortFlush);
+  window.addEventListener('pagehide', boundaryFlush);
+  window.addEventListener('beforeunload', boundaryFlush);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') bestEffortFlush();
+    if (document.visibilityState === 'hidden') boundaryFlush();
   });
-  // Periodic safety net: if the OS kills the app (task manager, power loss
-  // during restart) without firing close, this keeps the WAL checkpointed.
-  // Interval is harmless when queue is idle.
+  // Periodic safety net (dirty-gated inside — idle ticks cost nothing): if
+  // the OS kills the app without firing close, the vault is still recent.
   setInterval(() => {
-    void flushWrites(3000);
+    void persistAllToDatabase();
   }, 15000);
 
   if (!isTauriRuntime()) return;
@@ -369,16 +1504,58 @@ export async function registerCloseFlush(): Promise<void> {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const win = getCurrentWindow();
     let allowClose = false;
-    await win.onCloseRequested(async (event) => {
-      if (allowClose) return;
-      event.preventDefault();
+    // Hard kill switch: process exit is guaranteed to work even if the
+    // window refuses to close (e.g. a stuck WebView). Backed by the native
+    // force_exit command (zero new dependencies).
+    const forceQuit = () => {
+      allowClose = true;
       try {
-        await flushWrites(15000);
-      } catch (e) {
-        console.error('Flush on close failed', e);
-      } finally {
+        win.destroy().catch(() => {});
+      } catch {}
+      import('@tauri-apps/api/core')
+        .then((m) => m.invoke('force_exit').catch(() => window.close()))
+        .catch(() => {
+          try {
+            window.close();
+          } catch {}
+        });
+    };
+    await win.onCloseRequested(async (event) => {
+      try {
+        if (allowClose) return;
+        event.preventDefault();
+        console.info('Close requested — flushing writes (forced quit in 2.5s max)');
+        // FAILSAFE: the app is gone in ~2.5s no matter what. Previously the
+        // close could hang on the write queue (or a throw could skip the
+        // re-close entirely), forcing Task Manager kills that lost queued
+        // writes and landed users back in the setup wizard.
+        const forceTimer = setTimeout(() => {
+          console.warn('Close flush timed out — forcing quit');
+          forceQuit();
+        }, 2500);
+        try {
+          saveAutosaveSnapshot();
+        } catch {}
+        // Vault flush: single replace of every table, then quit. The 2.5s
+        // failsafe above guarantees the app still dies on a stuck vault.
+        try {
+          await persistAllToDatabase(true, 2500);
+        } catch (e) {
+          console.error('Vault flush on close failed', e);
+        } finally {
+          clearTimeout(forceTimer);
+        }
         allowClose = true;
-        await win.close();
+        try {
+          await win.close();
+        } catch {
+          forceQuit();
+        }
+      } catch (e) {
+        // NOTHING may leave this handler without progressing the close —
+        // any unexpected throw funnels to the guaranteed quit path.
+        console.error('Close handler fault — forcing quit', e);
+        forceQuit();
       }
     });
   } catch (e) {
@@ -408,11 +1585,9 @@ export const recordAuditLog = (
   };
 
   cacheAuditLogs = [newLog, ...cacheAuditLogs];
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSaveAuditLogs(cacheAuditLogs));
-  } else {
-    lsSet(LKEYS.AUDIT_LOGS, cacheAuditLogs);
-  }
+  // Local-first: audit lives in its own key; vault catches up at boundary.
+  lsSet(LKEYS.AUDIT_LOGS, cacheAuditLogs);
+  markDirty();
   return newLog;
 };
 
@@ -425,11 +1600,9 @@ export const isAdminSetupCompleted = (): boolean => cacheAdminSetupDone;
 export const setAdminSetupCompleted = (done: boolean = true) => {
   cacheAdminSetupDone = done;
   // Mirror to localStorage too (belt-and-suspenders) so the flag survives even
-  // if a queued SQLite write is interrupted by the app closing.
+  // if the app closes before the vault flush. Vault catches up at boundary.
   lsSet(LKEYS.ADMIN_SETUP_DONE, done);
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSetSetting('admin_setup_done', String(done)));
-  }
+  markDirty();
 };
 
 // ============================================================
@@ -527,17 +1700,117 @@ export const setActiveUserStorage = (user: User | null) => {
 
 export const loadCategories = (): Category[] => cacheCategories;
 
+// v1.5.0 one-time migration: shops whose categories are all still untouched
+// legacy phone-accessory defaults move to Products/Services. Any list the
+// user customized (added or renamed anything) is left exactly as-is.
+// Deleting a default still counts as untouched — the legacy set is gone.
+export const migrateLegacyDefaultCategories = (): boolean => {
+  try {
+    const current = cacheCategories || [];
+    if (current.length === 0) return false;
+    const legacyById = new Map(LEGACY_DEFAULT_CATEGORIES.map((c) => [c.id, c.name]));
+    const allUntouchedLegacy = current.every(
+      (c) => legacyById.get(c.id) === c.name
+    );
+    if (!allUntouchedLegacy) return false;
+    cacheCategories = [...DEFAULT_CATEGORIES];
+    try {
+      saveAutosaveSnapshot();
+    } catch {}
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// v2.0.5 live migration. Safe and idempotent:
+//  - legacy categories (no explicit kind) move under the Products root;
+//    categories literally named Services/Edibles are renamed "(Legacy)";
+//  - products without an explicit kind become Products (explicit service and
+//    edible kinds are deliberately preserved);
+//  - a legacy single price becomes the maximum. An explicit min < max or a
+//    tier floor < ceiling is preserved as a real range.
+// Runs once, guarded by a local marker.
+const LEGACY_INVENTORY_MIGRATION_KEY = 'joainas_2_0_5_inventory_migrated';
+
+export const migrateLegacyInventoryToProducts = (): boolean => {
+  try {
+    if (lsGet<boolean>(LEGACY_INVENTORY_MIGRATION_KEY, false)) return false;
+    let changed = false;
+    const renamedCategories = new Map<string, string>();
+
+    cacheCategories = (cacheCategories || []).map((category) => {
+      if (category.kind && category.parentRoot) return category;
+      changed = true;
+      if (category.kind) {
+        const parentRoot =
+          category.kind === 'service' ? 'Services' : category.kind === 'edible' ? 'Edibles' : 'Products';
+        return { ...category, parentRoot };
+      }
+      let name = category.name;
+      if (/^services$/i.test(name)) {
+        name = 'Services (Legacy)';
+        renamedCategories.set(category.name, name);
+      } else if (/^edibles$/i.test(name)) {
+        name = 'Edibles (Legacy)';
+        renamedCategories.set(category.name, name);
+      }
+      return { ...category, name, kind: 'product', parentRoot: 'Products' };
+    });
+
+    cacheProducts = (cacheProducts || []).map((product) => {
+      let next = product;
+
+      if (!next.kind) {
+        next = { ...next, kind: 'product' };
+        changed = true;
+      }
+      const renamed = renamedCategories.get(next.category);
+      if (renamed) {
+        next = { ...next, category: renamed };
+        changed = true;
+      }
+
+      const min = Number.isFinite(next.minPrice) ? (next.minPrice as number) : 0;
+      const max = Number.isFinite(next.retailPrice) ? next.retailPrice : 0;
+      const tiers = Array.isArray(next.priceTiers) ? next.priceTiers : [];
+      const tierRange = tiers.some((t) => {
+        const floor = Number(t?.floor) || 0;
+        const ceiling = Number(t?.ceiling) || 0;
+        return floor > 0 && ceiling > 0 && floor < ceiling;
+      });
+      const explicitRange = min > 0 && max > 0 && min < max;
+
+      if (!explicitRange && !tierRange) {
+        const highestTier = tiers.reduce((m, t) => Math.max(m, Number(t?.ceiling) || 0), 0);
+        const newMax = Math.max(max, min, highestTier);
+        if (next.minPrice !== undefined || next.retailPrice !== newMax) changed = true;
+        next = { ...next, retailPrice: newMax, minPrice: undefined };
+      }
+
+      return next;
+    });
+
+    if (changed) {
+      try {
+        saveAutosaveSnapshot();
+      } catch {}
+    }
+    lsSet(LEGACY_INVENTORY_MIGRATION_KEY, true);
+    return changed;
+  } catch (e) {
+    console.error('Legacy inventory migration failed', e);
+    return false;
+  }
+};
+
 export const saveCategories = (categories: Category[]) => {
   if (categories.length === 0 && cacheCategories.length > 1) {
     console.warn('Blocked accidental empty category save.');
     return;
   }
   cacheCategories = categories;
-  if (isTauriRuntime()) {
-    enqueueWrite(() => dbSaveCategories(categories));
-  } else {
-    lsSet(LKEYS.CATEGORIES, categories);
-  }
+  saveAutosaveSnapshot();
 };
 
 // ============================================================
@@ -570,6 +1843,8 @@ export const resetAllSystemData = async (): Promise<void> => {
   cacheExpenditures = [];
   cacheCategories = [...DEFAULT_CATEGORIES];
   cacheAuditLogs = [];
+  // Single file replaces old snapshot so the cleared state is what reloads.
+  saveAutosaveSnapshot();
   if (isTauriRuntime()) {
     await enqueueAndFlush(async () => {
       await dbSaveProducts([]);
@@ -579,13 +1854,9 @@ export const resetAllSystemData = async (): Promise<void> => {
       await dbSaveCategories(DEFAULT_CATEGORIES);
       await dbClearTable('inventory_adjustments');
     });
+    vaultDirty = false;
     return;
   }
-  lsSet(LKEYS.PRODUCTS, []);
-  lsSet(LKEYS.SALES, []);
-  lsSet(LKEYS.CUSTOMERS, []);
-  lsSet(LKEYS.EXPENDITURES, []);
-  lsSet(LKEYS.CATEGORIES, DEFAULT_CATEGORIES);
   lsSet(LKEYS.AUDIT_LOGS, []);
 };
 
@@ -595,7 +1866,7 @@ export const resetAllSystemData = async (): Promise<void> => {
 
 export const getBackupFolderPath = (): string | null => {
   try {
-    return localStorage.getItem('joainas_backup_folder_path');
+    return localStorage.getItem('senior_citizen_accessories_backup_folder_path');
   } catch (e) {
     console.error('Failed to get backup folder path', e);
     return null;
@@ -604,7 +1875,7 @@ export const getBackupFolderPath = (): string | null => {
 
 export const setBackupFolderPath = (path: string): void => {
   try {
-    localStorage.setItem('joainas_backup_folder_path', path);
+    localStorage.setItem('senior_citizen_accessories_backup_folder_path', path);
   } catch (e) {
     console.error('Failed to save backup folder path', e);
   }
@@ -809,17 +2080,12 @@ export async function relocateDatabaseFolder(): Promise<string | null> {
 // MISC UTILITIES
 // ============================================================
 
-export const formatNaira = (amount: number): string => {
-  let num = Math.abs(amount);
-  let formatted = new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num).replace('NGN', '₦');
-
-  return amount < 0 ? `-${formatted}` : formatted;
-};
+/**
+ * v1.6.0: renders the CURRENT shop currency (defaults NGN). Kept under the
+ * old name so all 100+ call sites become currency-aware with zero edits —
+ * new code should call formatMoney() from './currency' directly.
+ */
+export const formatNaira = (amount: number): string => formatMoney(amount);
 
 // Play POS scanner beep sound using Web Audio API
 export const playPOSBeep = () => {

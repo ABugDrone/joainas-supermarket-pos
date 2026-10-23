@@ -98,7 +98,9 @@ export const BarcodeGenerator: React.FC<BarcodeGeneratorProps> = ({
       return;
     }
 
-    const existing = new Set(products.map((p) => p.barcode).filter(Boolean));
+    const existing = new Set<string>(
+      products.map((p) => p.barcode).filter((b): b is string => !!b)
+    );
     let changed = false;
     const updated = products.map((p) => {
       if (selectedIds.has(p.id) && (!p.barcode || !p.barcode.trim())) {

@@ -1,7 +1,9 @@
 import React from 'react';
 import { DollarSign, Trash2 } from 'lucide-react';
 import { Expenditure, UserRole } from '../types';
-import { formatNaira, recordAuditLog } from '../utils/storage';
+import { formatNaira, recordAuditLog, todayLocal } from '../utils/storage';
+import { useCurrency } from '../hooks/useCurrency';
+import { getCurrencyCode } from '../utils/currency';
 import { useToast } from './Toast';
 import { NumberInput } from './NumberInput';
 
@@ -21,13 +23,14 @@ export const ExpenseModule: React.FC<ExpenseModuleProps> = ({
   onDeleteExpenditure,
 }) => {
   const { showToast } = useToast();
+  const { symbol: curSym } = useCurrency();
 
   const [description, setDescription] = React.useState('');
   const [amount, setAmount] = React.useState<number>(0);
   const [category, setCategory] = React.useState<Expenditure['category']>('Cold Room & Power');
 
   const [fromDate, setFromDate] = React.useState<string>('2026-08-01');
-  const [toDate, setToDate] = React.useState<string>(new Date().toISOString().split('T')[0]);
+  const [toDate, setToDate] = React.useState<string>(todayLocal());
 
   const filteredExpenses = React.useMemo(() => {
     return expenditures.filter((exp) => exp.date >= fromDate && exp.date <= toDate);
@@ -46,8 +49,9 @@ export const ExpenseModule: React.FC<ExpenseModuleProps> = ({
       description: description.trim(),
       category,
       amount,
-      date: new Date().toISOString().split('T')[0],
+      date: todayLocal(),
       createdBy: currentUser,
+      currency: getCurrencyCode(),
     };
 
     onAddExpenditure(newExp);
@@ -144,7 +148,7 @@ export const ExpenseModule: React.FC<ExpenseModuleProps> = ({
 
             <div>
               <label className="block text-slate-300 mb-1">
-                Amount (₦):
+                Amount ({curSym}):
               </label>
               <NumberInput
                 min={1}
@@ -196,7 +200,7 @@ export const ExpenseModule: React.FC<ExpenseModuleProps> = ({
                 <tr className="bg-[#0d1117] text-slate-400 font-bold uppercase text-[10px] border-b border-[#30363d]">
                   <th className="py-2.5 px-4">Description</th>
                   <th className="py-2.5 px-4">Category</th>
-                  <th className="py-2.5 px-4 text-right">Amount (₦)</th>
+                  <th className="py-2.5 px-4 text-right">Amount ({curSym})</th>
                   <th className="py-2.5 px-4 text-center">Date</th>
                   <th className="py-2.5 px-4 text-center">Action</th>
                 </tr>

@@ -3,23 +3,38 @@ import { Lock, User as UserIcon, ShieldAlert, AlertTriangle } from 'lucide-react
 import bcrypt from 'bcryptjs';
 import { User } from '../types';
 import { loadUsers, saveUsers, recordAuditLog, setActiveUserStorage } from '../utils/storage';
+import { useClockGate } from '../hooks/useClockGate';
 import { defaultCapabilitiesFor } from '../utils/permissions';
 import { useToast } from './Toast';
 import { hasRecoverySetupSync } from '../utils/recovery';
 import { AdminRecoveryModal } from './AdminRecoveryModal';
+import { ClockTamperGateModal } from './ClockTamperGateModal';
+import { ClockFlashAlert } from './ClockFlashAlert';
+import type { ClockOverrideAlert } from '../utils/clockOverride';
 
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: User) => void;
   fullScreen?: boolean;
+  /** Persistent FLASHALERT entries — shown above the sign-in card. */
+  clockAlerts?: ClockOverrideAlert[];
+  /** ADMIN verified the clock; the shell clears the alert/override. */
+  onClockVerified?: () => void;
 }
 
 // Detect bcrypt-style hashes ("$2a$", "$2b$", "$2y$") vs legacy plaintext.
 const isHashed = (value: string | undefined): boolean =>
   !!value && /^\$2[aby]\$\d{2}\$/.test(value);
 
-export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLoginSuccess, fullScreen = false }) => {
+export const LoginModal: React.FC<LoginModalProps> = ({
+  isOpen,
+  onClose,
+  onLoginSuccess,
+  fullScreen = false,
+  clockAlerts = [],
+  onClockVerified,
+}) => {
   const { showToast } = useToast();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
@@ -28,6 +43,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   const [showRecovery, setShowRecovery] = useState(false);
   const [capsOn, setCapsOn] = useState(false);
   const checkCaps = (e: React.KeyboardEvent<HTMLInputElement>) => setCapsOn(e.getModifierState('CapsLock'));
+  // v2.0.6 trusted clock: sign-in is ALWAYS allowed with a valid password.
+  // The live verdict only drives the warning copy; an ADMIN can verify the
+  // clock (and clear the persistent FLASHALERT) from the popup on demand.
+  const gate = useClockGate();
+  const [showClockGate, setShowClockGate] = useState(false);
 
   // Hidden developer shortcut: Ctrl+Shift+Alt+D opens recovery directly
   React.useEffect(() => {
@@ -141,9 +161,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   };
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 font-sans select-none ${
+    <div className={`fixed inset-0 z-50 flex flex-col font-sans select-none ${
       fullScreen ? 'bg-black' : 'bg-black/50 backdrop-blur-sm'
     }`}>
+      {clockAlerts.length > 0 && (
+        <ClockFlashAlert alerts={clockAlerts} onVerify={() => setShowClockGate(true)} />
+      )}
+      <div className="flex flex-1 items-center justify-center overflow-y-auto p-4">
       <div className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl shadow-2xl overflow-hidden animate-fadeIn">
         {/* Header with logo */}
         <div className="bg-gradient-to-r from-[var(--accent-color)] to-[var(--accent-hover)] px-8 py-8 text-center">
@@ -211,11 +235,34 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
             <button
               type="submit"
               disabled={isVerifying}
-              className={`py-3 bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-xl text-sm transition shadow-md ${fullScreen ? 'col-span-2' : ''}`}
+              className={`py-3 bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-xl text-sm transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${fullScreen ? 'col-span-2' : ''}`}
             >
               {isVerifying ? 'Verifying...' : 'Sign In'}
             </button>
           </div>
+
+          {/* v2.0.6 trusted clock: sign-in is allowed; non-admin sessions get
+              a persistent FLASHALERT and can keep selling. ADMIN verification
+              clears the alert and re-anchors the clock. */}
+          {!gate.ok && (
+            <div className="mt-5 p-4 rounded-xl border bg-amber-950/40 border-amber-500/50">
+              <p className="text-xs font-bold text-amber-200">⚠ System clock unverified — sign-in is allowed</p>
+              <p className="text-[11px] text-amber-100/85 mt-1 leading-snug">
+                Your password still works. A non-admin login creates a persistent
+                FLASHALERT and tags sales for the ADMIN to review; an ADMIN login or
+                ADMIN-password verification clears it and restores the trusted clock.
+              </p>
+              <p className="text-[11px] text-amber-200/70 mt-1 leading-snug break-words">{gate.reason}</p>
+              <button
+                type="button"
+                onClick={() => setShowClockGate(true)}
+                className="mt-3 w-full py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wide transition flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 text-white"
+              >
+                <ShieldAlert className="w-4 h-4" />
+                Verify with ADMIN password
+              </button>
+            </div>
+          )}
 
           {/* Recovery entry — only after 5 failed ADMIN attempts */}
           {(() => {
@@ -238,8 +285,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     </p>
                     <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-snug">
                       {hasVault
-                        ? 'Answer one of your 5 private security questions to reveal the actual password for 30 seconds or set a new one. No one else can guess these.'
-                        : 'This older install has no security questions yet. Use the developer recovery (Ctrl+Shift+Alt+D) or contact support. After upgrading, set your 5 questions in Admin → Security.'}
+                        ? 'Answer your private security question to reveal the actual password for 30 seconds or set a new one. No one else can guess it.'
+                        : 'This older install has no security question vault. Use the developer recovery (Ctrl+Shift+Alt+D) to reset the ADMIN password, or contact support. After signing in, set a question in Admin → Security.'}
                     </p>
                     <button
                       type="button"
@@ -257,6 +304,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
           })()}
         </form>
       </div>
+      </div>
+
+      {/* ADMIN-only verification — opens on demand from the FLASHALERT or the
+          amber clock note. It re-anchors the clock and clears the alert. */}
+      <ClockTamperGateModal
+        isOpen={showClockGate}
+        gate={gate}
+        onClose={() => setShowClockGate(false)}
+        onVerified={() => {
+          setShowClockGate(false);
+          onClockVerified?.();
+        }}
+      />
 
       <AdminRecoveryModal
         isOpen={showRecovery}

@@ -28,8 +28,16 @@ import {
   readBackupFile,
   resetAllSystemData,
   flushWrites,
+  persistAllToDatabase,
+  tryRecoverFromJsonBackup,
+  reanchorClock,
 } from '../utils/storage';
+import { refreshGate } from '../utils/trustedTime';
+import { CURRENCIES, getCurrencyCode, setCurrency } from '../utils/currency';
+import { useClockGate } from '../hooks/useClockGate';
 import { useToast } from './Toast';
+import { PremiumLock } from './PremiumLock';
+import { EDITION } from '../config/edition';
 import {
   ShieldCheck,
   UserPlus,
@@ -57,6 +65,10 @@ import {
   Code2,
   RotateCcw,
   KeyRound,
+  History,
+  Lock,
+  Eye,
+  Globe,
 } from 'lucide-react';
 
 interface AdminModuleProps {
@@ -70,7 +82,7 @@ interface AdminModuleProps {
 }
 
 const SQLITE_SCHEMA_DDL = `-- ====================================================================
--- JOAINAS SUPERMARKET & COLDSTORE - DESKTOP TAURI (GO + SQLITE) SCHEMA
+-- SENIOR CITIZEN SUPERMARKET & COLDSTORE - DESKTOP TAURI (GO + SQLITE) SCHEMA
 -- Database Engine: SQLite 3 (WAL Mode Enabled)
 -- Full Admin Control: All tables support complete CRUD
 -- ====================================================================
@@ -104,7 +116,8 @@ CREATE TABLE IF NOT EXISTS products (
     barcode TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     category_name TEXT NOT NULL,
-    unit TEXT CHECK(unit IN ('kg', 'pack', 'carton', 'bottle', 'piece', 'bag')) NOT NULL DEFAULT 'piece',
+    kind TEXT NOT NULL DEFAULT 'product',
+    unit TEXT NOT NULL DEFAULT 'piece',
     cost_price REAL NOT NULL DEFAULT 0.0,
     retail_price REAL NOT NULL DEFAULT 0.0,
     wholesale_price REAL NOT NULL DEFAULT 0.0,
@@ -209,7 +222,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 }) => {
   const { showToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<'users' | 'categories' | 'audit' | 'database' | 'security'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'categories' | 'audit' | 'database' | 'security'>(
+    () => (EDITION.isOpenSource ? 'categories' : 'users')
+  );
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadAuditLogs());
 
   // Security & recovery state (ADMIN only) — single question selected (1 of 5).
@@ -240,6 +255,61 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
 
+  // v1.6.0 store currency (Regional). Old records keep the code they were
+  // stamped with; the setting applies to new sales, prices and reports.
+  const [currencyCode, setCurrencyCodeState] = useState<string>(() => {
+    try {
+      return getCurrencyCode();
+    } catch {
+      return 'NGN';
+    }
+  });
+  const [currencyBusy, setCurrencyBusy] = useState(false);
+
+  const handleSaveCurrency = async () => {
+    setCurrencyBusy(true);
+    try {
+      const cur = await setCurrency(currencyCode);
+      recordAuditLog(
+        currentUser,
+        currentUserRole,
+        'Store Currency Changed',
+        `Shop currency set to ${cur.code} — ${cur.name} (${cur.symbol}). New sales and prices use it immediately; historical records keep their original currency.`
+      );
+      setAuditLogs(loadAuditLogs());
+      showToast(`Store currency set to ${cur.code} (${cur.symbol}). Prices update instantly.`, 'success');
+    } catch (e) {
+      console.error('Currency change failed', e);
+      showToast('Could not change the currency. Please try again.', 'error');
+    } finally {
+      setCurrencyBusy(false);
+    }
+  };
+
+  // v1.5.1 trusted clock: live verdict (updates in real time, no refresh).
+  const clockGate = useClockGate();
+  const [reanchorReason, setReanchorReason] = useState('');
+
+  const handleReanchorClock = () => {
+    if (!reanchorReason.trim()) {
+      showToast('Please state the reason for re-anchoring (e.g. "replaced CMOS battery, date fixed").', 'error');
+      return;
+    }
+    try {
+      reanchorClock(currentUser, currentUserRole, reanchorReason.trim());
+      const next = refreshGate();
+      setAuditLogs(loadAuditLogs());
+      setReanchorReason('');
+      showToast(
+        next.ok ? 'Clock re-anchored. Sales are unblocked.' : 'Clock re-anchored but still behind — fix the OS date/time, then re-anchor again.',
+        next.ok ? 'success' : 'warning'
+      );
+    } catch (e) {
+      console.error('Clock re-anchor failed', e);
+      showToast('Could not re-anchor the clock. Please try again.', 'error');
+    }
+  };
+
   // Category management state — prefers the App-level source of truth so the
   // POS grid picks up color changes immediately, with a local fallback.
   const [categories, setCategories] = useState<Category[]>(
@@ -251,6 +321,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const [newCatName, setNewCatName] = useState('');
   const [newCatDesc, setNewCatDesc] = useState('');
   const [newCatColor, setNewCatColor] = useState('#6366f1');
+  const [newCatRoot, setNewCatRoot] = useState<'Products' | 'Services' | 'Edibles'>('Products');
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
   // User creation modal state
@@ -262,6 +333,17 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const [newCapabilities, setNewCapabilities] = useState<Capability[]>(
     () => defaultCapabilitiesFor('Cashier')
   );
+
+  // Edit staff modal state (username is immutable — audit trail is keyed by it)
+  const [isEditUserOpen, setIsEditUserOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editRole, setEditRole] = useState<UserRole>('Cashier');
+  const [editCapabilities, setEditCapabilities] = useState<Capability[]>([]);
+  const [editPassword, setEditPassword] = useState('');
+
+  // Per-staff activity preview (sorted newest-first audit slice)
+  const [previewUser, setPreviewUser] = useState<User | null>(null);
 
   // Audit filter state
   const [auditSearch, setAuditSearch] = useState('');
@@ -328,6 +410,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       name: newCatName.trim(),
       color: newCatColor,
       description: newCatDesc.trim(),
+      kind: newCatRoot === 'Edibles' ? 'edible' : newCatRoot === 'Services' ? 'service' : 'product',
+      parentRoot: newCatRoot,
       createdAt: new Date().toISOString().split('T')[0],
     };
 
@@ -338,12 +422,13 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       currentUser,
       currentUserRole,
       'Created Product Category',
-      `Added new inventory category "${newCat.name}" with color ${newCat.color}.`
+      `Added new inventory category "${newCat.name}" under ${newCatRoot} with color ${newCat.color}.`
     );
 
     setNewCatName('');
     setNewCatDesc('');
     setNewCatColor('#6366f1');
+    setNewCatRoot('Products');
     showToast(`Category "${newCat.name}" added successfully!`, 'success');
   };
 
@@ -353,18 +438,26 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 
   const handleSaveCategoryColor = () => {
     if (!editingCategory) return;
+    const root = editingCategory.parentRoot || 'Products';
     const updated = categories.map((c) =>
-      c.id === editingCategory.id ? { ...c, color: editingCategory.color } : c
+      c.id === editingCategory.id
+        ? {
+            ...c,
+            color: editingCategory.color,
+            parentRoot: root,
+            kind: root === 'Edibles' ? 'edible' : root === 'Services' ? 'service' : 'product',
+          }
+        : c
     );
     applyCategories(updated);
     recordAuditLog(
       currentUser,
       currentUserRole,
-      'Updated Category Color',
-      `Changed color of category "${editingCategory.name}" to ${editingCategory.color}.`
+      'Updated Category',
+      `Changed category "${editingCategory.name}" (group: ${root}, color ${editingCategory.color}).`
     );
     setEditingCategory(null);
-    showToast(`Color updated for "${editingCategory.name}".`, 'success');
+    showToast(`Category "${editingCategory.name}" updated.`, 'success');
   };
 
   const handleDeleteCategory = (cat: Category) => {
@@ -473,6 +566,111 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     showToast(`Staff user "${user.username}" is now ${nextStatus.toUpperCase()}`, 'info');
   };
 
+  // Open the edit modal prefilled from the staff account
+  const openEditUser = (user: User) => {
+    setEditingUser(user);
+    setEditFullName(user.fullName);
+    setEditRole(user.role);
+    setEditCapabilities([...(user.capabilities || [])]);
+    setEditPassword('');
+    setIsEditUserOpen(true);
+  };
+
+  // Save staff edits: full name, role, capabilities, optional password reset
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    if (!editFullName.trim()) {
+      showToast('Staff full name is required!', 'error');
+      return;
+    }
+    if (editCapabilities.length === 0) {
+      showToast('Grant at least one capability — an account with zero access cannot sign in to anything.', 'error');
+      return;
+    }
+    // Never strand the store without an admin: block removing the final
+    // 'admin' capability (role label alone does not grant access).
+    const hadAdmin = (editingUser.capabilities || []).includes('admin');
+    const keepsAdmin = editCapabilities.includes('admin');
+    if (hadAdmin && !keepsAdmin) {
+      const otherAdmins = users.filter(
+        (u) => u.id !== editingUser.id && (u.capabilities || []).includes('admin')
+      ).length;
+      if (otherAdmins === 0) {
+        showToast('Cannot remove admin access from the last administrator — promote another account first.', 'error');
+        return;
+      }
+    }
+
+    let passwordHash = editingUser.password;
+    let passwordReset = false;
+    if (editPassword.trim()) {
+      if (editPassword.trim().length < 4) {
+        showToast('New password must be at least 4 characters (leave blank to keep the current one).', 'error');
+        return;
+      }
+      const { hash } = await import('bcryptjs');
+      passwordHash = await hash(editPassword.trim(), 10);
+      passwordReset = true;
+    }
+
+    const changes: string[] = [];
+    if (editFullName.trim() !== editingUser.fullName) changes.push(`name "${editingUser.fullName}" → "${editFullName.trim()}"`);
+    if (editRole !== editingUser.role) changes.push(`role "${editingUser.role}" → "${editRole}"`);
+    const oldCaps = [...(editingUser.capabilities || [])].sort().join(',');
+    const newCaps = [...editCapabilities].sort().join(',');
+    if (oldCaps !== newCaps) changes.push(`capabilities [${editingUser.capabilities.join(', ')}] → [${editCapabilities.join(', ')}]`);
+    if (passwordReset) changes.push('password reset');
+
+    let updatedUsers = users.map((u) =>
+      u.id === editingUser.id
+        ? { ...u, fullName: editFullName.trim(), role: editRole, capabilities: [...editCapabilities], password: passwordHash }
+        : u
+    );
+    onUpdateUsers(updatedUsers);
+    saveUsers(updatedUsers);
+
+    // v2.0.6: keep the recovery vault in sync when the ADMIN password that the
+    // vault belongs to changes. The vault stores one account's plaintext (the
+    // primary "admin" or the only admin); sync only for that account so a
+    // second admin's password reset cannot overwrite it.
+    if (passwordReset) {
+      const adminAccounts = users.filter(
+        (u) => u.role === 'System Admin' || (u.capabilities || []).includes('admin')
+      );
+      const isVaultAdmin =
+        editingUser.username.toLowerCase() === 'admin' || adminAccounts.length <= 1;
+      if (isVaultAdmin) {
+        try {
+          const { updateEncryptedPassword } = await import('../utils/recovery');
+          await updateEncryptedPassword(editPassword.trim());
+        } catch {
+          /* a vault write must never block a password change */
+        }
+      }
+    }
+
+    recordAuditLog(
+      currentUser,
+      currentUserRole,
+      'Edited Staff User',
+      `Updated staff account "${editingUser.username}"${changes.length ? `: ${changes.join('; ')}` : ' (no changes)'} .`
+    );
+    setAuditLogs(loadAuditLogs());
+
+    showToast(`Staff user "${editingUser.username}" updated successfully!`, 'success');
+    setIsEditUserOpen(false);
+    setEditingUser(null);
+    setEditPassword('');
+  };
+
+  // Sorted newest-first audit slice for one staff member (preview modal)
+  const getUserActivityLogs = (username: string): AuditLog[] =>
+    auditLogs
+      .filter((log) => log.username === username)
+      .slice()
+      .sort((a, b) => b.timestamp - a.timestamp);
+
   // Delete user
   const handleDeleteUser = (user: User) => {
     const adminCount = users.filter((u) => (u.capabilities || []).includes('admin')).length;
@@ -501,8 +699,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const handleExportBackup = async () => {
     try {
       const backupData = {
-        app: 'JOAINAS MART POS SYSTEM',
-        version: '1.4.1',
+        app: 'Joainas Mart',
+        version: EDITION.version,
         schemaVersion: 2,
         timestamp: new Date().toISOString(),
         products: loadProducts(),
@@ -513,6 +711,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         printerConfig: loadPrinterConfig(),
         users: loadUsers(),
         auditLogs: loadAuditLogs(),
+        currency: getCurrencyCode(),
       };
 
       const backupFolderPath = getBackupFolderPath();
@@ -615,6 +814,13 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           onUpdateUsers(parsed.users);
         }
         if (parsed.auditLogs) saveAuditLogs(parsed.auditLogs);
+        // v1.6.0: restore the shop currency saved with the backup (old
+        // backups predate it — keep the current setting for those).
+        if (typeof parsed.currency === 'string' && parsed.currency) {
+          try {
+            await setCurrency(parsed.currency);
+          } catch {}
+        }
 
         const isLegacy = !Array.isArray(parsed.categories);
         recordAuditLog(
@@ -632,12 +838,13 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             : 'Database backup restored successfully! Reloading system...',
           'success'
         );
-        // Durable before reload — await, not fire-and-forget (fixes browser race).
+        // Durable before reload — full vault replace, awaited (local-first:
+        // saves above only touched the snapshot file).
         try {
-          await flushWrites();
+          await persistAllToDatabase(true);
         } catch (flushErr) {
-          console.error('Flush after restore failed', flushErr);
-          showToast('Restore written but flush timed out — reload may need a retry.', 'error');
+          console.error('Vault flush after restore failed', flushErr);
+          showToast('Restore written but vault flush timed out — reload may need a retry.', 'error');
         }
         setTimeout(() => {
           window.location.reload();
@@ -691,6 +898,11 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         onUpdateUsers(parsed.users);
       }
       if (parsed.auditLogs) saveAuditLogs(parsed.auditLogs);
+      if (typeof parsed.currency === 'string' && parsed.currency) {
+        try {
+          await setCurrency(parsed.currency);
+        } catch {}
+      }
 
       const isLegacyNative = !Array.isArray(parsed.categories);
       recordAuditLog(
@@ -708,9 +920,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           : 'Database backup restored successfully! Reloading system...',
         'success'
       );
-      // Make sure every restored table (especially users) is durable on disk
-      // before the reload, otherwise the app could restart with no accounts.
-      await flushWrites();
+      // Make sure every restored table (especially users) is in the vault
+      // before the reload (local-first: saves above only touched snapshot).
+      await persistAllToDatabase(true);
       setTimeout(() => {
         window.location.reload();
       }, 1200);
@@ -793,6 +1005,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>Staff Users ({users.length})</span>
+            {EDITION.isOpenSource && <Lock className="w-3.5 h-3.5 text-amber-400" />}
           </button>
 
           <button
@@ -817,6 +1030,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           >
             <Activity className="w-4 h-4" />
             <span>Audit Trail ({auditLogs.length})</span>
+            {EDITION.isOpenSource && <Lock className="w-3.5 h-3.5 text-amber-400" />}
           </button>
 
           <button
@@ -841,12 +1055,21 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           >
             <KeyRound className="w-4 h-4" />
             <span>Security & Recovery</span>
+            {EDITION.isOpenSource && <Lock className="w-3.5 h-3.5 text-amber-400" />}
           </button>
         </div>
       </div>
 
       {/* Tab 1: Staff Users Management */}
-      {activeTab === 'users' && (
+      {activeTab === 'users' && EDITION.isOpenSource && (
+        <PremiumLock
+          feature="Staff Users"
+          title="Staff Users — Premium"
+          whatItDoes="Staff Users lets you create a separate login for each worker and choose what each person can open."
+          example='Give cashier "Musa" his own login that can only sell, while the manager can see everything.'
+        />
+      )}
+      {activeTab === 'users' && !EDITION.isOpenSource && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-sm font-extrabold uppercase text-slate-300 tracking-wider">
@@ -969,6 +1192,22 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
+
+                          <button
+                            onClick={() => openEditUser(user)}
+                            title="Edit Staff Account (name, role, capabilities, password)"
+                            className="p-1.5 rounded-lg bg-cyan-950/40 border border-cyan-800/60 text-cyan-300 hover:bg-cyan-900/60 transition"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            onClick={() => setPreviewUser(user)}
+                            title="Preview Staff Activities (audit trail)"
+                            className="p-1.5 rounded-lg bg-indigo-950/40 border border-indigo-800/60 text-indigo-300 hover:bg-indigo-900/60 transition"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -981,7 +1220,15 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       )}
 
       {/* Tab 2: Dynamic Category Management */}
-      {activeTab === 'categories' && (
+      {activeTab === 'categories' && EDITION.isOpenSource && (
+        <PremiumLock
+          feature="Categories"
+          title="Categories — Premium"
+          whatItDoes="Categories group your products into departments like Drinks, Snacks and Household, so the POS grid stays tidy and reports break down by section."
+          example='It answers: "How much did Drinks sell this week?" — one tap filters the whole shop to that section.'
+        />
+      )}
+      {activeTab === 'categories' && !EDITION.isOpenSource && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Create Category Card */}
@@ -1001,7 +1248,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                     required
                     value={newCatName}
                     onChange={(e) => setNewCatName(e.target.value)}
-                    placeholder="e.g. Dairy & Ice Creams"
+                    placeholder="e.g. Phone Accessories"
                     className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white font-bold outline-none focus:border-purple-500"
                   />
                 </div>
@@ -1017,6 +1264,24 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                     placeholder="Brief description of items in this category..."
                     className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white outline-none focus:border-purple-500"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                    Main Group:
+                  </label>
+                  <select
+                    value={newCatRoot}
+                    onChange={(e) => setNewCatRoot(e.target.value as 'Products' | 'Services' | 'Edibles')}
+                    className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white font-bold outline-none focus:border-purple-500"
+                  >
+                    <option value="Products">Products (stock-tracked goods)</option>
+                    <option value="Services">Services (never out of stock)</option>
+                    <option value="Edibles">Edibles (per plate, like services)</option>
+                  </select>
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Restaurant plates and servings belong under Edibles.
+                  </p>
                 </div>
 
                 <div>
@@ -1135,7 +1400,15 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       )}
 
       {/* Tab 3: Audit Logs & Activity Trail */}
-      {activeTab === 'audit' && (
+      {activeTab === 'audit' && EDITION.isOpenSource && (
+        <PremiumLock
+          feature="Audit Trail"
+          title="Audit Trail — Premium"
+          whatItDoes="Audit Trail is a notebook that writes down who did what and when, for example sales, deletions and logins."
+          example='It answers: "Who deleted the bag of rice on Monday by 2pm?" — it shows the name, action and time.'
+        />
+      )}
+      {activeTab === 'audit' && !EDITION.isOpenSource && (
         <div className="space-y-4">
           {/* Search & Filter Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-[#161b22] p-4 rounded-2xl border border-[#30363d]">
@@ -1226,6 +1499,66 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       {/* Tab 3: Database & Backup Management */}
       {activeTab === 'database' && (
         <div className="space-y-6">
+          {/* v1.5.1 trusted clock: tamper-evident sales dating (offline) */}
+          <div className={`border p-6 rounded-2xl shadow-xl space-y-4 ${clockGate.ok ? 'bg-[#161b22] border-[#30363d]' : 'bg-red-950/40 border-red-500/60'}`}>
+            <div className="flex items-center gap-3">
+              <div className={`p-3 border rounded-xl ${clockGate.ok ? 'bg-emerald-950 border-emerald-800 text-emerald-400' : 'bg-red-900 border-red-700 text-red-300'}`}>
+                <Clock className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-extrabold text-base text-white">System Clock Protection</h3>
+                <p className="text-xs text-slate-400">
+                  {clockGate.ok
+                    ? 'The system date and time match the last verified time. Sales are allowed.'
+                    : 'The system clock was changed by more than 30 minutes in either direction — new sales are BLOCKED until the clock is corrected.'}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  try {
+                    refreshGate();
+                  } catch {}
+                }}
+                className="px-3 py-2 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 text-xs font-bold rounded-xl transition flex items-center gap-2"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Recheck
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 bg-[#0d1117] border border-[#30363d] rounded-xl">
+                <div className="text-slate-500 font-bold uppercase text-[10px] tracking-wider mb-1">Last verified time</div>
+                <div className="text-slate-200 font-mono font-bold">
+                  {clockGate.lastGoodMs > 0 ? new Date(clockGate.lastGoodMs).toLocaleString() : 'Not recorded yet'}
+                </div>
+              </div>
+              <div className="p-3 bg-[#0d1117] border border-[#30363d] rounded-xl">
+                <div className="text-slate-500 font-bold uppercase text-[10px] tracking-wider mb-1">Current system time</div>
+                <div className="text-slate-200 font-mono font-bold">{new Date(clockGate.nowMs).toLocaleString()}</div>
+              </div>
+            </div>
+            {!clockGate.ok && (
+              <div className="p-3 bg-red-900/40 border border-red-500/40 rounded-xl space-y-2">
+                <p className="text-xs text-red-200">{clockGate.reason}</p>
+                <p className="text-[11px] text-red-200/70">
+                  Fix the computer&apos;s date and time first, then state the reason below and re-anchor. This action is recorded in the audit trail.
+                </p>
+                <input
+                  type="text"
+                  value={reanchorReason}
+                  onChange={(e) => setReanchorReason(e.target.value)}
+                  placeholder='Reason e.g. "replaced CMOS battery, date corrected"'
+                  className="w-full px-3 py-2.5 rounded-xl border border-red-500/40 bg-[#0d1117] text-slate-200 text-xs outline-none"
+                />
+                <button
+                  onClick={handleReanchorClock}
+                  className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition"
+                >
+                  Acknowledge & Re-anchor Clock
+                </button>
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Export Backup Card */}
             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-2xl shadow-xl space-y-4">
@@ -1330,6 +1663,73 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
               >
                 <FileCode className="w-4 h-4" />
                 <span>Browse Disk & Restore (Native)</span>
+              </button>
+              <button
+                onClick={async () => {
+                  showToast('Scanning BACKUP folder for old receipts…', 'info');
+                  try {
+                    const res = await tryRecoverFromJsonBackup(true);
+                    if (res && res.sales > 0) {
+                      recordAuditLog(currentUser, currentUserRole, 'Recovered Old Sales', `Merged ${res.sales} old receipts from ${res.file}.`);
+                      showToast(`Recovered ${res.sales} old receipt${res.sales === 1 ? '' : 's'} from ${res.file}.`, 'success');
+                      onDataReset();
+                    } else {
+                      showToast('No new old receipts found in the BACKUP folder.', 'info');
+                    }
+                  } catch (e) {
+                    console.error(e);
+                    showToast('Recovery scan failed. See console for details.', 'error');
+                  }
+                }}
+                className="w-full py-3 bg-emerald-900/40 hover:bg-emerald-800/50 text-emerald-300 font-extrabold text-xs uppercase tracking-wider rounded-xl shadow border border-emerald-400/30 transition flex items-center justify-center gap-2"
+              >
+                <History className="w-4 h-4" />
+                <span>Recover Old Sales from BACKUP Folder</span>
+              </button>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Merges missing old receipts from a backup JSON in your BACKUP folder — never overwrites or duplicates existing records.
+              </p>
+            </div>
+          </div>
+
+          {/* v1.6.0 Regional — store currency. Applies instantly to new
+              sales, prices and reports; historical records keep the currency
+              they were stamped with. Every change is audit-logged. */}
+          <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-2xl shadow-xl space-y-4">
+            <div className="flex items-center gap-3 border-b border-[#30363d] pb-4">
+              <div className="p-3 bg-cyan-950 border border-cyan-800 text-cyan-400 rounded-xl">
+                <Globe className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-extrabold text-base text-white">Store Currency — Regional</h3>
+                <p className="text-xs text-slate-400">
+                  Prices, receipts and reports use this currency. Old records keep their original currency.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                  Shop currency
+                </label>
+                <select
+                  value={currencyCode}
+                  onChange={(e) => setCurrencyCodeState(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-slate-200 outline-none font-medium text-xs"
+                >
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} — {c.name} ({c.symbol})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleSaveCurrency}
+                disabled={currencyBusy}
+                className="px-5 py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider transition"
+              >
+                {currencyBusy ? 'Saving…' : 'Save Currency'}
               </button>
             </div>
           </div>
@@ -1454,8 +1854,16 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         </div>
       )}
 
-      {/* Tab 5: Security & Recovery — 5 uncomfortable questions */}
-      {activeTab === 'security' && (
+      {/* Tab 5: Security & Recovery */}
+      {activeTab === 'security' && EDITION.isOpenSource && (
+        <PremiumLock
+          feature="Security and Recovery"
+          title="Security & Recovery — Premium"
+          whatItDoes="Security & Recovery keeps spare keys to staff accounts: secret questions and password reset, so a forgotten password never locks the shop."
+          example='It answers: "Cashier Ada forgot her password on a busy morning?" — reset it in seconds with the secret answer.'
+        />
+      )}
+      {activeTab === 'security' && !EDITION.isOpenSource && (
         <div className="space-y-6">
           <div className="bg-amber-950/30 border border-amber-800/60 p-6 rounded-2xl shadow-xl space-y-4">
             <div className="flex items-center gap-3 border-b border-amber-800/30 pb-4">
@@ -1474,8 +1882,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             </div>
 
             <div className="bg-[#0d1117] border border-amber-800/20 rounded-xl p-4 text-xs text-slate-300 leading-relaxed">
-              <p className="font-bold text-amber-300 mb-1">Why 5 uncomfortable questions?</p>
-              <p>They are private things only you know — not your phone number or staff ID that a colleague could guess. Example: your first crush, the exact date you met your partner, a nickname only family uses, an embarrassing teenage memory, a private fear. The recovery never displays unless you fail 5 times.</p>
+              <p className="font-bold text-amber-300 mb-1">Why these uncomfortable questions?</p>
+              <p>You pick one, and it is a private thing only you know — not your phone number or staff ID that a colleague could guess. Examples: your first crush, the exact date you met your partner, a nickname only family uses, an embarrassing teenage memory, a private fear. The recovery never displays unless you fail 5 times.</p>
             </div>
 
             <form
@@ -1600,8 +2008,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
               <p className="font-bold text-slate-300 mb-2">Developer retrieval (older installs without a vault)</p>
               <ol className="list-decimal list-inside space-y-1 text-slate-400 leading-relaxed">
                 <li>Open the login screen and press <code className="px-1 py-0.5 bg-black/30 rounded font-mono text-amber-300">Ctrl+Shift+Alt+D</code> to open the dev unlock.</li>
-                <li>Enter master code <code className="px-1 py-0.5 bg-black/30 rounded font-mono text-amber-300">JOAINAS-DEV-2026-DRONEBUG</code> — if a vault exists, the plain password is revealed without a question.</li>
-                <li>If no vault exists (v1.3.6 or earlier): close the app, locate the DB file shown in Admin → SQLite DB &amp; Backups (or <code className="font-mono">%APPDATA%\com.joainas.pos.desktop\db_path.txt</code>), open it with <code className="font-mono">sqlite3</code> or DB Browser, run <code className="font-mono">SELECT value FROM app_settings WHERE key='admin_recovery'</code> and <code className="font-mono">SELECT * FROM users WHERE username='admin'</code>. The <code className="font-mono">password_hash</code> is bcrypt — use <code className="font-mono">UPDATE users SET password_hash='' WHERE username='admin'</code> to clear it and set a new password via the app&apos;s “Set New Password” recovery, or copy the DB&apos;s <code className="font-mono">joainas_admin_recovery_v1</code> localStorage key and deobfuscate with the recovery utility.</li>
+                <li>Enter master code <code className="px-1 py-0.5 bg-black/30 rounded font-mono text-amber-300">SENIOR CITIZEN-DEV-2026-DRONEBUG</code> — if a vault exists, the plain password is revealed without a question.</li>
+                <li>If no vault exists (bcrypt-only installs): in the same developer panel enter a new ADMIN password and click <strong>Reset ADMIN Password</strong>. The reset is audit-logged, updates the hash and (when present) the vault. A bcrypt hash cannot be reversed, so a reset is the correct support path. Vault locations for reference: <code className="font-mono">app_settings.admin_recovery</code> in the SQLite DB (path shown in Admin → SQLite DB &amp; Backups, usually <code className="font-mono">%APPDATA%\com.dronebug.dirms.desktop\db_path.txt</code>) and localStorage key <code className="font-mono">senior_citizen_accessories_admin_recovery_v1</code>.</li>
               </ol>
               <p className="text-[11px] text-slate-500 mt-3">Full guide: see <code className="font-mono">RECOVERY_GUIDE.md</code> in the install folder.</p>
             </div>
@@ -1814,6 +2222,223 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         </div>
       )}
 
+      {/* Edit Staff Account Modal — name, role, capabilities, password reset */}
+      {isEditUserOpen && editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl p-6 text-[#e2e8f0] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-[#30363d] mb-4">
+              <div className="flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-cyan-400" />
+                <h3 className="font-black text-sm text-white uppercase tracking-wide">
+                  Edit Staff: @{editingUser.username}
+                </h3>
+              </div>
+              <button
+                onClick={() => { setIsEditUserOpen(false); setEditingUser(null); setEditPassword(''); }}
+                className="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 rounded bg-[#21262d]"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <form onSubmit={handleEditUserSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                  Staff Full Name:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                  Terminal Username (fixed — audit trail is keyed by it):
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={editingUser.username}
+                  className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#21262d] text-slate-500 font-mono font-bold outline-none cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                  Access Role:
+                </label>
+                <select
+                  value={editRole}
+                  onChange={(e) => {
+                    const role = e.target.value as UserRole;
+                    setEditRole(role);
+                    setEditCapabilities(defaultCapabilitiesFor(role));
+                  }}
+                  className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white outline-none focus:border-cyan-500 font-bold"
+                >
+                  <option value="Cashier">Cashier (Sales POS Checkout)</option>
+                  <option value="Store Manager">Store Manager (Inventory & Sales)</option>
+                  <option value="Inventory Staff">Inventory Staff (Stock Entry)</option>
+                  <option value="Accountant">Accountant (Financial Statements)</option>
+                  <option value="System Admin">System Administrator (Full Access)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                  Granted Capabilities (tick/untick to add or remove):
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      ['sell', 'Sell (POS Checkout)'],
+                      ['inventory', 'Inventory & Stock'],
+                      ['view_sales', 'View Sales Records'],
+                      ['customers', 'Customers & Ledger'],
+                      ['view_reports', 'Financial Reports'],
+                      ['expenses', 'Expenses'],
+                      ['printer_settings', 'Printer Settings'],
+                      ['receipts', 'Receipts / Reprint'],
+                      ['admin', 'Full Admin Access'],
+                    ] as [Capability, string][]
+                  ).map(([cap, label]) => (
+                    <label
+                      key={cap}
+                      className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-[11px] font-semibold cursor-pointer transition ${
+                        editCapabilities.includes(cap)
+                          ? 'bg-cyan-600/20 border-cyan-500 text-cyan-200'
+                          : 'bg-[#0d1117] border-[#30363d] text-slate-400'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editCapabilities.includes(cap)}
+                        onChange={() => {
+                          setEditCapabilities((prev) =>
+                            prev.includes(cap)
+                              ? prev.filter((c) => c !== cap)
+                              : [...prev, cap]
+                          );
+                        }}
+                        className="w-3.5 h-3.5 accent-cyan-500"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(Object.keys(CAPABILITY_PRESETS) as UserRole[]).map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setEditRole(preset);
+                        setEditCapabilities(defaultCapabilitiesFor(preset));
+                      }}
+                      className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide border transition ${
+                        editRole === preset
+                          ? 'bg-cyan-600 text-white border-cyan-500'
+                          : 'bg-[#0d1117] text-slate-400 border-[#30363d] hover:border-cyan-500'
+                      }`}
+                    >
+                      {preset} preset
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                  New Password (leave blank to keep current):
+                </label>
+                <input
+                  type="password"
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="•••••••• (blank = no change)"
+                  className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white outline-none focus:border-cyan-500 font-mono"
+                />
+              </div>
+
+              <div className="pt-3 flex gap-3">
+                <button
+                  type="submit"
+                  className="w-full py-2.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold uppercase tracking-wider text-xs transition shadow-lg"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Staff Activity Preview — that user's audit trail, newest first */}
+      {previewUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#30363d] bg-[#0d1117]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-indigo-950 border border-indigo-800 text-indigo-300 flex items-center justify-center font-black text-sm uppercase">
+                  {previewUser.username.charAt(0)}
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white">
+                    @{previewUser.username} <span className="text-slate-500 font-bold">• {previewUser.fullName}</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {getUserActivityLogs(previewUser.username).length} recorded activit{getUserActivityLogs(previewUser.username).length === 1 ? 'y' : 'ies'} • newest first
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPreviewUser(null)}
+                className="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 rounded bg-[#21262d]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="max-h-[55vh] overflow-y-auto divide-y divide-[#30363d]">
+              {getUserActivityLogs(previewUser.username).length === 0 ? (
+                <div className="py-10 text-center text-slate-500 text-xs">
+                  No audit activity recorded for this staff member yet.
+                </div>
+              ) : (
+                getUserActivityLogs(previewUser.username).map((log) => (
+                  <div key={log.id} className="px-5 py-3 hover:bg-[#1f242d] transition">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-extrabold text-cyan-300 text-xs">{log.action}</span>
+                      <span className="font-mono text-[10px] text-slate-500 whitespace-nowrap">{log.date} • {log.time}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-normal">{log.details}</p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-[#30363d] bg-[#0d1117] flex justify-end">
+              <button
+                onClick={() => {
+                  setSelectedUserFilter(previewUser.username);
+                  setAuditSearch('');
+                  setActiveTab('audit');
+                  setPreviewUser(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wide transition flex items-center gap-2"
+              >
+                <ListFilter className="w-4 h-4" />
+                Open in Audit Trail
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Category Color Modal */}
       {editingCategory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -1821,7 +2446,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             <div className="flex items-center justify-between border-b border-[#30363d] pb-3">
               <div className="flex items-center gap-2 text-purple-400 font-extrabold text-sm uppercase tracking-wide">
                 <Edit2 className="w-5 h-5" />
-                <span>Edit Category Color</span>
+                <span>Edit Category</span>
               </div>
               <button
                 onClick={() => setEditingCategory(null)}
@@ -1864,6 +2489,23 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
               />
             </div>
 
+            <div>
+              <label className="block text-slate-300 font-bold uppercase mb-1 text-[10px]">
+                Main Group:
+              </label>
+              <select
+                value={editingCategory.parentRoot || 'Products'}
+                onChange={(e) =>
+                  setEditingCategory({ ...editingCategory, parentRoot: e.target.value as 'Products' | 'Services' | 'Edibles' })
+                }
+                className="w-full p-2.5 rounded-xl border border-[#30363d] bg-[#0d1117] text-white font-bold text-xs outline-none focus:border-purple-500"
+              >
+                <option value="Products">Products (stock-tracked goods)</option>
+                <option value="Services">Services (never out of stock)</option>
+                <option value="Edibles">Edibles (per plate, like services)</option>
+              </select>
+            </div>
+
             <div className="flex gap-3 pt-1">
               <button
                 onClick={() => setEditingCategory(null)}
@@ -1875,7 +2517,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                 onClick={handleSaveCategoryColor}
                 className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold uppercase tracking-wider text-xs transition shadow-lg"
               >
-                Save Color
+                Save Changes
               </button>
             </div>
           </div>

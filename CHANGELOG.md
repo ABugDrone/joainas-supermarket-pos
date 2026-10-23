@@ -1,5 +1,211 @@
 # Joainas Mart POS System - Changelog
 
+## Version 2.0.6 (2026-10-23) — Trusted-clock recovery and FLASHALERT
+
+### 🕒 No more false clock warnings after a restart
+- The trusted-clock gate now blocks **only a backward rollback**. A forward gap (lunch break, overnight, weekend, a long shutdown) is normal downtime and is accepted automatically; it advances the anchor instead of raising a tamper warning.
+- Removed the old "more than 30 minutes ahead = tampered" rule that produced the false warning after almost every restart on a shop that had been closed for a while.
+- A forward gap over 24 hours is still noted in the diagnostics/audit context, but it never blocks sign-in or sales.
+- Real backward clock changes are still detected, audited and blocked for sessions without an override.
+
+### 🚨 Persistent FLASHALERT for non-admin override sessions
+- Non-admin staff can now sign in with a valid password while the clock is unverified. They can also **keep selling** — the shop is not forced to stop while the ADMIN is away.
+- Each override login creates a persistent top-of-app **FLASHALERT** naming the username, role, login time and reason. It survives logout and app restarts.
+- Sales completed under the override are recorded normally and tagged (`clockOverride`) in Sales Records, with a dedicated "Sale Completed Under Clock Override" audit row. The ADMIN can reconcile stock and cash when they return.
+- Only an **ADMIN login** or an **ADMIN-password verification** clears the FLASHALERT. There is no non-admin dismiss button. Correcting the Windows clock afterwards does **not** silently erase the alert — the evidence and tagged sales remain until an ADMIN reviews and verifies.
+- An ADMIN login under a warning verifies/re-anchors the clock, rewrites the native startup stamp (`accept_startup_time`), clears every pending FLASHALERT and restores normal sales. ADMIN sessions never show a FLASHALERT for their own login.
+- The live clock monitor no longer auto-logs-out a session that carries an override; sessions without an override still sign out on a genuine rollback.
+
+### 🔐 ADMIN recovery fixes
+- The recovery modal now accepts vaults with **1 question** (new installs) as well as legacy 5-question vaults. Previously it incorrectly required exactly 5.
+- Changing the ADMIN password in **Admin → Staff** now updates the encrypted recovery-vault copy so recovery reveals the current password.
+- Added a controlled **developer reset** for installs with no vault: enter the developer master code and a new ADMIN password. The reset updates the bcrypt hash, syncs any existing vault and writes an audit entry.
+- Corrected outdated recovery documentation, storage-key names and app-data paths in the UI and `RECOVERY_GUIDE.md`.
+- A bcrypt hash is never treated as reversible: without a vault, the only support path is the developer reset.
+
+### 🧪 Quality and packaging
+- Added tests for the forward-gap policy, long-shutdown restart, persistent FLASHALERT storage and runtime override lifecycle.
+- Version bumped to **2.0.6** across the frontend, Tauri config, Rust crate and lockfile.
+- Rebuilt the NSIS installer as `Joainas Mart_2.0.6_x64-setup.exe`.
+
+## Version 2.0.5 (2026-10-22) — Joainas Mart
+
+### 🏪 Rebrand — Joainas Mart
+- Product, installer and window branding are now **Joainas Mart** (previously DIRMS StoreBox PRO). Default receipt header/business name and the developer panel show Joainas Mart v2.0.5.
+- Receipts and financial statements keep the small **DroneBug Technologies & Services** developer credit and support contact.
+- Icons regenerate from `assets/Joainas Mart logo.png`; the Tauri identifier stays `com.dronebug.dirms.desktop` so existing shops keep their data directory.
+
+### 🔓 License activation removed
+- Removed the offline `.lic` activation screen, Ed25519/Argon2 Rust commands, and all license UI. Installation now goes straight to setup (fresh install) or login (existing shop) — no license file or activation password.
+- Removed `hardware-drivers/license-key.lic` and `license-key.rar` from the distribution.
+
+### 📦 Depleted-stock and negative-stock workflow
+- Adding an out-of-stock product no longer fails with a toast. Inventory-authorized users get a popup to **Add Stock** (restock then sell the requested quantity) or **Sell Anyway**; other roles are told to ask a manager.
+- Grid, list, search and barcode-scan paths all use the same request flow. Depleted items stay clickable instead of showing a disabled button.
+- Negative stock is now real: sales decrement stock below zero, the cart allows quantity increases for a negative-stock line, and inventory shows a red `OWED` badge.
+- Add Stock resets a negative count to the quantity received (`-3 + 5 → 5`); non-negative stock increments normally (`10 + 5 → 15`). Every restock is audit-logged.
+- New shared helpers in `src/utils/stock.ts`; the inventory screen gains a restock dialog (`StockAdjustModal`).
+
+### 💰 Price display and floor rules
+- Legacy single prices are treated as **maximums** and are discountable (no implicit floor). A min-only product displays `₦X+` and can sell at or above X. A real range displays `₦min – ₦max`.
+- `backfillMinPrices()` no longer writes `minPrice = retailPrice` on every launch, so max-only products stay max-only.
+- Historical receipts always show the actual sold price; ranges belong to the product, not old sales.
+
+### 💾 Backup recovery and legacy data preservation
+- Recovery now stops after the **first** backup that yields any data (sales, products or users), instead of merging every candidate file. This fixes the >5-backup inventory corruption.
+- Backup validation requires a real numeric `stockQty`; products are deduped by **ID and barcode**; live stock is never overwritten (defensive post-merge assertion included).
+- Legacy JSON backups are normalized on adoption: every inventory item becomes a Product, categories move under the Products root (`Services`/`Edibles` become `Services (Legacy)` / `Edibles (Legacy)`), and single prices become maximums while explicit `min < max` / tier ranges are preserved.
+- Existing databases get the same **safe live migration** once: categories are grouped under Products, items without an explicit kind become Products, deliberately recorded service/edible kinds are preserved, and only non-range prices lose their implicit floor.
+
+### 🧪 Quality and packaging
+- Replaced the stale bug-condition exploration test with real regression/property tests for pricing, stock reset, backup merging/normalization, branding/version and WCAG theme contrast.
+- Fixed muted-text contrast in the Ruby Red and Midnight Black themes.
+- Rewrote the installation guide for 2.0.5 and rebuilt the NSIS installer as `Joainas Mart_2.0.5_x64-setup.exe`.
+
+## Version 2.0.0 – 2.0.4 (reconstructed consolidated entry)
+
+> **Note:** the original per-release notes for these versions were not preserved in the repository. This consolidated entry is reconstructed from the shipped installers and code history; it is clearly labelled so it is not mistaken for a contemporaneous changelog.
+
+- **2.0.0** — Joainas Mart base release: rebranded application shell and installer, local-first storage with SQLite vault, retained users/sales/customers/products from the 1.x line, and the existing POS/inventory/reporting modules.
+- **2.0.1** — Recovery and update hardening around sibling-database merging and JSON backup adoption; improved startup diagnostics and install-evidence checks so updates land on login instead of re-running setup.
+- **2.0.2** — Pricing/quantity-tier refinements and safer cart restoration; continued receipt/statement branding cleanup.
+- **2.0.3** — Installer/build maintenance for the Windows x64 NSIS package, driver bundle updates and version metadata alignment.
+- **2.0.4** — Stability fixes in storage initialization and backup-folder handling; prepared the codebase for the 2.0.5 rebrand, license removal and depleted-stock work.
+
+## Version 1.6.0 (2026-09-22) — DIRMS open-source
+
+### 🏪 Rebrand — DIRMS
+- Every AMOR name across the app (sidebar, splash, receipts, statements, installer, window title) is now **DIRMS**. New in-app logo + desktop icon set from `assets/DIRMS.png`.
+- Open-source edition: no login/setup gate (single local user) with Premium-locked Reports, Analytics, Staff Users, Audit Trail, Security & Recovery, Categories and extra themes (dark theme included).
+
+### 💱 Store currency selection (global)
+- Full ISO-4217 list (~170 currencies, NGN default). Pick during first-time setup or change anytime in Admin → Database → Store Currency; prices update instantly, every change is audit-logged.
+- Each sale/expenditure is stamped with its currency — old records keep rendering in their original currency (pre-currency rows read as NGN). Per-currency decimals (JPY 0, KWD 3). Thermal receipts use printer-safe codes ("NGN 1,500.00") since ESC/POS codepages lack ₦/€/₹ glyphs.
+- Currency travels with JSON backups (restoring an old backup keeps the current setting).
+
+### 🔒 Setup/persistence hardening (from 1.5.1 field reports)
+- Admin setup verifies the vault write before leaving the wizard (no more silent setup loops); setup defaults to showing on zero accounts; boot storage self-test fails loud with the reason instead of looping.
+- Rust backend unified on the bundle identifier with legacy config migration; startup clock validation now checks backward jumps across restarts.
+
+## Version 1.5.1 (2026-09-18)
+
+### 🏪 Rebrand — AMOR CAKES AND MORE IMS
+- Every DIRMS/Dronebug name across the app (sidebar, splash, receipts, statements, installer, window title) is now **AMOR CAKES AND MORE IMS (Inventory Management System)**.
+- New desktop icon + in-app logo from `assets/AMO CAKE AND MORE LOGO.png` (Tauri icon set regenerated).
+- Receipt numbers now use the `RCT-YYYYMMDD-###` short form (old `JM-` receipts keep their numbers).
+- Theme `SENIOR CITIZEN Dark` renamed to `DIRM Dark` (id unchanged, saved choices carry over).
+
+### 🔓 Full Build — All 1.4.9 Features Unlocked
+- Login/auth, Staff Users, Reports, Analytics, Audit Trail, Security & Recovery and all themes are enabled. No locked modules remain.
+- **1.5.0 upgrade path:** 1.5.0 had no login, so existing shops have data but zero accounts. 1.5.1 shows a one-time upgrade setup ("Create Your Admin Account — Your Data Is Kept") that only ADDS the admin and preserves all products, sales, customers and records, then lands on normal login. Installs over 1.5.0 in the same folder with zero data loss.
+
+### 🔒 System Clock Tamper Protection (offline, real-time, both directions)
+- New trusted wall-clock anchor (high-water mark + monotonic sale sequence, stored in SQLite + local mirror). Moving the OS date **more than 30 minutes in EITHER direction** — backdated past OR fake future — BLOCKS new sales and sign-in identically, with an on-screen warning; every block and every admin re-anchor is written to the audit trail (so the trail is the backstop, never the only defense).
+- The anchor is never raised while blocked, so simply correcting the clock heals without any action. For genuine fixes (dead CMOS battery, legit correction), an ADMIN can re-anchor from the login screen ("ADMIN clock correction" — password-verified, reason required, audited) or Admin → SQLite DB & Backups → System Clock Protection.
+- A live monitor ticks every couple of seconds app-wide and re-checks instantly whenever the window regains focus: the moment tampering is detected the user is **signed out automatically** (Save/Print attempts under a fake date sign out immediately too), and **sign-in stays refused until the date/time is fixed** — with or without the right password. The moment the clock is corrected, POS, login and Admin all unblock live within seconds. No refresh, no restart.
+- POS checkout validates each receipt's date/timestamp; backdated or future-dated sales are refused before stock moves.
+
+### 🪟 Login Banner Fix
+- The update/backup notice that sat on TOP of the login screen (covering username/password) now sits at the BOTTOM with a capped height, so sign-in is never obstructed.
+
+## Version 1.4.9 (2026-09-10)
+
+### 🚪 One-Way Setup Latch — Update Opens Login, Never Setup
+- Fresh install (no flag, no accounts, no install evidence anywhere) is the ONLY path to the admin-creation wizard. Updates with zero loadable accounts but install evidence land on LOGIN with an inline recovery panel (Scan & unite, Restore backup file, Retry, Start-fresh link) — creating a second admin over orphaned data is impossible.
+- Install guidance: run the new `.exe` directly over the existing install (same folder). Data lives outside Program Files, so uninstall-first is unnecessary.
+
+### 🔒 Guaranteed Quit (white-screen hang killed)
+- New native `force_exit` command (`std::process::exit`, zero new deps) backs the close path: snapshot → best-effort vault flush → destroy → force-exit. No throw or wedge can strand a blank window again.
+
+### 🛡️ Hang-Proof Startup + On-Device Debug Log
+- Every table load individually guarded (one bad table can't empty all caches into a phantom setup screen) with per-step timings; `pos-debug.log` in the live DB folder records init/merge/recovery for shop-PC diagnosis.
+- Capabilities fixed: `fs:allow-read-dir` + `fs:allow-exists` so scans work first-try.
+- Vault flush reentrancy guard (no stacked full rewrites).
+
+## Version 1.4.8 (2026-09-10)
+
+### 💾 Local-First Storage — Single Snapshot, Vault at Boundaries
+- Every mutation writes caches + ONE localStorage snapshot file (replaced, now includes users/categories/printer config) and marks the vault dirty. SQLite is written ONLY by `persistAllToDatabase()` at logout, window close, shutdown, periodic dirty-check, setup/restore completion, and startup sync. No per-action DB writes, no redundancies, storage stays ~constant.
+- Setup wizard, backup restores, and logout all await/trigger the full vault replace instead of the old write queue.
+
+### 🔒 Close Button Guaranteed (v1.4.7 fix hardened)
+- Close can no longer hang: flush capped at 2.5s, then window destroy, with process `exit(0)` as the final fallback — every path out of the close handler progresses the quit. No throw can re-strand the window.
+
+### 🗄️ Sibling-Database Unite at Startup
+- First step of init: every known DB file (live folder, parent, Backup, Documents root, old/new app-data pointer targets, both file names) is ATTACH-merged into the live database — idempotent `INSERT OR IGNORE` with PRAGMA column intersection for schema drift. A stale pointer to an empty file can no longer strand accounts or hide sales; a recovery toast names what was united.
+- Bundle targets are NSIS `.exe` only from here on (no more MSI).
+
+### 🔄 Web/Desktop Parity
+- Desktop DBs united into the live file and exported to `senior_united_backup_2026-09-10.json` — load it via Admin → Restore on web preview to mirror desktop items.
+
+## Version 1.4.7 (2026-09-10)
+
+### 🐛 Setup Loop Fixed (v1.4.6 regression)
+- App renders a neutral loading gate until storage is ready (or timeout), THEN evaluates license/setup — no more setup-from-scratch on every launch.
+
+### 🔒 Close Failsafe — No More Task-Manager Kills
+- Window destroy forced after ~4s regardless of write-queue state (flush timeout cut to 4s on close + autosave first). Queued setup/user writes survive.
+
+### 🧾 Old Sales Recovery from JSON Backups
+- Auto-scan of the BACKUP folder for `*backup*.json` when the live DB has zero sales: merges receipts/items/missing products (dedupe by id), recovers accounts only when none exist (sets setup flag). Manual **Recover Old Sales from BACKUP Folder** button in Admin → Backups (safe merge, import-once markers, audit logged).
+
+### 📅 Local Dates Everywhere
+- All picker defaults and "today" filters use local `en-CA` dates (was UTC → off-by-one hiding records in WAT). Stored sale dates normalized to YYYY-MM-DD on load.
+
+### 💰 Pre-Sept-10 Records: Single Sold Price
+- Sales dated ≤ 2026-09-10 show the single sold price (`₦1,200`, no range) in Sales table + Sale Preview. Newer sales keep the sold-as-minimum range.
+
+### 😴 Sleep → Logout Only + Per-User Workspace
+- Heartbeat gap detector (>90s stall while visible = sleep): saves workspace + snapshot, returns to login gate. App NEVER closes on sleep.
+- Per-account snapshots (bill lines/customer/payment, inventory draft, active tab) in localStorage; next login restores only that account's work. Restore reconciles against the live catalog (drop deleted, clamp qty/stock, keep saved rate when inside current min–max else clamp to max, with summary toast).
+
+### 🪟 Single Instance
+- `tauri-plugin-single-instance`: clicking the desktop icon focuses the running window instead of opening duplicates.
+
+## Version 1.4.6 (2026-09-09)
+
+### 🐛 Bundle Startup — Splash Hang Fixed
+- `main.tsx` renders the app shell **before** storage init (10s timeout race) so the bundle always reaches license/login; a `storage-ready` event refreshes data when the DB catches up. `Analytics` (chart.js) is lazy-loaded so charts can never block first paint. Startup errors now replace the spinner with a message instead of hanging.
+- Legacy Joainas-branded localStorage keys auto-migrate to the Senior Citizen keys (license, setup flag, theme, recovery vault, autosave) so upgrades keep working.
+
+### 🔒 Sales Records — Erasure Fixed + Legacy DB Recovery
+- **Legacy DB recovery (Rust):** `resolve_db_path` now searches old Joainas locations (`com.joainas.pos.desktop` app-data, old pointer file, `Documents\Backup\joainas_pos.db`) and **copies** the legacy DB into the new location when the new file is missing — upgrades no longer start on an empty DB.
+- **Autosave never downgrades:** restore only applies snapshot slices that are strictly LONGER than the DB (sales/products/customers), and never pushes empty arrays over populated tables. The old `length !==` check could restore a stale snapshot and prune newer rows away.
+
+### 💰 Minimum Prices — Existing Prices Assumed Min, Past Records Anchor Min
+- **Range display stays** everywhere (Inventory, POS list/grid: `min – max`).
+- Products with no explicit min get `minPrice = retailPrice` (existing price assumed minimum); where sales dipped below retail, min falls to the lowest historical sold rate. New/edited items default an empty Min to Max on save.
+- **Past records display sold-as-minimum in the range:** Sales table Rate column and Sale Preview Price column now show `soldRate – currentMax` (e.g. `₦1,200 – ₦1,500`) with a `sold min` label; single-price items show `₦X (min)`. Sale items backfill `floorAtSale = rate` on load.
+
+## Version 1.4.3 (2026-09-05)
+
+### 🛒 Sell Service — Grid Fixed for 1B, List by Default + Preview Toggle
+- **Grid lines-only bug fixed:** `POSModule` grid at 368 groceries (and up to 1B) now renders correctly — each card keeps `min-h-[148px]`, `contain:layout paint`, proper `price/unit/name` badges (`whitespace-nowrap`, `break-words`, `title` hover). Removed collapsing `hover:scale-[1.03]` GPU layers. Grid now **paginated 50/page** (`filteredProducts.slice`) with Prev/Next, so a billion SKUs never mount 1B DOM nodes.
+- **List by default:** Sales inventory now shows as **List** (table `S/N, Product, Category, Price, Unit, Stock, Add`) by default, as requested. New `Grid|List` pill toggle in `TAP ANY ITEM` header lets user choose; state persists per session, resets on search change.
+
+### 📊 Analytics — New ADMIN-Only Menu Before Admin
+- New `Analytics` tab (`F8`, `BarChart3` sky) before `Admin` (`F9`), `NAV_CAPABILITY analytics:'admin'` — only `System Admin` / `admin` cap sees it.
+- **Product Records** sub-tab: product dropdown (All + single), optional compare product, period `daily|weekly|monthly|custom` (date, week-start, month selects, `from/to` + `Refresh` + audit log), KPI `Qty/Revenue/Records/Avg Daily`, table per-item `Date, Product, Qty, Rate, Amount, Receipt, Cashier` (capped 200), daily spark 14-day buckets.
+- **Visualizer** sub-tab: `chart.js 4.5.1` + `react-chartjs-2 5.3.1` with `chartConfig` registration; dropdowns `Product X`, `Product Y (compare)`, `Metric qty/revenue`, `Chart Bar|Line|Pie|Scatter`, `Granularity day/week/month`, `From/To` dates. Bar/Line show X vs Y per period, Pie top-8 product share, Scatter X vs Y correlation per bucket. Thematic dark `bg-[#161b22]` canvas.
+
+### 🔍 Smart Search + Hidden by Default Untouched
+- Products remain hidden until `Show Products` or smart search `≥2 letters` prefix (`name/category.slice(0,2)===q2` or `barcode/startsWith`), with `Type at least 2 letters...` placeholder — no “all on click”.
+
+## Version 1.4.2 (2026-08-31)
+
+### 🔒 Stock/Sales Sync — Durably Atomic + Auto-Save Cache
+- **Atomic sale+stock:** New `dbRecordSaleWithStockUpdate` + `recordSaleWithStockUpdate` — sale header, sale_items and `UPDATE products SET stock_qty = MAX(0, stock_qty - ?)` run sequentially per sale (replaces split `saveSales`+`saveProducts` dual-write that reverted on close). Customer balance also patched.
+- **Single-file auto-save cache:** `joainas_autosave_snapshot_v1` in `localStorage` (products/sales/customers/expenditures + timestamp) **replaces** old file each save — no pile-up. Saved synchronously on every stock add/reduce (`saveProducts`, `recordSaleWithStockUpdate`, etc.), on **sign-out** (`App handleLogout → saveAutosaveSnapshot` before clearing session), and on **abrupt closure/shutdown** (`beforeunload/pagehide/visibilitychange` hooks). Restored immediately on next login (`initStorage` restores if snapshot newer/more complete than SQLite, then pushes to DB). Guarantees up-to-date stock & sales even if SQLite queue was lost.
+- **Stale-closure note:** `handleCompleteSale` still uses captured `products` — documented as remaining risk (rapid double-checkout). Recommended next: functional updater + `BEGIN IMMEDIATE` + `WHERE stock_qty >= ?`.
+
+### 🧾 Sales — Clickable Preview In-Page
+- New `SaleDetailModal.tsx` thematic `S/N, Product, Qty, Price, Total` + customer/payment (`cashAmount/transferAmount/paymentNote`) + totals. `SalesRecords` rows are now `cursor-pointer` → `Preview` (audit logged) + `Preview|Print` actions; outside row shows `Product Breakdown`, `Qty`, `Rate`, `Total`; full details in modal.
+
+### 🛒 Sell Service — Bill Dataset Subpage (Not Stock) + Smart Search
+- **Full-screen Customer Bill** subpage (`isTableMode`) — hidden by default (`View Bill Table`), not auto >3. When opened: search at top still lets you pick inventory while bill stays visible. Inventory picks **hidden by default** like grid `Products hidden` (purpose: fully see bill without scroll); `Show/Hide Products` toggles. Bill table `S/N, Product, Quantity(±), Price, Total` thematic `var(--accent-color)` header, `flex-1 min-h-0` scroll fix (no more `Red oil` cutoff at footer).
+- **Both search + barcode on page:** Left `Search product name/category (2 letters)...` + right `Scan / enter barcode...` + `Scan` button (`ScanBarcode` focus). Shared `barcodeQuery`.
+- **Smart search:** Remains hidden until **2 letters** typed; then filters by **first-two-letters prefix** (`name.slice(0,2)===q2` or `category.slice(0,2)` or `barcode.startsWith`/`startsWith(q)`), top 12. Main grid also now `Type at least 2 letters...` when 1 letter.
+
 ## Version 1.4.1 (2026-08-22)
 
 ### 🖥️ Sidebar — Hardware Config Alignment

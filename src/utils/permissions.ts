@@ -3,10 +3,12 @@ import { Capability, CAPABILITY_PRESETS, UserRole, User } from '../types';
 // Full access is only granted to accounts holding the 'admin' capability.
 // Everyone else can only ever see/do what their capabilities allow.
 
-export const isAdmin = (user: Pick<User, 'capabilities' | 'role'> | null | undefined): boolean =>
+type CapabilityUser = Partial<Pick<User, 'capabilities' | 'role'>> | null | undefined;
+
+export const isAdmin = (user: CapabilityUser): boolean =>
   !!user && ((user as any).role === 'System Admin' || (user.capabilities || []).includes('admin'));
 
-export const can = (user: Pick<User, 'capabilities' | 'role'> | null | undefined, cap: Capability): boolean => {
+export const can = (user: CapabilityUser, cap: Capability): boolean => {
   if (!user) return false;
   if ((user as any).role === 'System Admin') return true;
   const caps = (user as any).capabilities || [];
@@ -14,7 +16,7 @@ export const can = (user: Pick<User, 'capabilities' | 'role'> | null | undefined
   return caps.includes(cap);
 };
 
-export const hasAny = (user: Pick<User, 'capabilities'> | null | undefined, caps: Capability[]): boolean =>
+export const hasAny = (user: CapabilityUser, caps: Capability[]): boolean =>
   caps.some((c) => can(user, c));
 
 // Sensible default capabilities for a given preset role.

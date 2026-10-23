@@ -1,25 +1,28 @@
 import bcrypt from 'bcryptjs';
 
 /**
- * Admin Password Recovery — 5 "uncomfortable" personal questions.
- * Only the admin who set them can answer; they are NOT obvious PII like
- * mother's maiden name or pet's name.
+ * Admin Password Recovery — one "uncomfortable" personal question.
+ * Only the admin who set it can answer; it is NOT obvious PII like mother's
+ * maiden name or a pet's name. Legacy 1.3.7 vaults may still hold 5 questions;
+ * recovery picks one at random from whatever the vault contains.
  *
  * Flow:
- *  - First-time setup Step 3 (or Admin → Security) stores 5 Q&A, answers are
- *    bcrypt-hashed, and the current admin plaintext password is obfuscated and
- *    stored for recovery.
+ *  - First-time setup Step 3 (or Admin → Security) stores one Q&A, the answer
+ *    is bcrypt-hashed, and the current admin plaintext password is obfuscated
+ *    and stored for recovery.
  *  - LoginModal counts failed attempts per username; after 5 wrong tries for
  *    the System Admin account it offers "Recover ADMIN Password".
- *  - Recovery picks ONE random question; correct answer reveals the actual
+ *  - Recovery asks the stored question; a correct answer reveals the actual
  *    password in plain text for 30 seconds (copy allowed) or lets the admin
  *    set a new one.
- *  - Developer backdoor: hidden shortcut on login screen.
+ *  - Developer path: hidden shortcut on login screen. If there is NO vault
+ *    (bcrypt hash only), `devResetAdminPassword()` writes a new password after
+ *    the master code is entered; that action is audit-logged.
  */
 
 // The 5 preset uncomfortable questions — private enough that a colleague
-// cannot guess, but the admin will remember. Admin answers all 5 at setup;
-// at recovery time ONE random question is asked.
+// cannot guess, but the admin will remember. New installs choose and answer
+// ONE; legacy 1.3.7 vaults may contain all 5, and recovery asks one at random.
 export const RECOVERY_QUESTIONS: string[] = [
   'What is the full name of your first childhood crush (the first person you ever liked romantically)?',
   'On what exact date (DD/MM/YYYY) did you first meet your current partner or lover in person for the first time?',
@@ -45,7 +48,7 @@ export interface RecoveryRecord {
 // NOT high-grade crypto — this is a local POS app. The real gate is the
 // uncomfortable answer check + physical access to the machine. The dev
 // backdoor uses the same deobfuscation with a master code.
-const RECOVERY_KEY = 'JOAINAS_DRONEBUG_RECOVERY_2026_V1';
+const RECOVERY_KEY = 'senior_citizen_accessories_DRONEBUG_RECOVERY_2026_V1';
 
 function obfuscate(plain: string): string {
   let xored = '';
@@ -69,7 +72,7 @@ function deobfuscate(enc: string): string {
   }
 }
 
-const LS_KEY = 'joainas_admin_recovery_v1';
+const LS_KEY = 'senior_citizen_accessories_admin_recovery_v1';
 const DB_KEY = 'admin_recovery';
 
 // Persist via localStorage always, and via app_settings when in Tauri.
@@ -201,7 +204,7 @@ export async function recoverPasswordWithAnswer(questionId: number, answer: stri
 
 // Developer backdoor master code — checked as plain compare for local support.
 // Change per deployment if you redistribute the binary.
-const DEV_MASTER_PLAIN = 'JOAINAS-DEV-2026-DRONEBUG';
+const DEV_MASTER_PLAIN = 'SENIOR_CITIZEN-DEV-2026-DRONEBUG';
 
 export function verifyDevMasterCode(code: string): boolean {
   return code.trim() === DEV_MASTER_PLAIN;
@@ -211,12 +214,43 @@ export async function devRecoverPassword(devCode: string): Promise<string | null
   if (!verifyDevMasterCode(devCode)) return null;
   const rec = await loadRecoveryRecord();
   if (!rec) {
-    // Older install with no recovery record: try to read users directly.
-    // The admin's bcrypt hash is not reversible, but we can at least indicate
-    // that no recovery vault exists and guide the dev to reset via DB.
+    // Older install with no recovery record: there is nothing reversible.
+    // Use devResetAdminPassword() instead (documented in RECOVERY_GUIDE.md).
     return null;
   }
   return deobfuscate(rec.encryptedPassword);
+}
+
+/**
+ * v2.0.6 controlled developer reset for installs with NO recovery vault.
+ * A bcrypt hash cannot be reversed, so support writes a fresh ADMIN password.
+ * Requires the developer master code, updates the stored hash, and syncs the
+ * vault when one exists. The caller must write an audit entry.
+ */
+export async function devResetAdminPassword(
+  devCode: string,
+  newPassword: string
+): Promise<boolean> {
+  if (!verifyDevMasterCode(devCode)) return false;
+  if (!newPassword || newPassword.length < 4) return false;
+  try {
+    const { loadUsers, saveUsers } = await import('./storage');
+    const users = loadUsers();
+    const target =
+      users.find((u) => u.username.toLowerCase() === 'admin') ??
+      users.find(
+        (u) => u.role === 'System Admin' || (u.capabilities || []).includes('admin')
+      );
+    if (!target) return false;
+    const hashed = await bcrypt.hash(newPassword, 10);
+    saveUsers(users.map((u) => (u.id === target.id ? { ...u, password: hashed } : u)));
+    // Keep the recovery vault in sync when one exists. No vault is created
+    // here because that needs a real security answer the ADMIN chooses.
+    await updateEncryptedPassword(newPassword);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // For older installs: direct DB/localStorage inspection guide is documented

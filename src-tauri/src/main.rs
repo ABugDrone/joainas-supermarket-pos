@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    joainas_pos_lib::run()
+    senior_accessories_lib::run()
 }

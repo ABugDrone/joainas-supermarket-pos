@@ -120,3 +120,15 @@ temp/
 
 # Generated icons
 src-tauri/icons/*.icns
+
+# License files — customer/test .lic files must never be committed
+*.lic
+hardware-drivers/license-key.lic
+hardware-drivers/license-key.rar
+
+# Large installer binaries (exceed GitHub's 100 MB file limit)
+hardware-drivers/MicrosoftEdgeWebView2RuntimeInstallerX64.exe
+
+# Local dev scratch pages
+curl*.html
+preview-test.html

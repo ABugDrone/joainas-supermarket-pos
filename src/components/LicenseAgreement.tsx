@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, CheckCircle2, XCircle } from 'lucide-react';
 import { useToast } from './Toast';
+import { EDITION } from '../config/edition';
 
 interface LicenseAgreementProps {
   onAgree: () => void;
@@ -20,7 +21,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
     },
     {
       title: 'This app works offline',
-      body: 'Joainas POS runs completely offline. You do not need the internet to sell, take inventory or print receipts.',
+      body: 'Joainas Mart runs completely offline. You do not need the internet to sell, take inventory or print receipts.',
     },
     {
       title: 'One admin is in charge',
@@ -63,7 +64,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
             className="w-16 h-16 mx-auto mb-3 rounded-xl bg-white/20 p-2 object-contain"
           />
           <h3 className="text-xl font-extrabold text-white">Software License Agreement</h3>
-          <p className="text-sm text-white/80 mt-1">Please read the terms below before using Joainas POS</p>
+          <p className="text-sm text-white/80 mt-1">Please read the terms below before using {EDITION.shortName} (v{EDITION.version})</p>
         </div>
 
         {/* Terms */}
@@ -83,7 +84,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
           <div className="mt-2 p-3 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)]">
             <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
               By agreeing, you confirm that you have read and understood these terms, and that you
-              accept them before continuing to set up and use Joainas POS.
+              accept them before continuing to set up and use Joainas Mart.
             </p>
           </div>
         </div>
@@ -116,7 +117,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
             </button>
           </div>
           <p className="mt-4 text-center text-[10px] text-[var(--text-muted)]">
-            Joainas POS v1.3.1 • Dronebug Technologies and Services
+            Joainas Mart v{EDITION.version} • Inventory Management System
           </p>
         </div>
       </div>

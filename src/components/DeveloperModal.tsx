@@ -1,6 +1,7 @@
 import React from 'react';
 import { Mail, Phone, CheckCircle2, X } from 'lucide-react';
 import { DEVELOPER_INFO } from '../data/initialData';
+import { EDITION } from '../config/edition';
 import { HeaderLogo } from './HeaderLogo';
 
 interface DeveloperModalProps {
@@ -28,8 +29,8 @@ export const DeveloperModal: React.FC<DeveloperModalProps> = ({ isOpen, onClose 
             alt="Joainas Mart"
             className="w-20 h-20 mx-auto mb-3 rounded-2xl bg-white/20 p-2 object-contain"
           />
-          <h3 className="text-xl font-extrabold text-white">Joainas Mart POS</h3>
-          <p className="text-sm text-white/80 mt-1">Seafoods • Frozen Foods • Groceries</p>
+          <h3 className="text-xl font-extrabold text-white">Joainas Mart</h3>
+          <p className="text-sm text-white/80 mt-1">Inventory Management System • v{EDITION.version} {EDITION.editionLabel}</p>
           <span className="inline-block mt-3 text-xs font-semibold text-white bg-white/20 px-3 py-1 rounded-full">
             {DEVELOPER_INFO.appVersion}
           </span>
@@ -61,6 +62,26 @@ export const DeveloperModal: React.FC<DeveloperModalProps> = ({ isOpen, onClose 
                 <Phone className="w-4 h-4 text-[var(--accent-color)]" />
                 <span>{DEVELOPER_INFO.phone}</span>
               </a>
+
+              <button
+                onClick={() => {
+                  (async () => {
+                    try {
+                      const { isTauriRuntime } = await import('../utils/db');
+                      if (isTauriRuntime()) {
+                        const { open } = await import('@tauri-apps/plugin-shell');
+                        await open(EDITION.supportFacebook);
+                        return;
+                      }
+                    } catch {}
+                    window.open(EDITION.supportFacebook, '_blank', 'noopener,noreferrer');
+                  })();
+                }}
+                className="flex items-center gap-2.5 text-sm text-[var(--text-secondary)] hover:text-[#1877F2] transition"
+              >
+                <img src="/icons/brand-facebook.svg" alt="Facebook" className="w-4 h-4 text-[#1877F2]" />
+                <span>Facebook: Azeez Yunus</span>
+              </button>
             </div>
           </div>
 
@@ -76,6 +97,7 @@ export const DeveloperModal: React.FC<DeveloperModalProps> = ({ isOpen, onClose 
               </div>
             ))}
           </div>
+
         </div>
 
         {/* Footer */}

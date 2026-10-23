@@ -1,6 +1,6 @@
 export type ThemeId =
-  | 'joainas-light'
-  | 'joainas-dark'
+  | 'SENIOR_CITIZEN-light'
+  | 'SENIOR_CITIZEN-dark'
   | 'emerald-fresh'
   | 'royal-navy'
   | 'warm-amber'
@@ -20,44 +20,44 @@ export interface AppTheme {
 
 export const APP_THEMES: AppTheme[] = [
   {
-    id: 'joainas-light',
-    name: 'Joainas Light',
-    category: 'light',
-    previewBg: '#F1F5F9',
-    previewCard: '#FFFFFF',
-    previewAccent: '#0052D4',
-    previewText: '#0F172A',
-    description: 'Clean, bright default theme with brand blue accents. Easy on the eyes.',
+    id: 'SENIOR_CITIZEN-light',
+    name: 'Ruby Red',
+    category: 'dark',
+    previewBg: '#7F1D1D',
+    previewCard: '#991B1B',
+    previewAccent: '#EF4444',
+    previewText: '#FEF2F2',
+    description: 'Bold ruby red. High visibility for accessories.',
     cssVars: {
-      '--bg-app': '#F1F5F9',
-      '--bg-surface': '#FFFFFF',
-      '--bg-sidebar': '#FFFFFF',
-      '--bg-header': '#FFFFFF',
-      '--bg-hover': '#F1F5F9',
-      '--bg-input': '#F8FAFC',
-      '--border-color': '#E2E8F0',
-      '--border-strong': '#CBD5E1',
-      '--text-primary': '#0F172A',
-      '--text-secondary': '#1E293B',
-      '--text-muted': '#334155',
-      '--text-inverse': '#FFFFFF',
-      '--accent-color': '#0052D4',
-      '--accent-hover': '#4364F7',
-      '--accent-orange': '#FF512F',
-      '--accent-orange-hover': '#F09819',
-      '--success': '#059669',
-      '--success-bg': '#ECFDF5',
-      '--warning': '#D97706',
-      '--warning-bg': '#FFFBEB',
-      '--error': '#DC2626',
-      '--error-bg': '#FEF2F2',
-      '--info': '#0891B2',
-      '--info-bg': '#ECFEFF',
+      '--bg-app': '#7F1D1D',
+      '--bg-surface': '#991B1B',
+      '--bg-sidebar': '#7F1D1D',
+      '--bg-header': '#7F1D1D',
+      '--bg-hover': '#B91C1C',
+      '--bg-input': '#450A0A',
+      '--border-color': '#991B1B',
+      '--border-strong': '#DC2626',
+      '--text-primary': '#FEF2F2',
+      '--text-secondary': '#FECACA',
+      '--text-muted': '#FECACA',
+      '--text-inverse': '#7F1D1D',
+      '--accent-color': '#EF4444',
+      '--accent-hover': '#F87171',
+      '--accent-orange': '#F59E0B',
+      '--accent-orange-hover': '#FBBF24',
+      '--success': '#34D399',
+      '--success-bg': '#064E3B',
+      '--warning': '#FBBF24',
+      '--warning-bg': '#78350F',
+      '--error': '#F87171',
+      '--error-bg': '#7F1D1D',
+      '--info': '#22D3EE',
+      '--info-bg': '#164E63',
     },
   },
   {
-    id: 'joainas-dark',
-    name: 'Joainas Dark',
+    id: 'SENIOR_CITIZEN-dark',
+    name: 'DIRM Dark',
     category: 'dark',
     previewBg: '#0F172A',
     previewCard: '#1E293B',
@@ -93,38 +93,38 @@ export const APP_THEMES: AppTheme[] = [
   },
   {
     id: 'emerald-fresh',
-    name: 'Emerald Fresh',
-    category: 'light',
-    previewBg: '#F0FDF9',
-    previewCard: '#FFFFFF',
-    previewAccent: '#059669',
-    previewText: '#064E3B',
-    description: 'Fresh green tones inspired by organic groceries and fresh seafood.',
+    name: 'Emerald Green',
+    category: 'dark',
+    previewBg: '#064E3B',
+    previewCard: '#065F46',
+    previewAccent: '#10B981',
+    previewText: '#ECFDF5',
+    description: 'Solid emerald. Fresh and vibrant.',
     cssVars: {
-      '--bg-app': '#F0FDF9',
-      '--bg-surface': '#FFFFFF',
-      '--bg-sidebar': '#FFFFFF',
-      '--bg-header': '#FFFFFF',
-      '--bg-hover': '#E6FCF5',
-      '--bg-input': '#F0FDF9',
-      '--border-color': '#A7F3D0',
-      '--border-strong': '#6EE7B7',
-      '--text-primary': '#064E3B',
-      '--text-secondary': '#065F46',
-      '--text-muted': '#047857',
-      '--text-inverse': '#FFFFFF',
-      '--accent-color': '#059669',
-      '--accent-hover': '#10B981',
-      '--accent-orange': '#D97706',
-      '--accent-orange-hover': '#F59E0B',
-      '--success': '#059669',
-      '--success-bg': '#ECFDF5',
-      '--warning': '#D97706',
-      '--warning-bg': '#FFFBEB',
-      '--error': '#DC2626',
-      '--error-bg': '#FEF2F2',
-      '--info': '#0891B2',
-      '--info-bg': '#ECFEFF',
+      '--bg-app': '#064E3B',
+      '--bg-surface': '#065F46',
+      '--bg-sidebar': '#065F46',
+      '--bg-header': '#065F46',
+      '--bg-hover': '#047857',
+      '--bg-input': '#022C22',
+      '--border-color': '#047857',
+      '--border-strong': '#10B981',
+      '--text-primary': '#ECFDF5',
+      '--text-secondary': '#A7F3D0',
+      '--text-muted': '#6EE7B7',
+      '--text-inverse': '#064E3B',
+      '--accent-color': '#10B981',
+      '--accent-hover': '#34D399',
+      '--accent-orange': '#F59E0B',
+      '--accent-orange-hover': '#FBBF24',
+      '--success': '#34D399',
+      '--success-bg': '#064E3B',
+      '--warning': '#FBBF24',
+      '--warning-bg': '#78350F',
+      '--error': '#F87171',
+      '--error-bg': '#7F1D1D',
+      '--info': '#22D3EE',
+      '--info-bg': '#164E63',
     },
   },
   {
@@ -165,38 +165,38 @@ export const APP_THEMES: AppTheme[] = [
   },
   {
     id: 'warm-amber',
-    name: 'Warm Amber',
-    category: 'light',
-    previewBg: '#FFFBEB',
-    previewCard: '#FFFFFF',
-    previewAccent: '#D97706',
-    previewText: '#78350F',
-    description: 'Warm golden tones. Cozy and inviting, like a neighborhood store.',
+    name: 'Gold',
+    category: 'dark',
+    previewBg: '#78350F',
+    previewCard: '#92400E',
+    previewAccent: '#F59E0B',
+    previewText: '#FFFBEB',
+    description: 'Solid gold. Warm and premium.',
     cssVars: {
-      '--bg-app': '#FFFBEB',
-      '--bg-surface': '#FFFFFF',
-      '--bg-sidebar': '#FFFFFF',
-      '--bg-header': '#FFFFFF',
-      '--bg-hover': '#FEF3C7',
-      '--bg-input': '#FFFBEB',
-      '--border-color': '#FDE68A',
-      '--border-strong': '#F59E0B',
-      '--text-primary': '#78350F',
-      '--text-secondary': '#92400E',
-      '--text-muted': '#A16207',
-      '--text-inverse': '#FFFFFF',
-      '--accent-color': '#D97706',
-      '--accent-hover': '#F59E0B',
-      '--accent-orange': '#DC2626',
-      '--accent-orange-hover': '#EF4444',
-      '--success': '#059669',
-      '--success-bg': '#ECFDF5',
-      '--warning': '#D97706',
-      '--warning-bg': '#FFFBEB',
-      '--error': '#DC2626',
-      '--error-bg': '#FEF2F2',
-      '--info': '#0891B2',
-      '--info-bg': '#ECFEFF',
+      '--bg-app': '#78350F',
+      '--bg-surface': '#92400E',
+      '--bg-sidebar': '#92400E',
+      '--bg-header': '#92400E',
+      '--bg-hover': '#B45309',
+      '--bg-input': '#451A03',
+      '--border-color': '#92400E',
+      '--border-strong': '#D97706',
+      '--text-primary': '#FFFBEB',
+      '--text-secondary': '#FDE68A',
+      '--text-muted': '#FCD34D',
+      '--text-inverse': '#78350F',
+      '--accent-color': '#F59E0B',
+      '--accent-hover': '#FBBF24',
+      '--accent-orange': '#EF4444',
+      '--accent-orange-hover': '#F87171',
+      '--success': '#34D399',
+      '--success-bg': '#064E3B',
+      '--warning': '#FBBF24',
+      '--warning-bg': '#78350F',
+      '--error': '#F87171',
+      '--error-bg': '#7F1D1D',
+      '--info': '#22D3EE',
+      '--info-bg': '#164E63',
     },
   },
   {
@@ -219,7 +219,7 @@ export const APP_THEMES: AppTheme[] = [
       '--border-strong': '#333333',
       '--text-primary': '#FFFFFF',
       '--text-secondary': '#A3A3A3',
-      '--text-muted': '#737373',
+      '--text-muted': '#808080',
       '--text-inverse': '#000000',
       '--accent-color': '#3B82F6',
       '--accent-hover': '#60A5FA',
@@ -237,7 +237,9 @@ export const APP_THEMES: AppTheme[] = [
   },
 ];
 
-const THEME_STORAGE_KEY = 'joainas_app_theme_v2';
+// v1.5.1 full build: fresh key (old installs don't carry over) and
+// AMOLED Black is the default theme.
+const THEME_STORAGE_KEY = 'dirms_app_theme_v1';
 
 export const getSavedTheme = (): ThemeId => {
   try {
@@ -248,7 +250,7 @@ export const getSavedTheme = (): ThemeId => {
   } catch (e) {
     console.error('Failed to load theme from localStorage', e);
   }
-  return 'joainas-light';
+  return 'midnight-black';
 };
 
 export const applyThemeToDocument = (themeId: ThemeId) => {
@@ -293,7 +295,7 @@ export const FONT_SIZES: FontSizeOption[] = [
   { id: 'xlarge', name: 'Extra Large (138%)', scale: '138%', description: 'Maximum legibility' },
 ];
 
-const FONT_SIZE_STORAGE_KEY = 'joainas_app_font_size_v1';
+const FONT_SIZE_STORAGE_KEY = 'senior_citizen_accessories_app_font_size_v1';
 
 export const getSavedFontSize = (): FontSizeId => {
   try {
@@ -355,7 +357,7 @@ export const FONT_FAMILIES: FontFamilyOption[] = [
   },
 ];
 
-const FONT_FAMILY_STORAGE_KEY = 'joainas_app_font_family_v2';
+const FONT_FAMILY_STORAGE_KEY = 'senior_citizen_accessories_app_font_family_v2';
 
 export const getSavedFontFamily = (): FontFamilyId => {
   try {

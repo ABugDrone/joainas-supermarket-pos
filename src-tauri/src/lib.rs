@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use tauri::Manager;
 use tauri_plugin_sql::Builder as SqlBuilder;
 
 use windows::core::{PCWSTR, PWSTR};
@@ -11,9 +13,38 @@ use windows::Win32::Graphics::Printing::{
     StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_ACCESS_USE, PRINTER_DEFAULTSW,
 };
 
-const APP_IDENTIFIER: &str = "com.joainas.pos.desktop";
-const DB_FILE_NAME: &str = "joainas_pos.db";
+// Must match `identifier` in tauri.conf.json. Tauri's own app-data dir
+// (WebView profile, appDataDir API) is derived from the bundle id — Rust
+// state files (pointer, startup stamp) must live in the same place or shop
+// state fragments across directories and fresh installs misdetect.
+const APP_IDENTIFIER: &str = "com.dronebug.dirms.desktop";
+const DB_FILE_NAME: &str = "senior_citizen_accessories.db";
 const POINTER_FILE_NAME: &str = "db_path.txt";
+// Persistent boot timestamp for OS-clock rollback detection (see
+// validate_startup_time below). Lives in the app-private config dir — a
+// different location from the SQLite vault and localStorage anchor — so a
+// rollback performed while the app was closed is still caught even if the
+// other two copies were wiped or restored from an old backup.
+const STARTUP_TIME_FILE_NAME: &str = "startup_time.bin";
+// Backward skew allowed at boot (seconds). Matches CLOCK_SKEW_TOLERANCE_MS
+// (30 min) in src/utils/trustedTime.ts — small NTP/DST corrections pass,
+// anything bigger means the clock was moved while the app was closed.
+// Deliberately BACKWARD-only: normal overnight/weekend closures move time
+// forward, so they can never trip this check.
+const STARTUP_BACKWARD_TOLERANCE_SECS: u64 = 30 * 60;
+
+// Pre-1.4.5 (Joainas-branded) locations. The 1.4.5 rebrand changed both the
+// app identifier AND the db file name, so upgrades orphaned the live database
+// (empty new file = "sales records erased"). These are checked first and the
+// legacy database is COPIED (never moved/deleted) into the new location.
+// v1.5.2 adds the 1.5.x Rust-side id (com.seniorcitizen...), which never
+// matched the bundle id (com.dronebug...) — its pointer file and startup
+// stamp are adopted, never abandoned.
+const LEGACY_APP_IDENTIFIERS: &[&str] = &[
+    "com.seniorcitizen.accessories.desktop",
+    "com.joainas.pos.desktop",
+];
+const LEGACY_DB_FILE_NAMES: &[&str] = &["joainas_pos.db"];
 
 // The database file lives in Documents\Backup by default (or a folder the
 // admin selects). A tiny pointer file in the app config dir records the
@@ -47,6 +78,10 @@ fn pointer_path() -> PathBuf {
     config_dir().join(POINTER_FILE_NAME)
 }
 
+fn startup_time_path() -> PathBuf {
+    config_dir().join(STARTUP_TIME_FILE_NAME)
+}
+
 fn copy_db_file(src: &Path, dst: &Path) {
     let _ = fs::create_dir_all(dst.parent().unwrap_or_else(|| Path::new(".")));
     for ext in ["", "-wal", "-shm"] {
@@ -58,21 +93,79 @@ fn copy_db_file(src: &Path, dst: &Path) {
     }
 }
 
+/// If a pointer file exists at the current location, ensure its parent
+/// exists and return the recorded path.
+fn read_pointer_file() -> Option<PathBuf> {
+    let content = fs::read_to_string(&pointer_path()).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let p = PathBuf::from(trimmed);
+    if let Some(parent) = p.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    Some(p)
+}
+
+fn legacy_config_dir(app_id: &str) -> PathBuf {
+    let appdata = std::env::var("APPDATA").unwrap_or_default();
+    if appdata.is_empty() {
+        PathBuf::from(".")
+    } else {
+        Path::new(&appdata).join(app_id)
+    }
+}
+
+/// Identifier migration: state files used to live under legacy app-data
+/// dirs (see LEGACY_APP_IDENTIFIERS). Adopt the legacy pointer file (the
+/// admin's chosen folder) and the startup timestamp (tamper evidence)
+/// instead of starting over with amnesia — otherwise the next boot
+/// misdetects a healthy install as fresh. Copy, never move.
+fn migrate_legacy_config() {
+    for old_id in LEGACY_APP_IDENTIFIERS {
+        let old_cfg = legacy_config_dir(old_id);
+        if old_cfg == config_dir() {
+            continue;
+        }
+        if let Ok(content) = fs::read_to_string(old_cfg.join(POINTER_FILE_NAME)) {
+            if content.trim().is_empty() {
+                continue;
+            }
+            if read_pointer_file().is_none() {
+                if let Some(parent) = pointer_path().parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let _ = fs::write(&pointer_path(), content.trim());
+            }
+            if !startup_time_path().exists() {
+                if let Some(parent) = startup_time_path().parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let _ = fs::copy(
+                    old_cfg.join(STARTUP_TIME_FILE_NAME),
+                    &startup_time_path(),
+                );
+            }
+            break;
+        }
+    }
+}
+
 /// Resolve the absolute database path.
 /// - If a pointer file exists, it wins (the folder the user chose).
-/// - Otherwise fall back to Documents\Backup, migrating a legacy database
-///   that may still live in the app config dir (never purges existing data).
+/// - Otherwise adopt legacy config files, then fall back to
+///   Documents\Backup, migrating a legacy database that may still live in
+///   the app config dir (never purges existing data).
 /// Returns the resolved path and whether a legacy DB was migrated.
 fn resolve_db_path() -> (PathBuf, bool) {
-    if let Ok(content) = fs::read_to_string(&pointer_path()) {
-        let trimmed = content.trim();
-        if !trimmed.is_empty() {
-            let p = PathBuf::from(trimmed);
-            if let Some(parent) = p.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            return (p, false);
-        }
+    if let Some(p) = read_pointer_file() {
+        return (p, false);
+    }
+
+    migrate_legacy_config();
+    if let Some(p) = read_pointer_file() {
+        return (p, false);
     }
 
     let legacy = config_dir().join(DB_FILE_NAME);
@@ -83,6 +176,36 @@ fn resolve_db_path() -> (PathBuf, bool) {
     if legacy.exists() && !target.exists() {
         copy_db_file(&legacy, &target);
         migrated = true;
+    }
+
+    // 1.4.5 rebrand recovery: if the new-location DB still doesn't exist,
+    // look for a legacy Joainas database (old app-data dir, old file name,
+    // old pointer file, or Documents\Backup under the old name) and copy it
+    // in. Copy — never move — so the old install remains intact as backup.
+    if !target.exists() {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        for old_id in LEGACY_APP_IDENTIFIERS {
+            let old_cfg = legacy_config_dir(old_id);
+            // Legacy pointer file may point at the true live DB location.
+            let old_pointer = old_cfg.join(POINTER_FILE_NAME);
+            if let Ok(content) = fs::read_to_string(&old_pointer) {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    candidates.push(PathBuf::from(trimmed));
+                }
+            }
+            for old_name in LEGACY_DB_FILE_NAMES {
+                candidates.push(old_cfg.join(old_name));
+                candidates.push(documents_dir().join("Backup").join(old_name));
+            }
+        }
+        for cand in candidates {
+            if cand.exists() && cand.is_file() {
+                copy_db_file(&cand, &target);
+                migrated = true;
+                break;
+            }
+        }
     }
 
     if let Some(parent) = pointer_path().parent() {
@@ -102,6 +225,7 @@ struct DbInfo {
 
 #[tauri::command]
 fn get_db_info() -> Result<DbInfo, String> {
+
     let (path, migrated) = resolve_db_path();
     let folder = path
         .parent()
@@ -132,6 +256,124 @@ fn relocate_database(dir: String) -> Result<String, String> {
     }
 
     Ok(format!("sqlite:{}", target.display()))
+}
+
+// ---------------------------------------------------------------------------
+// Startup-time validation: OS-clock rollback detection across restarts.
+//
+// The frontend's trusted-clock anchor only advances while the app is running,
+// so a rollback performed while the app was CLOSED is invisible to it whenever
+// the anchor stores were also wiped or restored from an old backup. This file
+// records the Unix time of every successful boot in the app-private config
+// dir; if the current clock reads further behind the recorded time than
+// STARTUP_BACKWARD_TOLERANCE_SECS, the clock was moved backwards while the
+// app was closed and the boot is reported as tampered.
+//
+// Two deliberate deviations from the naive "write once, compare forever"
+// design (which degrades into uselessness as the stored stamp goes stale):
+// - The stamp is REWRITTEN on every successful validation, so it always
+//   reflects the most recent trusted boot.
+// - A corrupt/unparseable file self-heals (re-initialized, reported ok with
+//   a warning reason) instead of bricking the app — the frontend audits the
+//   recovery. Only a confirmed backward jump returns ok: false, and then the
+//   file is left untouched to preserve the evidence for the next boot.
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct StartupTimeValidation {
+    ok: bool,
+    reason: String,
+    last_trusted_unix: u64,
+    current_unix: u64,
+}
+
+fn current_unix_secs() -> Result<u64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .map_err(|_| {
+            "System clock reads before the Unix epoch — the OS date is wildly wrong.".to_string()
+        })
+}
+
+#[tauri::command]
+fn validate_startup_time() -> Result<StartupTimeValidation, String> {
+    let path = startup_time_path();
+    let current = current_unix_secs()?;
+
+    let stored = match fs::read_to_string(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // First ever launch — initialize the stamp.
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            fs::write(&path, current.to_string()).map_err(|e| e.to_string())?;
+            return Ok(StartupTimeValidation {
+                ok: true,
+                reason: "First launch — startup timestamp initialized.".to_string(),
+                last_trusted_unix: current,
+                current_unix: current,
+            });
+        }
+        Err(e) => return Err(format!("Could not read startup timestamp: {}", e)),
+        Ok(content) => content,
+    };
+
+    let last_trusted: u64 = match stored.trim().parse() {
+        Ok(v) => v,
+        Err(_) => {
+            // Corrupt file (disk glitch or manual edit) — re-initialize and
+            // report ok so the app is never bricked; the frontend audits it.
+            fs::write(&path, current.to_string()).map_err(|e| e.to_string())?;
+            return Ok(StartupTimeValidation {
+                ok: true,
+                reason: "Startup timestamp file was corrupt — re-initialized. If this repeats, the system disk may be failing.".to_string(),
+                last_trusted_unix: current,
+                current_unix: current,
+            });
+        }
+    };
+
+    if current.saturating_add(STARTUP_BACKWARD_TOLERANCE_SECS) < last_trusted {
+        // Clock moved backwards while the app was closed. Do NOT rewrite the
+        // file — the stale stamp is the evidence, and the next boot must
+        // still fail until the clock is corrected.
+        let behind = last_trusted.saturating_sub(current);
+        return Ok(StartupTimeValidation {
+            ok: false,
+            reason: format!(
+                "System clock was moved backwards by ~{}h {}m while the app was closed. Correct the OS date/time and restart the app.",
+                behind / 3600,
+                (behind % 3600) / 60
+            ),
+            last_trusted_unix: last_trusted,
+            current_unix: current,
+        });
+    }
+
+    // Healthy boot — advance the stamp so the next launch compares against
+    // NOW, not against some long-ago first run.
+    fs::write(&path, current.to_string()).map_err(|e| e.to_string())?;
+    Ok(StartupTimeValidation {
+        ok: true,
+        reason: String::new(),
+        last_trusted_unix: current,
+        current_unix: current,
+    })
+}
+
+/// v2.0.6: called after an ADMIN has verified that the current OS date/time
+/// is correct. Rewrites the native startup stamp so the next launch does not
+/// re-flag a stale/future value left over from an earlier clock change.
+#[tauri::command]
+fn accept_startup_time() -> Result<u64, String> {
+    let current = current_unix_secs()?;
+    let path = startup_time_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, current.to_string()).map_err(|e| e.to_string())?;
+    Ok(current)
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +446,7 @@ fn print_raw(printer: String, data: Vec<u8>) -> Result<(), String> {
                 }
             }
 
-            let mut doc_name = wide("Joainas POS Receipt");
+            let mut doc_name = wide("Joainas Mart Receipt");
             let mut datatype = wide("RAW");
             let doc_info = DOC_INFO_1W {
                 pDocName: PWSTR(doc_name.as_mut_ptr()),
@@ -336,6 +578,14 @@ fn get_default_printer() -> String {
     get_default_printer_name().unwrap_or_default()
 }
 
+/// Guaranteed process exit for the close path. Window close/destroy can
+/// strand the app in a half-torn-down state (blank window, living process)
+/// if the WebView is wedged — nothing survives std::process::exit.
+#[tauri::command]
+fn force_exit() -> Result<(), String> {
+    std::process::exit(0);
+}
+
 pub fn run() {
     let _ = resolve_db_path();
 
@@ -349,16 +599,29 @@ pub fn run() {
         // (src/utils/db.ts -> bootstrapSchema) on every connection, so old and
         // new databases both work and existing data is never lost.
         .plugin(SqlBuilder::default().build())
+        // Single instance: clicking the desktop icon while the app is
+        // already open (e.g. minimized to the taskbar) focuses the running
+        // window instead of opening a duplicate with a stale session.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             get_db_info,
             relocate_database,
+            validate_startup_time,
+            accept_startup_time,
             print_raw,
             list_printers,
-            get_default_printer
+            get_default_printer,
+            force_exit
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Joainas POS Windows application");
+        .expect("error while running Joainas Mart Windows application");
 }

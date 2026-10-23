@@ -1,82 +1,92 @@
-# Joainas POS — ADMIN Password Recovery Guide (v1.3.7)
+# Joainas Mart — ADMIN Password Recovery Guide (v2.0.6)
 
-## For Store ADMIN (normal use)
+This guide covers the **ADMIN** account only. Staff passwords can be reset by an ADMIN in **Admin → Staff** without this flow.
 
-1. On the Sign In screen, deliberately fail the ADMIN login **5 times** with a wrong password.
-   - After the 5th failure, a gold banner appears: **“ADMIN recovery unlocked — 5 failed attempts”** with a **Recover ADMIN Password** button.
-   - This screen never appears before 5 failures — it is invisible during normal logins.
+## What changed in 2.0.6
+
+- New installs set **one** private security question, not five. The recovery modal now accepts a 1-question vault.
+- Changing the ADMIN password in **Admin → Staff** now syncs the encrypted recovery-vault copy, so recovery reveals the current password.
+- If an install has **no vault** (older bcrypt-only accounts), support can use the controlled **Reset ADMIN Password** action in the developer panel. A bcrypt hash is never reversible.
+- The developer master code in this build is:
+
+  `SENIOR CITIZEN-DEV-2026-DRONEBUG`
+
+## For the Store ADMIN (normal recovery)
+
+1. On the **Sign In** screen, fail the ADMIN login **5 times** with a wrong password.
+   - After the 5th failure, an amber panel appears: **“ADMIN recovery unlocked — 5 failed attempts”** with a **Recover ADMIN Password** button.
+   - The panel is hidden before 5 failures.
 
 2. Click **Recover ADMIN Password**.
-   - The app picks **one random** of the 5 private security questions you set during First-Time Setup (or later in **Admin → Security & Recovery**).
-   - Questions are intentionally uncomfortable and private — e.g. *first childhood crush*, *exact date you first met your partner*, *secret family nickname*, *embarrassing teenage memory*, *private fear* — so no colleague can guess them. Answers are case-insensitive.
+   - The app shows the question stored in your vault. New installs have one question; legacy 1.3.7 vaults may have five, in which case one is picked at random.
+   - Answers are case-insensitive and trimmed.
 
-3. Type your exact answer and click **Verify Answer**.
-   - If correct, the **actual ADMIN password is shown in plain text for 30 seconds** (with a countdown). Click the copy icon to copy it.
-   - After 30 seconds it auto-hides. You can also click **Set New Password** to immediately create a new one (min 4 chars, confirmation required). The new password is bcrypt-hashed and the recovery vault is re-encrypted to the new value.
+3. Type the exact answer and click **Verify Answer**.
+   - A correct answer reveals the **actual ADMIN password in plain text for 30 seconds**. Use the copy icon if needed.
+   - After 30 seconds it hides automatically.
+   - Click **Set New Password** to replace it immediately (minimum 4 characters, confirmation required). The new value is bcrypt-hashed and the recovery vault is updated.
 
-4. If you answer wrong, try again. There is no lockout — you can keep trying.
+4. A wrong answer can be retried. There is no lockout on the security question.
 
-### Setting / Updating the 5 Questions
+### Setting or updating the question
 
-- **At first install:** Step 3 of 3 of First-Time Setup now asks for all 5 answers before the dashboard opens. All 5 are required.
-- **Later:** Go to **Admin → Security & Recovery** (ADMIN only). Fill the 5 answers, confirm with the current ADMIN plain password, and click **Create/Update Recovery Vault**. The vault status shows “Vault Active” when ready.
+- **During first install:** the setup wizard asks you to choose one of five private questions and provide the answer.
+- **Later:** sign in as ADMIN and open **Admin → Security & Recovery**. Choose a question, enter the answer and the current ADMIN plain password, then click **Create/Update Recovery Vault**. The badge shows **Vault Active** when ready.
+- The five presets are intentionally private: first childhood crush, the exact date you met your partner, a family-only nickname, an embarrassing teenage memory, and a private fear. Pick one only you can answer.
 
-## For Developer / Support (older installs without a vault, or when ADMIN truly cannot answer)
+## For Developer / Support
 
-### Shortcut in the running app (works on any version ≥1.3.7)
+### Shortcut in the running app
 
-1. On the **Sign In** screen, press **Ctrl + Shift + Alt + D**.
-2. The recovery modal opens with a **Developer retrieval** section.
-3. Enter the master code: `JOAINAS-DEV-2026-DRONEBUG`
-   - If a recovery vault exists (≥1.3.7), the plain password is revealed immediately without a question.
-   - This code is intentionally simple for local support — change it in `src/utils/recovery.ts` (`DEV_MASTER_PLAIN`) and rebuild for a private build if you need secrecy.
+1. On the **Sign In** screen, press **Ctrl + Shift + Alt + D**. The recovery modal opens with a **Developer retrieval** section.
+2. Enter the master code:
 
-### Direct file / DB inspection (older install, e.g. v1.3.6, no vault)
+   `SENIOR CITIZEN-DEV-2026-DRONEBUG`
 
-If the store is still on an older version that never created a vault, there is nothing to decrypt. Do one of:
+3. If a vault exists, **Unlock Vault** reveals the stored plaintext password without a security question.
+4. If **no vault exists**, use **Reset ADMIN Password** in the same panel:
+   - Enter a new ADMIN password (minimum 4 characters) and confirm it.
+   - Click **Reset ADMIN Password**.
+   - The app writes a fresh bcrypt hash, syncs the vault if one exists, and records an **ADMIN Password Reset via Developer Code** audit entry.
+   - Sign in with the new password immediately, then set a security question in **Admin → Security & Recovery**.
 
-**A) Inspect the live DB location:**
-- In the app, open **Admin → SQLite DB & Backups** and note the **BACKUP Folder Configuration** path. Or read `%APPDATA%\com.joainas.pos.desktop\db_path.txt` — it contains the full path to `joainas_pos.db`.
-- Open that file with **DB Browser for SQLite** or `sqlite3`:
+> **Why reset instead of recover?** Login passwords are bcrypt hashes and cannot be reversed. Without a vault there is no plaintext to reveal, so the only safe support path is a controlled reset.
+
+### Where the vault lives
+
+- **SQLite (Tauri desktop):** `app_settings` row with key `admin_recovery`.
+- **localStorage (browser/dev fallback):** `senior_citizen_accessories_admin_recovery_v1`.
+- **App data folder:** `%APPDATA%\com.dronebug.dirms.desktop\` (the Tauri identifier is unchanged so existing shops keep their data). The exact DB path is shown in **Admin → SQLite DB & Backups** and in `db_path.txt`.
+- The vault contains `{ questions: [{ id, question, answerHash }], encryptedPassword, createdAt, updatedAt }`.
+- Answers are bcrypt-hashed. `encryptedPassword` is XOR-obfuscated with the local recovery key and base64-encoded (see `src/utils/recovery.ts`).
+
+### Manual inspection (last resort)
+
+Open the DB with **DB Browser for SQLite** or `sqlite3`:
 
 ```sql
--- where is the recovery vault (if any)?
-SELECT value FROM app_settings WHERE key='admin_recovery';
+-- Is there a vault?
+SELECT value FROM app_settings WHERE key = 'admin_recovery';
 
--- list users (password_hash is bcrypt, not reversible)
-SELECT id, username, role, password_hash, status FROM users WHERE username='admin';
-
--- emergency unlock: clear the hash so any password works, then use the recovery
--- "Set New Password" flow, or directly set a known bcrypt hash:
-UPDATE users SET password_hash = '' WHERE username='admin';
--- Now sign in as admin with any password, then go to Admin → Security & Recovery
--- to set the 5 questions and a proper new password.
+-- List the admin account. The password column is a bcrypt hash, not plaintext.
+SELECT id, username, role, password, status FROM users WHERE username = 'admin';
 ```
 
-In browser dev mode (no Tauri), the same vault is in `localStorage`:
+Do **not** clear the password hash to "unlock" the account: the login screen deliberately refuses an empty hash. Prefer the in-app developer reset above. If you must rebuild the account manually, generate a bcrypt hash offline and write that value, then sign in and set a new vault.
+
+In browser dev mode:
 
 ```js
-localStorage.getItem('joainas_admin_recovery_v1')
+localStorage.getItem('senior_citizen_accessories_admin_recovery_v1')
 ```
 
-It contains `{questions:[{id, question, answerHash}], encryptedPassword, ...}`. `encryptedPassword` is XOR-obfuscated with the static key `JOAINAS_DRONEBUG_RECOVERY_2026_V1` and base64-encoded (see `src/utils/recovery.ts` `obfuscate`/`deobfuscate`). You can deobfuscate it by calling `await devRecoverPassword('JOAINAS-DEV-2026-DRONEBUG')` from the dev console.
+## Security notes
 
-**B) Reset via app_settings (no cracking needed):**
-- If you have file access, you can also just delete the vault to force a reset:
+- Security answers are stored as bcrypt hashes (cost 10), never plaintext.
+- Login credentials are bcrypt; the recovery vault holds one obfuscated plaintext copy for the ADMIN account only. The obfuscation key is local to the binary, so physical access to the machine and its data folder is required to attempt recovery.
+- The 30-second reveal is intentionally short. Copy the password, then let it hide.
+- The developer reset is audit-logged. Change the master code in `src/utils/recovery.ts` (`DEV_MASTER_PLAIN`) and rebuild for a private distribution.
 
-```sql
-DELETE FROM app_settings WHERE key='admin_recovery';
-```
+## Build and version
 
-Then restart the app as ADMIN, go to **Admin → Security & Recovery**, and create a fresh vault.
-
-### Security Notes
-
-- Security answers are stored as **bcrypt hashes** (cost 10), never plain text. Passwords are stored as bcrypt for login + an obfuscated copy for recovery — the obfuscation key is local to the binary. Physical access to the machine + DB file is required to even attempt recovery, which matches the threat model of a single-store POS.
-- The 30-second reveal is intentionally short. Copy, then let it auto-hide.
-- Change the developer master code per deployment if you redistribute the binary.
-
-## Build & Version
-
-- This flow is included in **v1.3.7**. After upgrading an older install, the first ADMIN login should visit **Admin → Security & Recovery** to create the vault. Until then, the login screen will show “No recovery vault found” after 5 failures and offer the developer path.
-
+This flow ships in **v2.0.6**. After upgrading an older install, sign in as ADMIN and open **Admin → Security & Recovery** to create or refresh the vault. Until then, the login screen shows **No recovery vault found** after 5 failures and offers the developer path.

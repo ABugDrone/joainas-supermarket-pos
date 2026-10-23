@@ -8,15 +8,25 @@ import {
   Category,
 } from '../types';
 
-// Default category colors used to classify the POS product grid.
-// Admins can customize these per category via Admin -> Categories.
+// Default categories: every item is a Product, a Service, or an Edible.
+// Users can add more or remove these at any time via Admin -> Categories.
 export const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'cat-seafood', name: 'Seafood', color: '#14b8a6', description: 'Fish, prawns, crabs & fresh catch', createdAt: '2026-01-01' },
-  { id: 'cat-frozen', name: 'Frozen Foods', color: '#f97316', description: 'Frozen meats, poultry & processed items', createdAt: '2026-01-01' },
-  { id: 'cat-groceries', name: 'Groceries', color: '#8b5cf6', description: 'Tinned goods, rice, oil & pantry staples', createdAt: '2026-01-01' },
-  { id: 'cat-beverages', name: 'Beverages', color: '#eab308', description: 'Water, soft drinks, juices & energy drinks', createdAt: '2026-01-01' },
-  { id: 'cat-baking', name: 'Baking & Flour', color: '#ec4899', description: 'Flour, bread, buns & bakery ingredients', createdAt: '2026-01-01' },
-  { id: 'cat-spices', name: 'Spices & Condiments', color: '#ef4444', description: 'Seasonings, sauces, spices & condiments', createdAt: '2026-01-01' },
+  { id: 'cat-products', name: 'Products', color: '#10b981', description: 'Physical goods sold in the shop', kind: 'product', parentRoot: 'Products', createdAt: '2026-01-01' },
+  { id: 'cat-services', name: 'Services', color: '#3b82f6', description: 'Work or services rendered to customers', kind: 'service', parentRoot: 'Services', createdAt: '2026-01-01' },
+  { id: 'cat-edibles', name: 'Edibles', color: '#f59e0b', description: 'Food & servings sold per plate — treated like services', kind: 'edible', parentRoot: 'Edibles', createdAt: '2026-01-01' },
+];
+
+// Pre-v1.5.0 phone-accessory defaults. If every stored category is still an
+// untouched legacy entry (user never added/renamed anything), v1.5.0
+// migrates the list to DEFAULT_CATEGORIES one-time. Customized lists are
+// left untouched.
+export const LEGACY_DEFAULT_CATEGORIES: { id: string; name: string }[] = [
+  { id: 'cat-cases', name: 'Phone Cases' },
+  { id: 'cat-chargers', name: 'Chargers & Cables' },
+  { id: 'cat-power', name: 'Power Banks' },
+  { id: 'cat-headsets', name: 'Headsets & Earbuds' },
+  { id: 'cat-protectors', name: 'Screen Protectors' },
+  { id: 'cat-holders', name: 'Holders & Stands' },
 ];
 
 export const INITIAL_PRODUCTS: Product[] = [
@@ -217,7 +227,7 @@ export const INITIAL_PRODUCTS: Product[] = [
 export const INITIAL_CUSTOMERS: Customer[] = [
   {
     id: 'cust-1',
-    fullName: 'Joainas Supermarket VIP',
+    fullName: 'Demo Walk-in Customer',
     accountType: 'individual',
     phone: '100',
     address: 'Main Street, Yola',
@@ -262,13 +272,15 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 ];
 
 export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
-  storeName: 'JOAINAS MART',
-  tagline: 'Seafoods, Frozen Foods & Groceries',
-  address: 'Behind Fire Service, Gimba Road, Jimeta Yola. Adamawa State.',
+  storeName: 'Joainas Mart',
+  tagline: 'Inventory Management System',
+  address: 'Joainas Mart.',
   phone: '',
-  receiptHeaderNote: 'WELCOME TO JOAINAS SEAFOODS & GROCERIES',
-  receiptFooterNote: 'Thank you for shopping with us! No refund on frozen items after 24 hrs.',
+  receiptHeaderNote: 'WELCOME TO Joainas Mart',
+  receiptFooterNote: 'Thank you for your patronage! Please come again.',
   showLogo: true,
+  logoDataUrl: undefined,
+  businessName: 'Joainas Mart',
   paperWidth: '80mm',
   autoPrintOnSale: true,
   pointRate: 0,
@@ -277,10 +289,10 @@ export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
 };
 
 export const DEVELOPER_INFO: StoreDeveloperInfo = {
-  company: 'Dronebug Technologies and services',
+  company: 'Dronebug Technologies & Services',
   email: 'dronebugtechnologies@gmail.com',
-  phone: '',
-  appVersion: 'v3.2.0 Desktop POS (React + Vite + Tauri Engine)',
+  phone: '+2347035716349',
+  appVersion: 'v2.0.6 Joainas Mart (React + Vite + Tauri Engine)',
 };
 
 export const INITIAL_SALES: SaleRecord[] = [
@@ -359,7 +371,7 @@ export const INITIAL_SALES: SaleRecord[] = [
     balanceDue: 0,
     paymentMethod: 'Cash',
     customerId: 'cust-1',
-    customerName: 'Joainas Supermarket VIP',
+    customerName: 'Demo Walk-in Customer',
     customerPhone: '100',
     pointsEarned: 0,
     cashier: 'Cashier-1',

@@ -1,9 +1,13 @@
 import React from 'react';
-import { FileText, Printer, TrendingUp, DollarSign, ShoppingBag, Search, Lock, LockOpen } from 'lucide-react';
+import { FileText, Printer, TrendingUp, DollarSign, ShoppingBag, Search, Lock, Eye } from 'lucide-react';
 import { SaleRecord, UserRole, User } from '../types';
-import { formatNaira, recordAuditLog } from '../utils/storage';
+import { formatNaira, recordAuditLog, todayLocal } from '../utils/storage';
+import { useCurrency } from '../hooks/useCurrency';
+import { formatMoney } from '../utils/currency';
+import { formatSoldRange, formatSaleRate, isLegacySale } from '../utils/pricing';
 import { can } from '../utils/permissions';
 import { useToast } from './Toast';
+import { SaleDetailModal } from './SaleDetailModal';
 
 interface SalesRecordsProps {
   sales: SaleRecord[];
@@ -21,14 +25,16 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
   onReprintReceipt,
 }) => {
   const { showToast } = useToast();
+  const { symbol: curSym } = useCurrency();
 
   const [filterMode, setFilterMode] = React.useState<'today' | 'date' | 'range' | 'all'>('today');
-  const [singleDate, setSingleDate] = React.useState<string>(new Date().toISOString().split('T')[0]);
-  const [fromDate, setFromDate] = React.useState<string>(new Date().toISOString().split('T')[0]);
-  const [toDate, setToDate] = React.useState<string>(new Date().toISOString().split('T')[0]);
+  const [singleDate, setSingleDate] = React.useState<string>(todayLocal());
+  const [fromDate, setFromDate] = React.useState<string>(todayLocal());
+  const [toDate, setToDate] = React.useState<string>(todayLocal());
   const [searchQuery, setSearchQuery] = React.useState('');
+  const [selectedSale, setSelectedSale] = React.useState<SaleRecord | null>(null);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = todayLocal();
 
   // A cashier (or any non-admin) may only see the sales they attended to.
   // Admins and users with the admin capability can see every transaction.
@@ -84,6 +90,20 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
     );
     onReprintReceipt(sale);
     showToast(`Thermal receipt ${sale.receiptNo} opened for printing.`, 'info');
+  };
+
+  const handlePreviewSale = (sale: SaleRecord) => {
+    if (!canAccessSale(sale)) {
+      showToast('This receipt belongs to another staff member.', 'error');
+      return;
+    }
+    recordAuditLog(
+      currentUser,
+      currentUserRole,
+      'Previewed Sale Record',
+      `Previewed receipt ${sale.receiptNo} (${sale.items.length} items, ${formatNaira(sale.totalAmount)}).`
+    );
+    setSelectedSale(sale);
   };
 
   return (
@@ -262,8 +282,8 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                 <th className="py-3 px-4">Customer</th>
                 <th className="py-3 px-4">Product Breakdown</th>
                 <th className="py-3 px-4 text-center">Qty</th>
-                <th className="py-3 px-4 text-right">Rate (₦)</th>
-                <th className="py-3 px-4 text-right">Total Amount (₦)</th>
+                <th className="py-3 px-4 text-right">Rate ({curSym})</th>
+                <th className="py-3 px-4 text-right">Total Amount ({curSym})</th>
                 <th className="py-3 px-4 text-center">Action</th>
               </tr>
             </thead>
@@ -278,11 +298,18 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                 filteredSales.map((sale) => (
                   <tr
                     key={sale.id}
-                    className="hover:bg-[#21262d] transition font-medium text-slate-200"
+                    onClick={() => handlePreviewSale(sale)}
+                    className={`transition font-medium text-slate-200 cursor-pointer ${canAccessSale(sale) ? 'hover:bg-[#21262d]' : 'opacity-60'}`}
+                    title="Click to preview full sale details"
                   >
                     <td className="py-3 px-4 font-bold">
                       <span className="text-cyan-400 block">{sale.receiptNo}</span>
                       <span className="text-[10px] text-slate-400 font-normal">{sale.date} {sale.time}</span>
+                      {sale.clockOverride && (
+                        <span className="mt-1 inline-flex w-fit items-center rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-300">
+                          Clock flag
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <span className="font-bold text-white">{sale.customerName || 'General Customer'}</span>
@@ -302,29 +329,48 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                       {sale.items.reduce((s, i) => s + i.quantity, 0)}
                     </td>
                     <td className="py-3 px-4 text-right text-slate-300">
-                      {sale.items[0]?.rate.toLocaleString()}
+                      <div className="flex flex-col items-end gap-0.5">
+                        {sale.items.map((it, idx) => {
+                          const max = it.ceilingAtSale ?? it.product.retailPrice ?? it.rate;
+                          const legacy = isLegacySale(sale.date);
+                          return (
+                            <span key={idx} className="text-[11px] whitespace-nowrap" title={legacy ? `Sold ${formatMoney(it.rate, sale.currency)}` : `Sold ${formatMoney(it.rate, sale.currency)} (min) — range ${formatSoldRange(it.rate, max, sale.currency)}`}>
+                              {formatSaleRate(it.rate, max, sale.date, sale.currency)}
+                            </span>
+                          );
+                        })}
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-right font-black text-cyan-400 text-sm">
-                      {formatNaira(sale.totalAmount)}
+                      {formatMoney(sale.totalAmount, sale.currency)}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      {canAccessSale(sale) ? (
+                      <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button
-                          onClick={() => handlePrintAction(sale)}
-                          className="inline-flex items-center gap-1 py-1 px-2.5 rounded-md bg-cyan-950 border border-cyan-800/50 text-cyan-400 font-bold hover:bg-cyan-900/60 transition"
+                          onClick={() => handlePreviewSale(sale)}
+                          className={`inline-flex items-center gap-1 py-1 px-2 rounded-md font-bold transition ${canAccessSale(sale) ? 'bg-[#21262d] border border-[#30363d] text-slate-300 hover:bg-[#2d333d] hover:text-white' : 'bg-[#21262d] border border-[#30363d] text-slate-500 cursor-not-allowed'}`}
+                          title="Preview details"
                         >
-                          <Printer className="w-3.5 h-3.5" />
-                          Print
+                          <Eye className="w-3.5 h-3.5" /> Preview
                         </button>
-                      ) : (
-                        <span
-                          className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md bg-[#21262d] border border-[#30363d] text-slate-500 font-bold cursor-not-allowed"
-                          title="This sale was served by another staff member. Only the serving cashier or the Admin can reprint it."
-                        >
-                          <Lock className="w-3.5 h-3.5" />
-                          Locked
-                        </span>
-                      )}
+                        {canAccessSale(sale) ? (
+                          <button
+                            onClick={() => handlePrintAction(sale)}
+                            className="inline-flex items-center gap-1 py-1 px-2.5 rounded-md bg-cyan-950 border border-cyan-800/50 text-cyan-400 font-bold hover:bg-cyan-900/60 transition"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            Print
+                          </button>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md bg-[#21262d] border border-[#30363d] text-slate-500 font-bold cursor-not-allowed"
+                            title="This sale was served by another staff member."
+                          >
+                            <Lock className="w-3.5 h-3.5" />
+                            Locked
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -335,13 +381,15 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
 
         <div className="bg-[#0d1117] p-4 border-t border-[#30363d] flex items-center justify-between">
           <span className="text-xs font-bold text-slate-400">
-            Report Summary (Joainas Supermarket POS Engine)
+            Report Summary (Joainas Mart Records Engine) — Click any row to preview full details
           </span>
           <div className="text-lg font-black text-white">
             Total: <span className="text-cyan-400">{formatNaira(totalRevenue)}</span>
           </div>
         </div>
       </div>
+
+      <SaleDetailModal sale={selectedSale} isOpen={!!selectedSale} onClose={() => setSelectedSale(null)} onReprint={handlePrintAction} />
     </div>
   );
 };

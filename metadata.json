@@ -1,6 +1,6 @@
 {
-  "name": "Joainas Seafoods & Groceries POS",
-  "description": "Desktop POS, Inventory & Financial Management App for Joainas Seafoods, Frozen Foods and Groceries built by Dronebug Technologies.",
+  "name": "Joainas Mart",
+  "description": "Desktop POS, Inventory, Installment Ledger & Financial Management App built by Dronebug Technologies.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

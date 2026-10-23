@@ -191,7 +191,7 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
             Financial Statement & P&L Income Report
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Generate monthly, quarterly, half-yearly or annual financial statements for Joainas Seafoods, Frozen foods and Groceries.
+            Generate monthly, quarterly, half-yearly or annual financial statements for your shop records.
           </p>
         </div>
 

@@ -1,15 +1,21 @@
 import React, { useState } from 'react';
 import { ShieldCheck, User, Lock, Phone, KeyRound, ArrowRight, FolderOpen, HardDrive, HelpCircle } from 'lucide-react';
 import { User as UserType } from '../types';
-import { saveUsers, loadUsers, setAdminSetupCompleted, recordAuditLog, relocateDatabaseFolder, setBackupFolderPath as persistBackupFolderPath, flushWrites } from '../utils/storage';
+import { saveUsers, loadUsers, setAdminSetupCompleted, recordAuditLog, relocateDatabaseFolder, setBackupFolderPath as persistBackupFolderPath, persistAllToDatabase } from '../utils/storage';
 import { RECOVERY_QUESTIONS, createSingleRecoveryRecord } from '../utils/recovery';
+import { CURRENCIES, getCurrencyCode, setCurrency } from '../utils/currency';
 import { useToast } from './Toast';
 
 interface FirstTimeAdminSetupProps {
   onSetupComplete: (adminUser: UserType) => void;
+  // v1.5.1 upgrade mode: the shop already has business data (from 1.5.0,
+  // which had no login) but zero user accounts. Same screen, same safe
+  // behavior (existing data is preserved — the admin is only prepended),
+  // with copy that reassures the owner nothing will be wiped.
+  upgradeMode?: boolean;
 }
 
-export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetupComplete }) => {
+export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetupComplete, upgradeMode = false }) => {
   const { showToast } = useToast();
 
   const [fullName, setFullName] = useState('Store Administrator');
@@ -21,6 +27,15 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
   const [step, setStep] = useState<'account' | 'backup' | 'security'>('account');
   const [selectedSecurityIdx, setSelectedSecurityIdx] = useState(0);
   const [singleSecurityAnswer, setSingleSecurityAnswer] = useState('');
+  // v1.6.0 store currency (NGN default). Saved at completion; old records
+  // without a stamp keep rendering as NGN.
+  const [currencyCode, setCurrencyCode] = useState<string>(() => {
+    try {
+      return getCurrencyCode();
+    } catch {
+      return 'NGN';
+    }
+  });
   const [capsOn, setCapsOn] = useState(false);
   const checkCaps = (e: React.KeyboardEvent<HTMLInputElement>) => setCapsOn(e.getModifierState('CapsLock'));
 
@@ -135,6 +150,14 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
 
       setAdminSetupCompleted(true);
 
+      // v1.6.0: persist the chosen store currency before the vault flush so
+      // it is durable alongside the admin account.
+      try {
+        await setCurrency(currencyCode);
+      } catch (e) {
+        console.error('Failed to save store currency', e);
+      }
+
       recordAuditLog(
         newAdmin.username,
         'System Admin',
@@ -142,11 +165,40 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
         `Master System Administrator account (${newAdmin.fullName}) configured. Backup folder: ${backupFolderPath}`
       );
 
-      // Flush the queued SQLite writes BEFORE leaving the setup wizard. The admin
-      // account, setup flag and audit log must be durable on disk — otherwise
-      // closing the app right after setup loses the account and the next launch
-      // shows a login screen with no users ("user admin not found").
-      await flushWrites(8000);
+      // Full vault replace BEFORE leaving the setup wizard (local-first:
+      // saves above only touched the snapshot file). The admin account,
+      // setup flag and audit log must be durable — otherwise closing the app
+      // right after setup loses the account ("user admin not found").
+      // v1.5.2: generous timeout for slow disks + VERIFY-AFTER-WRITE. A
+      // silent vault failure (dead DB layer returns success without writing)
+      // used to loop every next launch back to setup with no explanation.
+      const persisted = await persistAllToDatabase(true, 20000);
+      let verified = false;
+      try {
+        if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+          const { dbLoadUsers } = await import('../utils/db');
+          const wantId = 'usr-admin-master';
+          const wantName = (username.trim() || 'admin').toLowerCase();
+          for (let attempt = 0; attempt < 4 && !verified; attempt++) {
+            if (attempt > 0) await new Promise((r) => setTimeout(r, 1000));
+            const rows = await dbLoadUsers().catch(() => null);
+            verified = !!rows?.some(
+              (u) => u.id === wantId || (u.username || '').toLowerCase() === wantName
+            );
+          }
+        } else {
+          verified = loadUsers().some((u) => u.id === 'usr-admin-master');
+        }
+      } catch {
+        verified = false;
+      }
+      if (!persisted || !verified) {
+        showToast(
+          'Setup could NOT be saved to the database — DO NOT close the app. Check disk space and permissions, then try again. Your entries are kept on this screen.',
+          'error'
+        );
+        return;
+      }
 
       showToast('Admin account created! Backup folder configured. Launching POS terminal...', 'success');
       onSetupComplete(newAdmin);
@@ -169,14 +221,20 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
           <div>
             <div className="inline-flex items-center gap-2 bg-[var(--accent-color)]/10 border border-[var(--accent-color)]/30 px-4 py-1.5 rounded-full text-[var(--accent-color)] text-sm font-semibold mb-3">
               <ShieldCheck className="w-4 h-4" />
-              First-Time Setup {step === 'account' ? '(Step 1 of 3)' : step === 'backup' ? '(Step 2 of 3)' : '(Step 3 of 3)'}
+              {upgradeMode ? 'One-Time Upgrade' : <>First-Time Setup {step === 'account' ? '(Step 1 of 3)' : step === 'backup' ? '(Step 2 of 3)' : '(Step 3 of 3)'}</>}
             </div>
             <h2 className="text-2xl font-extrabold text-[var(--text-primary)]">
-              {step === 'account' ? 'Welcome to Joainas Mart' : step === 'backup' ? 'Configure Backup Storage' : 'Secure Your ADMIN Account'}
+              {step === 'account'
+                ? upgradeMode
+                  ? 'Create Your Admin Account — Your Data Is Kept'
+                  : 'Welcome to Joainas Mart'
+                : step === 'backup' ? 'Configure Backup Storage' : 'Secure Your ADMIN Account'}
             </h2>
             <p className="text-sm text-[var(--text-muted)] mt-2 max-w-sm mx-auto">
-              {step === 'account' 
-                ? "Let's create your admin account to get started with the POS system."
+              {step === 'account'
+                ? upgradeMode
+                  ? 'This update adds staff logins. Create the administrator account once — all your existing products, sales, customers and records stay exactly as they are.'
+                  : "Let's create your admin account to get started with the POS system."
                 : step === 'backup'
                 ? "Select a BACKUP folder for data storage and easy restoration."
                 : "Answer 5 private questions — you will need just ONE correct answer to recover the ADMIN password after 5 failed logins."
@@ -279,6 +337,26 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
                   />
                 </div>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-[var(--text-secondary)] mb-1.5">
+                Store Currency
+              </label>
+              <select
+                value={currencyCode}
+                onChange={(e) => setCurrencyCode(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-primary)] outline-none font-medium text-sm"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code} — {c.name} ({c.symbol})
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-[var(--text-muted)] mt-1">
+                Prices, receipts and reports use this currency. Can be changed later in Admin → Database.
+              </p>
             </div>
 
             <div className="pt-4">
@@ -447,7 +525,7 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
         )}
 
         <div className="mt-6 pt-4 border-t border-[var(--border-color)] text-center text-xs text-[var(--text-muted)]">
-          Powered by Dronebug Technologies
+          Powered by Joainas Mart
         </div>
       </div>
     </div>

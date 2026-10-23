@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatNaira } from '../utils/storage';
+import { formatNaira, loadPrinterConfig } from '../utils/storage';
 
 export interface FinancialStatementData {
   fromDate: string;
@@ -31,6 +31,20 @@ const formatDisplayDate = (iso: string): string => {
 };
 
 export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = ({ data, id, periodLabel }) => {
+  // Letterhead always mirrors Hardware Config (business identity), never the app name.
+  let businessName = 'Joainas Mart';
+  let businessAddress = '';
+  let businessPhone = '';
+  let logoSrc = '/logo.png';
+  try {
+    const cfg = loadPrinterConfig();
+    if (cfg) {
+      businessName = cfg.businessName || cfg.storeName || businessName;
+      businessAddress = cfg.address || '';
+      businessPhone = cfg.phone || '';
+      logoSrc = cfg.logoDataUrl || '/logo.png';
+    }
+  } catch {}
   return (
     <div
       id={id}
@@ -44,21 +58,34 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
         boxSizing: 'border-box',
       }}
     >
-      {/* Letterhead */}
+      {/* Letterhead — mirrors Hardware Config business identity */}
       <div className="text-center border-b-2 border-black pb-4 mb-6">
-        <h1 className="text-2xl font-black tracking-tight uppercase text-black">Joainas Seafoods, Frozen Foods and Groceries</h1>
+        <img
+          src={logoSrc}
+          alt="Business logo"
+          className="mx-auto mb-2 block"
+          style={{ width: '28mm', maxHeight: '28mm', objectFit: 'contain' }}
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+        <h1 className="text-2xl font-black tracking-tight uppercase text-black">{businessName}</h1>
         <p className="text-[11px] font-bold text-gray-800 uppercase tracking-wider mt-1">
           Statement of Profit and Loss (Income Statement)
         </p>
         <p className="text-[11px] text-gray-700 mt-1">
           For the Period: <strong>{formatDisplayDate(data.fromDate)}</strong> to <strong>{formatDisplayDate(data.toDate)}</strong>
         </p>
-        <p className="text-[10px] text-gray-600 mt-1.5">
-          Behind Fire Service, Gimba Road, Jimeta Yola, Adamawa State, Nigeria
-        </p>
-        <p className="text-[10px] text-gray-600">
-          Serviced by Dronebug Technologies • dronebugtechnologies@gmail.com
-        </p>
+        {businessAddress && (
+          <p className="text-[10px] text-gray-600 mt-1.5">
+            {businessAddress}
+          </p>
+        )}
+        {businessPhone && (
+          <p className="text-[10px] text-gray-600">
+            Tel: {businessPhone}
+          </p>
+        )}
       </div>
 
       {/* Revenue & COGS */}
@@ -119,7 +146,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
       </div>
 
       <p className="text-[10px] text-gray-600 mt-6">
-        This statement was generated automatically by the Joainas Mart POS system from {data.transactionCount} completed receipt(s) within the selected period.
+        This statement was generated automatically by the Joainas Mart system from {data.transactionCount} completed receipt(s) within the selected period.
       </p>
 
       {/* Signatures */}
@@ -130,10 +157,11 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
         </div>
         <div className="text-right">
           <p className="font-bold">Software Developer Verification:</p>
-          <p className="mt-1 font-semibold">Dronebug Technologies and Services</p>
+          <p className="mt-1 font-semibold">Joainas Mart</p>
           <p>dronebugtechnologies@gmail.com</p>
         </div>
       </div>
+      <p className="text-center text-[9px] text-gray-600 mt-8">Copyright of DroneBug Technologies &amp; Services. All rights reserved 2026 (Contact: +2347035716349)</p>
     </div>
   );
 };

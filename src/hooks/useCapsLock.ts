@@ -1,8 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 export function useCapsLock() {
   const [capsOn, setCapsOn] = useState(false);
-  const check = useCallback((e: React.KeyboardEvent<HTMLInputElement> | KeyboardEvent) => {
+  const check = useCallback((e: ReactKeyboardEvent<HTMLInputElement> | KeyboardEvent) => {
     const on = (e as KeyboardEvent).getModifierState ? (e as KeyboardEvent).getModifierState('CapsLock') : false;
     setCapsOn(on);
   }, []);

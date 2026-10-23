@@ -35,9 +35,9 @@ export async function getDbInfo(): Promise<{ url: string; folder: string; migrat
 }
 
 export async function getDbUrl(): Promise<string> {
-  if (!isTauriRuntime()) return 'sqlite:joainas_pos.db';
+  if (!isTauriRuntime()) return 'sqlite:senior_citizen_accessories.db';
   const info = await getDbInfo();
-  return info ? info.url : 'sqlite:joainas_pos.db';
+  return info ? info.url : 'sqlite:senior_citizen_accessories.db';
 }
 
 export async function openDb(url: string): Promise<Database | null> {
@@ -96,7 +96,8 @@ const SCHEMA_CREATES: string[] = [
     barcode TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     category_name TEXT NOT NULL,
-    unit TEXT CHECK(unit IN ('kg', 'pack', 'carton', 'bottle', 'piece', 'bag')) NOT NULL DEFAULT 'piece',
+    kind TEXT NOT NULL DEFAULT 'product',
+    unit TEXT NOT NULL DEFAULT 'piece',
     cost_price REAL NOT NULL DEFAULT 0.0,
     retail_price REAL NOT NULL DEFAULT 0.0,
     wholesale_price REAL NOT NULL DEFAULT 0.0,
@@ -166,12 +167,45 @@ const SCHEMA_CREATES: string[] = [
     receipt_header_note TEXT,
     receipt_footer_note TEXT,
     show_logo BOOLEAN NOT NULL DEFAULT 1,
+    logo_data_url TEXT,
+    business_name TEXT,
     paper_width TEXT CHECK(paper_width IN ('80mm', '58mm')) NOT NULL DEFAULT '80mm',
     auto_print_on_sale BOOLEAN NOT NULL DEFAULT 1,
     point_rate INTEGER NOT NULL DEFAULT 2,
     print_density TEXT CHECK(print_density IN ('Normal', 'High', 'Draft')) NOT NULL DEFAULT 'Normal',
     printer_name TEXT NOT NULL DEFAULT 'XP-80C',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS contracts (
+    id TEXT PRIMARY KEY NOT NULL,
+    customer_id TEXT NOT NULL,
+    contract_code TEXT UNIQUE NOT NULL,
+    product_label TEXT NOT NULL DEFAULT '',
+    purchase_date TEXT NOT NULL,
+    total_price REAL NOT NULL DEFAULT 0.0,
+    down_payment REAL NOT NULL DEFAULT 0.0,
+    total_paid REAL NOT NULL DEFAULT 0.0,
+    pending_balance REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'INSTALLMENT_ACTIVE',
+    due_date TEXT,
+    down_remitted INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    currency TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS micro_payments (
+    id TEXT PRIMARY KEY NOT NULL,
+    contract_id TEXT NOT NULL,
+    customer_id TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0.0,
+    collected_at INTEGER NOT NULL,
+    receipt_note TEXT,
+    remitted INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS audit_logs (
     id TEXT PRIMARY KEY NOT NULL,
@@ -212,6 +246,10 @@ const SCHEMA_INDEXES: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_sales_cashier ON sales(cashier_username)',
   'CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)',
   'CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id)',
+  'CREATE INDEX IF NOT EXISTS idx_contracts_customer ON contracts(customer_id)',
+  'CREATE INDEX IF NOT EXISTS idx_contracts_status ON contracts(status)',
+  'CREATE INDEX IF NOT EXISTS idx_payments_contract ON micro_payments(contract_id)',
+  'CREATE INDEX IF NOT EXISTS idx_payments_customer ON micro_payments(customer_id)',
   'CREATE INDEX IF NOT EXISTS idx_expenditures_date ON expenditures(expense_date)',
   'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(log_timestamp DESC)',
   'CREATE INDEX IF NOT EXISTS idx_audit_logs_username ON audit_logs(username)',
@@ -296,6 +334,50 @@ export async function bootstrapSchema(d: Database): Promise<void> {
     );
   }
 
+  // 2b. Products unit CHECK normalization (v2.0.0): legacy tables restrict
+  // unit to 6 goods values, which rejects service units (hour/job/...).
+  // Rebuild once without the restrictive CHECK; data preserved.
+  try {
+    const prodSql: any[] = await d.select(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name='products'`
+    );
+    const ddl: string = prodSql?.[0]?.sql || '';
+    if (ddl.includes(`'kg', 'pack'`) || ddl.includes(`"kg", "pack"`)) {
+      await d.execute('ALTER TABLE products RENAME TO products_old', []);
+      await d.execute(
+        `CREATE TABLE products (
+          id TEXT PRIMARY KEY NOT NULL,
+          barcode TEXT UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          category_name TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'product',
+          unit TEXT NOT NULL DEFAULT 'piece',
+          cost_price REAL NOT NULL DEFAULT 0.0,
+          retail_price REAL NOT NULL DEFAULT 0.0,
+          wholesale_price REAL NOT NULL DEFAULT 0.0,
+          stock_qty INTEGER NOT NULL DEFAULT 0,
+          reorder_level INTEGER NOT NULL DEFAULT 5,
+          min_price REAL,
+          price_tiers TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+        []
+      );
+      await d.execute(
+        `INSERT INTO products (id, barcode, name, category_name, kind, unit, cost_price, retail_price, wholesale_price, stock_qty, reorder_level, created_at, updated_at)
+         SELECT id, barcode, name, category_name,
+           CASE WHEN lower(category_name) = 'services' THEN 'service' ELSE 'product' END,
+           unit, cost_price, retail_price, wholesale_price, stock_qty, reorder_level, created_at, updated_at FROM products_old`,
+        []
+      );
+      await d.execute('DROP TABLE products_old', []);
+      console.info('Normalized legacy products unit CHECK + kind');
+    }
+  } catch (e) {
+    console.error('Failed to normalize products table', e);
+  }
+
   // 3. Add columns introduced after the original schema.
   await ensureColumn(
     d,
@@ -318,6 +400,18 @@ export async function bootstrapSchema(d: Database): Promise<void> {
   await ensureColumn(d, 'sales', 'cash_amount', 'ALTER TABLE sales ADD COLUMN cash_amount REAL');
   await ensureColumn(d, 'sales', 'transfer_amount', 'ALTER TABLE sales ADD COLUMN transfer_amount REAL');
   await ensureColumn(d, 'sales', 'payment_note', 'ALTER TABLE sales ADD COLUMN payment_note TEXT');
+  await ensureColumn(d, 'sales', 'currency', 'ALTER TABLE sales ADD COLUMN currency TEXT');
+  await ensureColumn(d, 'customers', 'nin', 'ALTER TABLE customers ADD COLUMN nin TEXT');
+  await ensureColumn(d, 'customers', 'bvn', 'ALTER TABLE customers ADD COLUMN bvn TEXT');
+  await ensureColumn(d, 'products', 'kind', `ALTER TABLE products ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'`);
+  await ensureColumn(d, 'categories', 'kind', `ALTER TABLE categories ADD COLUMN kind TEXT`);
+  await ensureColumn(d, 'categories', 'parent_root', `ALTER TABLE categories ADD COLUMN parent_root TEXT`);
+  await ensureColumn(d, 'printer_configs', 'logo_data_url', 'ALTER TABLE printer_configs ADD COLUMN logo_data_url TEXT');
+  await ensureColumn(d, 'printer_configs', 'business_name', 'ALTER TABLE printer_configs ADD COLUMN business_name TEXT');
+  await ensureColumn(d, 'contracts', 'currency', 'ALTER TABLE contracts ADD COLUMN currency TEXT');
+  await ensureColumn(d, 'expenditures', 'currency', 'ALTER TABLE expenditures ADD COLUMN currency TEXT');
+  await ensureColumn(d, 'products', 'min_price', 'ALTER TABLE products ADD COLUMN min_price REAL');
+  await ensureColumn(d, 'products', 'price_tiers', 'ALTER TABLE products ADD COLUMN price_tiers TEXT');
 
   // 4. Indexes (idempotent).
   for (const sql of SCHEMA_INDEXES) {
@@ -336,7 +430,7 @@ export async function bootstrapSchema(d: Database): Promise<void> {
         receipt_header_note, receipt_footer_note, show_logo,
         paper_width, auto_print_on_sale, point_rate, print_density, printer_name
       ) VALUES (
-        1, 'Joainas Supermarket & Coldstore', '', '', '', '', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
+        1, 'Joainas Mart', '', '', '', '', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
       )
       ON CONFLICT(id) DO NOTHING`,
       []
@@ -424,20 +518,32 @@ export function mapCategory(row: any): Category {
     name: row.name,
     color: row.color || '#6366f1',
     description: row.description || undefined,
+    kind: row.kind || undefined,
+    parentRoot: row.parent_root || undefined,
     createdAt: row.created_at,
   };
 }
 
 export function mapProduct(row: any): Product {
+  let parsedTiers: any[] | undefined;
+  try {
+    if (row.price_tiers) {
+      const p = typeof row.price_tiers === 'string' ? JSON.parse(row.price_tiers) : row.price_tiers;
+      if (Array.isArray(p)) parsedTiers = p;
+    }
+  } catch {}
   return {
     id: row.id,
     barcode: row.barcode,
     name: row.name,
     category: row.category_name,
+    kind: row.kind === 'service' ? 'service' : row.kind === 'edible' ? 'edible' : row.kind === 'product' ? 'product' : undefined,
     unit: row.unit,
     costPrice: row.cost_price,
     retailPrice: row.retail_price,
     wholesalePrice: row.wholesale_price,
+    minPrice: row.min_price ?? undefined,
+    priceTiers: parsedTiers as any,
     stockQty: row.stock_qty,
     reorderLevel: row.reorder_level,
   };
@@ -450,11 +556,46 @@ export function mapCustomer(row: any): Customer {
     accountType: row.account_type || 'individual',
     phone: row.phone || undefined,
     address: row.address || '',
+    nin: row.nin || undefined,
+    bvn: row.bvn || undefined,
     balance: row.balance,
     points: row.points,
     advancePayment: row.advance_payment,
     assignedCashier: row.assigned_cashier || undefined,
     createdAt: row.created_at,
+  };
+}
+
+export function mapContract(row: any): any {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    contractCode: row.contract_code,
+    productLabel: row.product_label || '',
+    purchaseDate: row.purchase_date,
+    totalPrice: row.total_price,
+    downPayment: row.down_payment,
+    totalPaid: row.total_paid,
+    pendingBalance: row.pending_balance,
+    status: row.status === 'COMPLETED' ? 'COMPLETED' : 'INSTALLMENT_ACTIVE',
+    dueDate: row.due_date || undefined,
+    downRemitted: !!row.down_remitted,
+    createdBy: row.created_by || undefined,
+    currency: row.currency || undefined,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapMicroPayment(row: any): any {
+  return {
+    id: row.id,
+    contractId: row.contract_id,
+    customerId: row.customer_id,
+    amount: row.amount,
+    collectedAt: row.collected_at,
+    receiptNote: row.receipt_note || undefined,
+    remitted: !!row.remitted,
+    createdBy: row.created_by || undefined,
   };
 }
 
@@ -466,6 +607,7 @@ export function mapExpenditure(row: any): Expenditure {
     amount: row.amount,
     date: row.expense_date,
     createdBy: row.created_by,
+    currency: row.currency || undefined,
   };
 }
 
@@ -478,6 +620,8 @@ export function mapPrinterConfig(row: any): ThermalPrinterConfig {
     receiptHeaderNote: row.receipt_header_note || '',
     receiptFooterNote: row.receipt_footer_note || '',
     showLogo: !!row.show_logo,
+    logoDataUrl: row.logo_data_url || undefined,
+    businessName: row.business_name || undefined,
     paperWidth: row.paper_width,
     autoPrintOnSale: !!row.auto_print_on_sale,
     pointRate: row.point_rate,
@@ -521,6 +665,9 @@ export function mapSale(row: any, productLookup: Map<string, Product>): SaleReco
       quantity: it.quantity,
       priceType: it.price_type,
       rate: it.rate,
+      // Past records are regarded as minimum prices: floor snapshot = rate.
+      ceilingAtSale: it.rate,
+      floorAtSale: it.rate,
       amount: it.amount,
     };
   });
@@ -546,6 +693,7 @@ export function mapSale(row: any, productLookup: Map<string, Product>): SaleReco
     date: row.sale_date,
     time: row.sale_time,
     timestamp: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    currency: row.currency || undefined,
   };
 }
 
@@ -670,6 +818,8 @@ export async function dbSaveCategories(categories: Category[]): Promise<void> {
     { col: 'name', value: (c) => c.name },
     { col: 'color', value: (c) => c.color || '#6366f1' },
     { col: 'description', value: (c) => c.description || null },
+    { col: 'kind', value: (c) => (c as any).kind || null },
+    { col: 'parent_root', value: (c) => (c as any).parentRoot || null },
     { col: 'created_at', value: (c) => c.createdAt || null },
   ], categories);
   await deleteIdsNotIn(d, 'categories', 'id', categories.map((c) => c.id));
@@ -693,10 +843,20 @@ export async function dbSaveProducts(products: Product[]): Promise<void> {
     { col: 'barcode', value: (p) => p.barcode },
     { col: 'name', value: (p) => p.name },
     { col: 'category_name', value: (p) => p.category },
+    {
+      col: 'kind',
+      value: (p) => {
+        if (p.kind === 'service' || p.kind === 'edible' || p.kind === 'product') return p.kind;
+        const cat = ((p as any).category || '').toLowerCase();
+        return cat === 'services' ? 'service' : cat === 'edibles' ? 'edible' : 'product';
+      },
+    },
     { col: 'unit', value: (p) => p.unit },
     { col: 'cost_price', value: (p) => p.costPrice },
     { col: 'retail_price', value: (p) => p.retailPrice },
     { col: 'wholesale_price', value: (p) => p.wholesalePrice ?? p.retailPrice },
+    { col: 'min_price', value: (p) => (p as any).minPrice ?? null },
+    { col: 'price_tiers', value: (p) => JSON.stringify((p as any).priceTiers || []) },
     { col: 'stock_qty', value: (p) => p.stockQty },
     { col: 'reorder_level', value: (p) => p.reorderLevel },
   ], products);
@@ -722,6 +882,8 @@ export async function dbSaveCustomers(customers: Customer[]): Promise<void> {
     { col: 'account_type', value: (c) => c.accountType || 'individual' },
     { col: 'phone', value: (c) => c.phone || null },
     { col: 'address', value: (c) => c.address || '' },
+    { col: 'nin', value: (c) => (c as any).nin || null },
+    { col: 'bvn', value: (c) => (c as any).bvn || null },
     { col: 'balance', value: (c) => c.balance },
     { col: 'points', value: (c) => c.points ?? 0 },
     { col: 'advance_payment', value: (c) => c.advancePayment ?? 0 },
@@ -781,6 +943,7 @@ export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
     { col: 'cashier_username', value: (s) => s.cashier },
     { col: 'sale_date', value: (s) => s.date },
     { col: 'sale_time', value: (s) => s.time },
+    { col: 'currency', value: (s) => s.currency || null },
   ], sales);
 
   // 2. Upsert sale items (stable ids keyed off sale+product so re-saves
@@ -818,6 +981,78 @@ export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
 }
 
 // ============================================================
+// ATOMIC SALE + STOCK UPDATE
+// Records a single sale and decrements stock in one sequential DB call
+// using `stock_qty - qty` so an intentional depleted-stock sale can go
+// negative. This replaces the old dual-write (saveSales + saveProducts full table rewrite) that
+// could revert if the second write was lost on close.
+// ============================================================
+
+export async function dbRecordSaleWithStockUpdate(sale: SaleRecord): Promise<void> {
+  const d = await getDb();
+  if (!d) return;
+
+  // 1. Insert sale header
+  await d.execute(
+    `INSERT INTO sales (id, receipt_no, subtotal, total_amount, advance_payment, balance_due, payment_method, price_type, customer_id, customer_name, customer_phone, points_earned, cash_amount, transfer_amount, payment_note, cashier_username, sale_date, sale_time, currency)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       receipt_no=excluded.receipt_no, subtotal=excluded.subtotal, total_amount=excluded.total_amount, advance_payment=excluded.advance_payment, balance_due=excluded.balance_due, payment_method=excluded.payment_method, price_type=excluded.price_type, customer_id=excluded.customer_id, customer_name=excluded.customer_name, customer_phone=excluded.customer_phone, points_earned=excluded.points_earned, cash_amount=excluded.cash_amount, transfer_amount=excluded.transfer_amount, payment_note=excluded.payment_note, cashier_username=excluded.cashier_username, sale_date=excluded.sale_date, sale_time=excluded.sale_time, currency=excluded.currency`,
+    [
+      sale.id,
+      sale.receiptNo,
+      sale.subtotal,
+      sale.totalAmount,
+      sale.advancePayment,
+      sale.balanceDue,
+      sale.paymentMethod,
+      sale.priceType,
+      sale.customerId || null,
+      sale.customerName || null,
+      sale.customerPhone || null,
+      sale.pointsEarned || 0,
+      (sale as any).cashAmount ?? null,
+      (sale as any).transferAmount ?? null,
+      (sale as any).paymentNote || null,
+      sale.cashier,
+      sale.date,
+      sale.time,
+      sale.currency || null,
+    ]
+  );
+
+  // 2. Insert sale items
+  for (const item of sale.items) {
+    await d.execute(
+      `INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, price_type, rate, amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET sale_id=excluded.sale_id, product_id=excluded.product_id, product_name=excluded.product_name, quantity=excluded.quantity, price_type=excluded.price_type, rate=excluded.rate, amount=excluded.amount`,
+      [
+        `item-${sale.id}-${item.product.id}`,
+        sale.id,
+        item.product.id,
+        item.product.name,
+        item.quantity,
+        item.priceType,
+        item.rate,
+        item.amount,
+      ]
+    );
+  }
+
+  // 3. Decrement stock atomically per item (services & edibles are uncounted — skip)
+  for (const item of sale.items) {
+    const kind = (item.product as any).kind;
+    const cat = String((item.product as any).category || '').toLowerCase();
+    if (kind === 'service' || kind === 'edible' || cat === 'services' || cat === 'edibles') continue;
+    await d.execute(
+      `UPDATE products SET stock_qty = stock_qty - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [item.quantity, item.product.id]
+    );
+  }
+}
+
+// ============================================================
 // EXPENDITURES
 // ============================================================
 
@@ -837,6 +1072,7 @@ export async function dbSaveExpenditures(expenditures: Expenditure[]): Promise<v
     { col: 'amount', value: (e) => e.amount },
     { col: 'expense_date', value: (e) => e.date },
     { col: 'created_by', value: (e) => e.createdBy },
+    { col: 'currency', value: (e) => e.currency || null },
   ], expenditures);
   await deleteIdsNotIn(d, 'expenditures', 'id', expenditures.map((e) => e.id));
 }
@@ -858,22 +1094,24 @@ export async function dbSavePrinterConfig(config: ThermalPrinterConfig): Promise
   if (!d) return;
   await d.execute(
     `INSERT INTO printer_configs (id, store_name, tagline, address, phone, receipt_header_note, receipt_footer_note,
-      show_logo, paper_width, auto_print_on_sale, point_rate, print_density, printer_name)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      show_logo, logo_data_url, business_name, paper_width, auto_print_on_sale, point_rate, print_density, printer_name)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
-       store_name = excluded.store_name,
-       tagline = excluded.tagline,
-       address = excluded.address,
-       phone = excluded.phone,
-       receipt_header_note = excluded.receipt_header_note,
-       receipt_footer_note = excluded.receipt_footer_note,
-       show_logo = excluded.show_logo,
-       paper_width = excluded.paper_width,
-       auto_print_on_sale = excluded.auto_print_on_sale,
-       point_rate = excluded.point_rate,
-       print_density = excluded.print_density,
-       printer_name = excluded.printer_name,
-       updated_at = CURRENT_TIMESTAMP`,
+        store_name = excluded.store_name,
+        tagline = excluded.tagline,
+        address = excluded.address,
+        phone = excluded.phone,
+        receipt_header_note = excluded.receipt_header_note,
+        receipt_footer_note = excluded.receipt_footer_note,
+        show_logo = excluded.show_logo,
+        logo_data_url = excluded.logo_data_url,
+        business_name = excluded.business_name,
+        paper_width = excluded.paper_width,
+        auto_print_on_sale = excluded.auto_print_on_sale,
+        point_rate = excluded.point_rate,
+        print_density = excluded.print_density,
+        printer_name = excluded.printer_name,
+        updated_at = CURRENT_TIMESTAMP`,
     [
       config.storeName,
       config.tagline,
@@ -882,6 +1120,8 @@ export async function dbSavePrinterConfig(config: ThermalPrinterConfig): Promise
       config.receiptHeaderNote,
       config.receiptFooterNote,
       config.showLogo ? 1 : 0,
+      (config as any).logoDataUrl || null,
+      (config as any).businessName || null,
       config.paperWidth,
       config.autoPrintOnSale ? 1 : 0,
       config.pointRate,
@@ -889,6 +1129,109 @@ export async function dbSavePrinterConfig(config: ThermalPrinterConfig): Promise
       config.printerName || 'XP-80C',
     ]
   );
+}
+
+// ============================================================
+// INSTALLMENT CONTRACTS + MICRO-PAYMENTS (StoreBox PRO ledger)
+// ============================================================
+
+export async function dbLoadContracts(): Promise<any[]> {
+  const d = await getDb();
+  if (!d) return [];
+  const rows = await d.select<any[]>('SELECT * FROM contracts ORDER BY created_at DESC');
+  return rows.map(mapContract);
+}
+
+export async function dbSaveContracts(contracts: any[]): Promise<void> {
+  const d = await getDb();
+  if (!d) return;
+  await upsertRows(d, 'contracts', 'id', [
+    { col: 'customer_id', value: (c) => c.customerId },
+    { col: 'contract_code', value: (c) => c.contractCode },
+    { col: 'product_label', value: (c) => c.productLabel || '' },
+    { col: 'purchase_date', value: (c) => c.purchaseDate },
+    { col: 'total_price', value: (c) => c.totalPrice },
+    { col: 'down_payment', value: (c) => c.downPayment ?? 0 },
+    { col: 'total_paid', value: (c) => c.totalPaid ?? 0 },
+    { col: 'pending_balance', value: (c) => c.pendingBalance ?? 0 },
+    { col: 'status', value: (c) => c.status || 'INSTALLMENT_ACTIVE' },
+    { col: 'due_date', value: (c) => c.dueDate || null },
+    { col: 'down_remitted', value: (c) => (c.downRemitted ? 1 : 0) },
+    { col: 'created_by', value: (c) => c.createdBy || null },
+    { col: 'currency', value: (c) => c.currency || null },
+    { col: 'created_at', value: (c) => c.createdAt || null },
+  ], contracts);
+  await deleteIdsNotIn(d, 'contracts', 'id', contracts.map((c) => c.id));
+}
+
+export async function dbLoadMicroPayments(): Promise<any[]> {
+  const d = await getDb();
+  if (!d) return [];
+  const rows = await d.select<any[]>('SELECT * FROM micro_payments ORDER BY collected_at ASC');
+  return rows.map(mapMicroPayment);
+}
+
+function recalcContract(totalPrice: number, downPayment: number, micros: number): { totalPaid: number; pending: number; status: string } {
+  const totalPaid = (downPayment || 0) + (micros || 0);
+  const pending = Math.max(0, (totalPrice || 0) - totalPaid);
+  return { totalPaid, pending, status: pending <= 0.005 ? 'COMPLETED' : 'INSTALLMENT_ACTIVE' };
+}
+
+export async function dbRecordMicroPayment(p: { contractId: string; customerId: string; amount: number; receiptNote?: string; remitted?: boolean; createdBy?: string }): Promise<any | null> {
+  const d = await getDb();
+  if (!d) return null;
+  const id = `mpay-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  const collectedAt = Date.now();
+  await d.execute(
+    `INSERT INTO micro_payments (id, contract_id, customer_id, amount, collected_at, receipt_note, remitted, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, p.contractId, p.customerId, p.amount, collectedAt, p.receiptNote || null, p.remitted ? 1 : 0, p.createdBy || null]
+  );
+  const crows: any[] = await d.select('SELECT * FROM contracts WHERE id = ?', [p.contractId]);
+  if (!crows.length) return { id, collectedAt };
+  const c = crows[0];
+  const sums: any[] = await d.select('SELECT COALESCE(SUM(amount),0) AS s FROM micro_payments WHERE contract_id = ?', [p.contractId]);
+  const r = recalcContract(c.total_price, c.down_payment, sums?.[0]?.s ?? 0);
+  await d.execute('UPDATE contracts SET total_paid = ?, pending_balance = ?, status = ? WHERE id = ?', [r.totalPaid, r.pending, r.status, p.contractId]);
+  // Mirror onto legacy customer balance (sum of pending across contracts)
+  try {
+    const all: any[] = await d.select('SELECT COALESCE(SUM(pending_balance),0) AS s FROM contracts WHERE customer_id = ?', [p.customerId]);
+    await d.execute('UPDATE customers SET balance = ? WHERE id = ?', [all?.[0]?.s ?? 0, p.customerId]);
+  } catch {}
+  return { id, collectedAt, ...r };
+}
+
+export async function dbDeleteMicroPayment(paymentId: string): Promise<boolean> {
+  const d = await getDb();
+  if (!d) return false;
+  const rows: any[] = await d.select('SELECT * FROM micro_payments WHERE id = ?', [paymentId]);
+  if (!rows.length) return false;
+  const { contract_id, customer_id } = rows[0];
+  await d.execute('DELETE FROM micro_payments WHERE id = ?', [paymentId]);
+  const crows: any[] = await d.select('SELECT * FROM contracts WHERE id = ?', [contract_id]);
+  if (crows.length) {
+    const c = crows[0];
+    const sums: any[] = await d.select('SELECT COALESCE(SUM(amount),0) AS s FROM micro_payments WHERE contract_id = ?', [contract_id]);
+    const r = recalcContract(c.total_price, c.down_payment, sums?.[0]?.s ?? 0);
+    await d.execute('UPDATE contracts SET total_paid = ?, pending_balance = ?, status = ? WHERE id = ?', [r.totalPaid, r.pending, r.status, contract_id]);
+  }
+  try {
+    const all: any[] = await d.select('SELECT COALESCE(SUM(pending_balance),0) AS s FROM contracts WHERE customer_id = ?', [customer_id]);
+    await d.execute('UPDATE customers SET balance = ? WHERE id = ?', [all?.[0]?.s ?? 0, customer_id]);
+  } catch {}
+  return true;
+}
+
+export async function dbSetMicroRemitted(paymentId: string, remitted: boolean): Promise<void> {
+  const d = await getDb();
+  if (!d) return;
+  await d.execute('UPDATE micro_payments SET remitted = ? WHERE id = ?', [remitted ? 1 : 0, paymentId]);
+}
+
+export async function dbSetContractDownRemitted(contractId: string, remitted: boolean): Promise<void> {
+  const d = await getDb();
+  if (!d) return;
+  await d.execute('UPDATE contracts SET down_remitted = ? WHERE id = ?', [remitted ? 1 : 0, contractId]);
 }
 
 // ============================================================
@@ -955,4 +1298,81 @@ export async function dbClearTable(table: string): Promise<void> {
   const d = await getDb();
   if (!d) return;
   await d.execute(`DELETE FROM ${table}`, []);
+}
+
+// ============================================================
+// SIBLING-DATABASE MERGE (v1.4.8)
+// The install history left several database files behind (old Joainas
+// identifier, rebrand renames, user-relocated folders, stale pointer
+// files). Whichever file the pointer names is "live" — but the accounts
+// and sales may sit in a sibling file, stranding the user at the setup
+// wizard or hiding all history. This ATTACHes a sibling file and copies
+// every row the live DB is missing (INSERT OR IGNORE by id — never
+// overwrites, never duplicates). Column lists are intersected via PRAGMA
+// so old schemas (missing min_price etc.) merge safely.
+// Returns rows added per table (all zero when already united).
+// ============================================================
+
+const MERGE_TABLES = [
+  'users',
+  'categories',
+  'products',
+  'customers',
+  'sales',
+  'sale_items',
+  'expenditures',
+] as const;
+
+function sqlEscapePath(p: string): string {
+  return p.replace(/'/g, "''");
+}
+
+async function tableColumns(d: Database, qualified: string): Promise<string[]> {
+  try {
+    const rows = await d.select<{ name: string }[]>(`PRAGMA table_info(${qualified})`);
+    return rows.map((r) => r.name);
+  } catch {
+    return [];
+  }
+}
+
+export async function dbMergeFromFile(absPath: string): Promise<Record<string, number>> {
+  const added: Record<string, number> = {};
+  const d = await getDb();
+  if (!d) return added;
+  // Attach under a fixed alias; detach in finally so one bad file can
+  // never poison later merges.
+  try {
+    await d.execute(`ATTACH DATABASE '${sqlEscapePath(absPath)}' AS srcdb`, []);
+  } catch (e) {
+    console.error('Merge attach failed', absPath, e);
+    return added;
+  }
+  try {
+    for (const table of MERGE_TABLES) {
+      try {
+        const liveCols = await tableColumns(d, table);
+        const srcCols = await tableColumns(d, `srcdb.${table}`);
+        if (liveCols.length === 0 || srcCols.length === 0) continue;
+        const common = liveCols.filter((c) => srcCols.includes(c));
+        if (!common.includes('id')) continue;
+        const list = common.join(', ');
+        const before: any[] = await d.select(`SELECT COUNT(*) AS n FROM ${table}`);
+        const beforeN = before?.[0]?.n ?? 0;
+        await d.execute(
+          `INSERT OR IGNORE INTO ${table} (${list}) SELECT ${list} FROM srcdb.${table}`,
+          []
+        );
+        const after: any[] = await d.select(`SELECT COUNT(*) AS n FROM ${table}`);
+        added[table] = (after?.[0]?.n ?? beforeN) - beforeN;
+      } catch (e) {
+        console.error(`Merge failed for table ${table} from`, absPath, e);
+      }
+    }
+  } finally {
+    try {
+      await d.execute('DETACH DATABASE srcdb', []);
+    } catch {}
+  }
+  return added;
 }

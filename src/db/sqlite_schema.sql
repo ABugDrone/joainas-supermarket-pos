@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS customers (
     account_type TEXT CHECK(account_type IN ('individual', 'company', 'ngo', 'government')) NOT NULL DEFAULT 'individual',
     phone TEXT,
     address TEXT,
+    nin TEXT,
+    bvn TEXT,
     balance REAL NOT NULL DEFAULT 0.0, -- Positive = Customer owes store (Debt), Negative = Store credit
     points INTEGER NOT NULL DEFAULT 0,
     advance_payment REAL NOT NULL DEFAULT 0.0,
@@ -208,6 +210,41 @@ AFTER UPDATE ON products
 BEGIN
     UPDATE products SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
 END;
+
+-- 10b. STOREBOX PRO LEDGER: contracts + micro-payments (v2.0.0)
+CREATE TABLE IF NOT EXISTS contracts (
+    id TEXT PRIMARY KEY NOT NULL,
+    customer_id TEXT NOT NULL,
+    contract_code TEXT UNIQUE NOT NULL,
+    product_label TEXT NOT NULL DEFAULT '',
+    purchase_date TEXT NOT NULL,
+    total_price REAL NOT NULL DEFAULT 0.0,
+    down_payment REAL NOT NULL DEFAULT 0.0,
+    total_paid REAL NOT NULL DEFAULT 0.0,
+    pending_balance REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'INSTALLMENT_ACTIVE',
+    due_date TEXT,
+    down_remitted INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    currency TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS micro_payments (
+    id TEXT PRIMARY KEY NOT NULL,
+    contract_id TEXT NOT NULL,
+    customer_id TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0.0,
+    collected_at INTEGER NOT NULL,
+    receipt_note TEXT,
+    remitted INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_contracts_customer ON contracts(customer_id);
+CREATE INDEX IF NOT EXISTS idx_payments_contract ON micro_payments(contract_id);
 
 -- --------------------------------------------------------------------
 -- 11. APP SETTINGS / KEY-VALUE TABLE

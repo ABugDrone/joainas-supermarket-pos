@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ShieldCheck, Lock, KeyRound, Eye, EyeOff, Copy, Check, AlertTriangle, RefreshCw } from 'lucide-react';
-import { RECOVERY_QUESTIONS, verifyRecoveryAnswer, recoverPasswordWithAnswer, devRecoverPassword, loadRecoveryRecord, verifyDevMasterCode } from '../utils/recovery';
-import { loadUsers, saveUsers } from '../utils/storage';
+import {
+  RECOVERY_QUESTIONS,
+  verifyRecoveryAnswer,
+  recoverPasswordWithAnswer,
+  devRecoverPassword,
+  devResetAdminPassword,
+  loadRecoveryRecord,
+  verifyDevMasterCode,
+} from '../utils/recovery';
+import { loadUsers, saveUsers, recordAuditLog } from '../utils/storage';
 import { useToast } from './Toast';
 
 interface AdminRecoveryModalProps {
@@ -15,6 +23,7 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
   const [phase, setPhase] = useState<'question' | 'revealed' | 'reset'>('question');
   const [questionIdx, setQuestionIdx] = useState<number>(0);
   const [question, setQuestion] = useState<string>('');
+  const [hasVault, setHasVault] = useState(false);
   const [answer, setAnswer] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [revealed, setRevealed] = useState<string>('');
@@ -25,6 +34,9 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
   const [confirmNew, setConfirmNew] = useState('');
   const [isDevMode, setIsDevMode] = useState(false);
   const [devCode, setDevCode] = useState('');
+  const [devNewPassword, setDevNewPassword] = useState('');
+  const [devConfirmPassword, setDevConfirmPassword] = useState('');
+  const [isDevResetting, setIsDevResetting] = useState(false);
   const [capsOn, setCapsOn] = useState(false);
   const checkCaps = (e: React.KeyboardEvent<HTMLInputElement>) => setCapsOn(e.getModifierState('CapsLock'));
   const countdownRef = useRef<number | null>(null);
@@ -34,10 +46,14 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
     // pick a random question from the stored record
     (async () => {
       const rec = await loadRecoveryRecord();
-      if (!rec || rec.questions.length !== 5) {
-        setQuestion('No recovery questions are configured for this install.');
+      if (!rec || rec.questions.length < 1) {
+        setHasVault(false);
+        setQuestion('');
+        setPhase('question');
+        setAnswer('');
         return;
       }
+      setHasVault(true);
       const list = rec.questions;
       const picked = list[Math.floor(Math.random() * list.length)];
       setQuestionIdx(picked.id);
@@ -105,13 +121,59 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
   const handleDevRecover = async () => {
     const plain = await devRecoverPassword(devCode);
     if (!plain) {
-      showToast('Invalid developer code or no recovery vault found. See RECOVERY_GUIDE.md for DB inspection.', 'error');
+      showToast(
+        'No vault found for this install. Enter the developer code and use “Reset ADMIN Password” below.',
+        'error'
+      );
       return;
     }
     setRevealed(plain);
     setPhase('revealed');
     setCountdown(30);
     showToast('Developer recovery successful.', 'success');
+  };
+
+  /**
+   * v2.0.6: controlled developer reset for installs with NO recovery vault.
+   * The admin credential is bcrypt-only and cannot be reversed, so the safe
+   * support path is a new password written with the developer master code.
+   * The action is audit-logged and updates the vault when one exists.
+   */
+  const handleDevReset = async () => {
+    if (!devCode.trim()) {
+      showToast('Enter the developer master code first.', 'error');
+      return;
+    }
+    if (!devNewPassword || devNewPassword.length < 4) {
+      showToast('New ADMIN password must be at least 4 characters.', 'error');
+      return;
+    }
+    if (devNewPassword !== devConfirmPassword) {
+      showToast('The new passwords do not match.', 'error');
+      return;
+    }
+    setIsDevResetting(true);
+    try {
+      const ok = await devResetAdminPassword(devCode, devNewPassword);
+      if (!ok) {
+        showToast('Invalid developer code, or no ADMIN account was found.', 'error');
+        return;
+      }
+      recordAuditLog(
+        'Developer',
+        'System Admin',
+        'ADMIN Password Reset via Developer Code',
+        'The ADMIN password was reset locally using the developer master code. The operator should sign in and set a recovery question immediately.'
+      );
+      showToast('ADMIN password reset. Use the new password to sign in now.', 'success');
+      onRecovered(devNewPassword);
+      onClose();
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to reset the ADMIN password.', 'error');
+    } finally {
+      setIsDevResetting(false);
+    }
   };
 
   const handleResetPassword = async () => {
@@ -138,6 +200,12 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
       // also update the encrypted recovery copy so next recovery shows the new password
       const { updateEncryptedPassword } = await import('../utils/recovery');
       await updateEncryptedPassword(newPassword);
+      recordAuditLog(
+        target.username,
+        target.role,
+        'ADMIN Password Reset via Recovery',
+        'The ADMIN password was reset after a successful security-question recovery. The recovery vault copy was updated.'
+      );
       showToast('Admin password has been reset. Use it to sign in.', 'success');
       onRecovered(newPassword);
       onClose();
@@ -157,7 +225,7 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
             </div>
             <div>
               <h3 className="font-extrabold text-lg">Recover ADMIN Password</h3>
-              <p className="text-xs text-white/80">Answer one of your 5 security questions</p>
+              <p className="text-xs text-white/80">Answer your security question, or use the developer reset</p>
             </div>
           </div>
         </div>
@@ -173,7 +241,9 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
               <div>
                 <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">Security Question</label>
                 <div className="p-3 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)] text-sm font-semibold text-[var(--text-primary)] leading-snug">
-                  {question || 'Loading...'}
+                  {hasVault
+                    ? (question || 'Loading...')
+                    : 'No security question is configured for this install. Use the developer reset below.'}
                 </div>
               </div>
 
@@ -197,7 +267,7 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
                 </button>
                 <button
                   onClick={handleVerify}
-                  disabled={isVerifying || !question}
+                  disabled={isVerifying || !hasVault || !question}
                   className="py-3 rounded-xl bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2"
                 >
                   {isVerifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
@@ -210,19 +280,54 @@ export const AdminRecoveryModal: React.FC<AdminRecoveryModalProps> = ({ isOpen, 
                   Developer retrieval (older installs)
                 </button>
                 {isDevMode && (
-                  <div className="mt-3 p-3 rounded-xl bg-[#0d1117] border border-[#30363d] space-y-2">
-                    <p className="text-xs text-slate-400">Enter developer master code to reveal without a security question. For older versions without a recovery vault, see <code className="font-mono bg-black/20 px-1 rounded">RECOVERY_GUIDE.md</code> to inspect <code className="font-mono">app_settings</code> / localStorage key <code className="font-mono">joainas_admin_recovery_v1</code>.</p>
+                  <div className="mt-3 p-3 rounded-xl bg-[#0d1117] border border-[#30363d] space-y-3">
+                    <p className="text-xs text-slate-400">
+                      Enter the developer master code to reveal an existing vault without a
+                      security question. If this install has <strong>no vault</strong>, use the
+                      reset section below — a bcrypt password cannot be reversed.
+                    </p>
                     <div className="flex gap-2">
                       <input
                         type="password"
                         value={devCode}
                         onChange={(e) => setDevCode(e.target.value)}
-                        placeholder="JOAINAS-DEV-2026-..."
+                        placeholder="SENIOR CITIZEN-DEV-2026-..."
                         className="flex-1 px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-xs font-mono outline-none"
                       />
                       <button onClick={handleDevRecover} className="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold">
-                        Unlock
+                        Unlock Vault
                       </button>
+                    </div>
+
+                    <div className="border-t border-[#30363d] pt-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-amber-300">
+                        Reset ADMIN password (no vault required)
+                      </p>
+                      <input
+                        type="password"
+                        value={devNewPassword}
+                        onChange={(e) => setDevNewPassword(e.target.value)}
+                        placeholder="New ADMIN password (min. 4 chars)"
+                        className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-xs outline-none"
+                      />
+                      <input
+                        type="password"
+                        value={devConfirmPassword}
+                        onChange={(e) => setDevConfirmPassword(e.target.value)}
+                        placeholder="Confirm new ADMIN password"
+                        className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-xs outline-none"
+                      />
+                      <button
+                        onClick={handleDevReset}
+                        disabled={isDevResetting || !devCode.trim() || !devNewPassword}
+                        className="w-full px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-extrabold uppercase tracking-wide"
+                      >
+                        {isDevResetting ? 'Resetting…' : 'Reset ADMIN Password'}
+                      </button>
+                      <p className="text-[10px] text-slate-500 leading-snug">
+                        Audit-logged. Sign in immediately afterwards and set a security question in
+                        Admin → Security. Storage key: <code className="font-mono">senior_citizen_accessories_admin_recovery_v1</code>.
+                      </p>
                     </div>
                   </div>
                 )}

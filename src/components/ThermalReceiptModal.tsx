@@ -2,8 +2,9 @@ import React from 'react';
 import { Printer, X, Copy, Check, Volume2, Image as ImageIcon, FileDown, AlertTriangle } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { SaleRecord, ThermalPrinterConfig } from '../types';
+import { SaleRecord, ThermalPrinterConfig, MANDATORY_RECEIPT_FOOTER } from '../types';
 import { formatNaira, playPOSBeep, pickReceiptSavePath, writeBinaryFile, openInDefaultApp } from '../utils/storage';
+import { formatMoney, moneyAscii } from '../utils/currency';
 import { printReceipt } from '../utils/escpos';
 import { isTauriRuntime } from '../utils/db';
 import { useToast } from './Toast';
@@ -99,9 +100,10 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
     }
   };
 
+  const headerName = config.businessName || config.storeName;
   const getEscPosText = () => {
     let text = `================================\n`;
-    text += `       ${config.storeName}\n`;
+    text += `       ${headerName}\n`;
     text += `  ${config.tagline}\n`;
     text += `================================\n`;
     text += `Address: ${config.address}\n`;
@@ -128,18 +130,18 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
     });
 
     text += `--------------------------------\n`;
-    text += `TOTAL:          ₦${sale.totalAmount.toLocaleString()}\n`;
-    text += `PAID (ADVANCE): ₦${sale.advancePayment.toLocaleString()}\n`;
-    text += `BALANCE DUE:    ₦${sale.balanceDue.toLocaleString()}\n`;
+    text += `TOTAL:          ${moneyAscii(sale.totalAmount, sale.currency)}\n`;
+    text += `PAID (ADVANCE): ${moneyAscii(sale.advancePayment, sale.currency)}\n`;
+    text += `BALANCE DUE:    ${moneyAscii(sale.balanceDue, sale.currency)}\n`;
     text += `PAYMENT METHOD: ${sale.paymentMethod}\n`;
     if ((sale as any).cashAmount !== undefined || (sale as any).transferAmount !== undefined) {
-      if ((sale as any).cashAmount !== undefined) text += `Cash: ${formatNaira((sale as any).cashAmount)}\n`;
-      if ((sale as any).transferAmount !== undefined) text += `Transfer: ${formatNaira((sale as any).transferAmount)}\n`;
+      if ((sale as any).cashAmount !== undefined) text += `Cash: ${moneyAscii((sale as any).cashAmount, sale.currency)}\n`;
+      if ((sale as any).transferAmount !== undefined) text += `Transfer: ${moneyAscii((sale as any).transferAmount, sale.currency)}\n`;
       if ((sale as any).paymentNote) text += `Note: ${(sale as any).paymentNote}\n`;
     }
     text += `--------------------------------\n`;
     text += `${config.receiptFooterNote}\n`;
-    text += `Software by Dronebug Tech\n`;
+    text += `${MANDATORY_RECEIPT_FOOTER}\n`;
     text += `================================\n\n\n`;
     return text;
   };
@@ -234,12 +236,12 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               boxSizing: 'border-box',
             }}
           >
-            {/* Store Header */}
+            {/* Store Header — Joainas Mart logo default, custom override, else bold name */}
             <div className="text-center mb-3 pb-3 border-b-2 border-gray-700">
-              {config.showLogo && (
-                <img src="/logo.png" alt="Logo" className="w-16 h-16 mx-auto mb-2 object-contain" />
-              )}
-              <div className="font-black text-2xl tracking-tight text-black uppercase leading-tight">{config.storeName}</div>
+              {config.showLogo ? (
+                <img src={config.logoDataUrl || '/logo.png'} alt="Logo" className="mx-auto mb-2 object-contain" style={{ maxWidth: config.paperWidth === '58mm' ? 96 : 128, maxHeight: 64 }} />
+              ) : null}
+              <div className="font-black text-2xl tracking-tight text-black uppercase leading-tight">{headerName}</div>
               <div className="text-sm text-gray-800 font-bold mt-1">{config.tagline}</div>
               <div className="text-xs text-gray-700 font-medium mt-1">{config.address}</div>
               <div className="text-xs text-gray-700 font-medium">Tel: {config.phone}</div>
@@ -307,22 +309,22 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             <div className="border-t-2 border-black pt-2 mt-2 space-y-1.5 text-[13px]">
               <div className="flex justify-between text-xl font-black text-black">
                 <span>TOTAL:</span>
-                <span>{formatNaira(sale.totalAmount)}</span>
+                <span>{formatMoney(sale.totalAmount, sale.currency)}</span>
               </div>
               <div className="flex justify-between font-black text-gray-900">
                 <span>Paid:</span>
-                <span>{formatNaira(sale.advancePayment)}</span>
+                <span>{formatMoney(sale.advancePayment, sale.currency)}</span>
               </div>
               {sale.balanceDue > 0 && (
                 <div className="flex justify-between font-black text-red-700">
                   <span>Balance Due:</span>
-                  <span>{formatNaira(sale.balanceDue)}</span>
+                  <span>{formatMoney(sale.balanceDue, sale.currency)}</span>
                 </div>
               )}
               {sale.balanceDue < 0 && (
                 <div className="flex justify-between font-black text-emerald-700">
                   <span>Change:</span>
-                  <span>{formatNaira(Math.abs(sale.balanceDue))}</span>
+                  <span>{formatMoney(Math.abs(sale.balanceDue), sale.currency)}</span>
                 </div>
               )}
               <div className="flex justify-between text-xs text-gray-800 font-bold pt-1 border-t-2 border-gray-700">
@@ -332,13 +334,13 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               {(sale as any).cashAmount !== undefined && (
                 <div className="flex justify-between text-xs text-gray-800 font-bold">
                   <span>Cash:</span>
-                  <span>{formatNaira((sale as any).cashAmount)}</span>
+                  <span>{formatMoney((sale as any).cashAmount, sale.currency)}</span>
                 </div>
               )}
               {(sale as any).transferAmount !== undefined && (
                 <div className="flex justify-between text-xs text-gray-800 font-bold">
                   <span>Transfer:</span>
-                  <span>{formatNaira((sale as any).transferAmount)}</span>
+                  <span>{formatMoney((sale as any).transferAmount, sale.currency)}</span>
                 </div>
               )}
               {(sale as any).paymentNote && (
@@ -349,6 +351,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
             {/* Footer */}
             <div className="text-center text-xs text-gray-800 font-bold border-t-2 border-gray-700 pt-3 mt-3 space-y-1">
               <p className="font-black text-black">{config.receiptFooterNote}</p>
+              <p className="text-[10px]">{MANDATORY_RECEIPT_FOOTER}</p>
             </div>
           </div>
         </div>
