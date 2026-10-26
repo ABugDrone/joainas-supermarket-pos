@@ -207,31 +207,15 @@ html.dark-theme textarea {
   border-color: var(--border-color) !important;
 }
 
-/* Placeholder text — force PURE BLACK readable color in all light themes.
-   Covers every input type, browser prefix, and Tailwind placeholder utilities. */
-html.light-theme input::placeholder,
-html.light-theme textarea::placeholder,
-html.light-theme select::placeholder,
-html.light-theme input::-webkit-input-placeholder,
-html.light-theme textarea::-webkit-input-placeholder,
-html.light-theme select::-webkit-input-placeholder,
-html.light-theme input::-moz-placeholder,
-html.light-theme textarea::-moz-placeholder,
-html.light-theme select::-moz-placeholder,
-html.light-theme input:-ms-input-placeholder,
-html.light-theme textarea:-ms-input-placeholder,
-html.light-theme select:-ms-input-placeholder {
-  color: #000000 !important;
+/* Placeholder text — readable in light themes.
+   IMPORTANT: never mix unsupported vendor selectors (::-moz-placeholder,
+   :-ms-input-placeholder) into one comma list. Chromium rejects the ENTIRE
+   rule when any selector in the list is unknown — that is exactly what left
+   every input placeholder rendered in the browser-default grey. */
+html.light-theme ::placeholder {
+  color: #111111 !important;
   opacity: 1 !important;
-}
-
-/* Override ANY Tailwind placeholder utility classes in light themes */
-html.light-theme ::placeholder,
-html.light-theme ::-webkit-input-placeholder,
-html.light-theme ::-moz-placeholder,
-html.light-theme :-ms-input-placeholder {
-  color: #000000 !important;
-  opacity: 1 !important;
+  -webkit-text-fill-color: #111111 !important;
 }
 
 html.light-theme .placeholder-slate-100::placeholder,
@@ -250,8 +234,9 @@ html.light-theme .placeholder-neutral-400::placeholder,
 html.light-theme .placeholder-zinc-400::placeholder,
 html.light-theme .placeholder-stone-400::placeholder,
 html.light-theme .placeholder-white::placeholder {
-  color: #000000 !important;
+  color: #111111 !important;
   opacity: 1 !important;
+  -webkit-text-fill-color: #111111 !important;
 }
 
 /* Select dropdown options must render dark text on light dropdown lists */
@@ -282,7 +267,11 @@ html.theme-storebox-white [class*="bg-[#111111]"],
 html.theme-storebox-white [class*="bg-[#131a27]"],
 html.theme-storebox-white [class*="bg-[#161b22]"],
 html.theme-storebox-white [class*="bg-[#1e293b]"],
-html.theme-storebox-white [class*="bg-[#0a0a0a]"] {
+html.theme-storebox-white [class*="bg-[#0a0a0a]"],
+html.theme-storebox-white [class*="bg-[#1a1114]"],
+html.theme-storebox-white [class*="bg-[#1f242d]"],
+html.theme-storebox-white [class*="bg-[#1f2630]"],
+html.theme-storebox-white [class*="bg-[#2d333d]"] {
   background-color: #ffffff !important;
 }
 
@@ -336,7 +325,7 @@ html.theme-storebox-white .pos-dark-section .text-gray-500 {
 }
 html.theme-storebox-white .pos-dark-section .text-cyan-300,
 html.theme-storebox-white .pos-dark-section .text-cyan-400 {
-  color: #0e7490 !important;
+  color: #0b6b86 !important;
 }
 html.theme-storebox-white .pos-dark-section .text-emerald-400 {
   color: #047857 !important;
@@ -348,21 +337,21 @@ html.theme-storebox-white :is(
   [class*="bg-[var(--accent-color)]"],
   [class*="bg-[var(--accent-orange)]"],
   [class*="bg-gradient"],
-  [class*="bg-black"],
-  [class*="bg-emerald-500"], [class*="bg-emerald-600"], [class*="bg-emerald-700"], [class*="bg-emerald-800"], [class*="bg-emerald-900"],
-  [class*="bg-green-500"], [class*="bg-green-600"], [class*="bg-green-700"], [class*="bg-green-800"],
-  [class*="bg-teal-500"], [class*="bg-teal-600"], [class*="bg-teal-700"],
-  [class*="bg-cyan-500"], [class*="bg-cyan-600"], [class*="bg-cyan-700"], [class*="bg-cyan-800"], [class*="bg-cyan-900"],
-  [class*="bg-sky-500"], [class*="bg-sky-600"], [class*="bg-sky-700"],
-  [class*="bg-blue-500"], [class*="bg-blue-600"], [class*="bg-blue-700"],
-  [class*="bg-indigo-500"], [class*="bg-indigo-600"], [class*="bg-indigo-700"], [class*="bg-indigo-900"],
-  [class*="bg-violet-500"], [class*="bg-violet-600"], [class*="bg-violet-700"],
-  [class*="bg-purple-500"], [class*="bg-purple-600"], [class*="bg-purple-700"], [class*="bg-purple-900"],
-  [class*="bg-fuchsia-500"], [class*="bg-fuchsia-600"], [class*="bg-pink-500"], [class*="bg-pink-600"],
-  [class*="bg-rose-500"], [class*="bg-rose-600"], [class*="bg-rose-700"],
-  [class*="bg-red-500"], [class*="bg-red-600"], [class*="bg-red-700"], [class*="bg-red-800"], [class*="bg-red-900"],
-  [class*="bg-orange-600"], [class*="bg-orange-700"],
-  [class*="bg-amber-600"], [class*="bg-amber-700"], [class*="bg-amber-800"], [class*="bg-amber-900"]
+  [class~="bg-black"],
+  [class~="bg-emerald-500"], [class~="bg-emerald-600"], [class~="bg-emerald-700"], [class~="bg-emerald-800"], [class~="bg-emerald-900"],
+  [class~="bg-green-500"], [class~="bg-green-600"], [class~="bg-green-700"], [class~="bg-green-800"],
+  [class~="bg-teal-500"], [class~="bg-teal-600"], [class~="bg-teal-700"],
+  [class~="bg-cyan-500"], [class~="bg-cyan-600"], [class~="bg-cyan-700"], [class~="bg-cyan-800"], [class~="bg-cyan-900"],
+  [class~="bg-sky-500"], [class~="bg-sky-600"], [class~="bg-sky-700"],
+  [class~="bg-blue-500"], [class~="bg-blue-600"], [class~="bg-blue-700"],
+  [class~="bg-indigo-500"], [class~="bg-indigo-600"], [class~="bg-indigo-700"], [class~="bg-indigo-900"],
+  [class~="bg-violet-500"], [class~="bg-violet-600"], [class~="bg-violet-700"],
+  [class~="bg-purple-500"], [class~="bg-purple-600"], [class~="bg-purple-700"], [class~="bg-purple-900"],
+  [class~="bg-fuchsia-500"], [class~="bg-fuchsia-600"], [class~="bg-pink-500"], [class~="bg-pink-600"],
+  [class~="bg-rose-500"], [class~="bg-rose-600"], [class~="bg-rose-700"],
+  [class~="bg-red-500"], [class~="bg-red-600"], [class~="bg-red-700"], [class~="bg-red-800"], [class~="bg-red-900"],
+  [class~="bg-orange-600"], [class~="bg-orange-700"],
+  [class~="bg-amber-600"], [class~="bg-amber-700"], [class~="bg-amber-800"], [class~="bg-amber-900"]
 ) {
   color: #ffffff !important;
 }
@@ -371,41 +360,41 @@ html.theme-storebox-white :is(
   [class*="bg-[var(--accent-color)]"],
   [class*="bg-[var(--accent-orange)]"],
   [class*="bg-gradient"],
-  [class*="bg-black"],
-  [class*="bg-emerald-500"], [class*="bg-emerald-600"], [class*="bg-emerald-700"], [class*="bg-emerald-800"], [class*="bg-emerald-900"],
-  [class*="bg-green-500"], [class*="bg-green-600"], [class*="bg-green-700"], [class*="bg-green-800"],
-  [class*="bg-teal-500"], [class*="bg-teal-600"], [class*="bg-teal-700"],
-  [class*="bg-cyan-500"], [class*="bg-cyan-600"], [class*="bg-cyan-700"], [class*="bg-cyan-800"], [class*="bg-cyan-900"],
-  [class*="bg-sky-500"], [class*="bg-sky-600"], [class*="bg-sky-700"],
-  [class*="bg-blue-500"], [class*="bg-blue-600"], [class*="bg-blue-700"],
-  [class*="bg-indigo-500"], [class*="bg-indigo-600"], [class*="bg-indigo-700"], [class*="bg-indigo-900"],
-  [class*="bg-violet-500"], [class*="bg-violet-600"], [class*="bg-violet-700"],
-  [class*="bg-purple-500"], [class*="bg-purple-600"], [class*="bg-purple-700"], [class*="bg-purple-900"],
-  [class*="bg-fuchsia-500"], [class*="bg-fuchsia-600"], [class*="bg-pink-500"], [class*="bg-pink-600"],
-  [class*="bg-rose-500"], [class*="bg-rose-600"], [class*="bg-rose-700"],
-  [class*="bg-red-500"], [class*="bg-red-600"], [class*="bg-red-700"], [class*="bg-red-800"], [class*="bg-red-900"],
-  [class*="bg-orange-600"], [class*="bg-orange-700"],
-  [class*="bg-amber-600"], [class*="bg-amber-700"], [class*="bg-amber-800"], [class*="bg-amber-900"]
+  [class~="bg-black"],
+  [class~="bg-emerald-500"], [class~="bg-emerald-600"], [class~="bg-emerald-700"], [class~="bg-emerald-800"], [class~="bg-emerald-900"],
+  [class~="bg-green-500"], [class~="bg-green-600"], [class~="bg-green-700"], [class~="bg-green-800"],
+  [class~="bg-teal-500"], [class~="bg-teal-600"], [class~="bg-teal-700"],
+  [class~="bg-cyan-500"], [class~="bg-cyan-600"], [class~="bg-cyan-700"], [class~="bg-cyan-800"], [class~="bg-cyan-900"],
+  [class~="bg-sky-500"], [class~="bg-sky-600"], [class~="bg-sky-700"],
+  [class~="bg-blue-500"], [class~="bg-blue-600"], [class~="bg-blue-700"],
+  [class~="bg-indigo-500"], [class~="bg-indigo-600"], [class~="bg-indigo-700"], [class~="bg-indigo-900"],
+  [class~="bg-violet-500"], [class~="bg-violet-600"], [class~="bg-violet-700"],
+  [class~="bg-purple-500"], [class~="bg-purple-600"], [class~="bg-purple-700"], [class~="bg-purple-900"],
+  [class~="bg-fuchsia-500"], [class~="bg-fuchsia-600"], [class~="bg-pink-500"], [class~="bg-pink-600"],
+  [class~="bg-rose-500"], [class~="bg-rose-600"], [class~="bg-rose-700"],
+  [class~="bg-red-500"], [class~="bg-red-600"], [class~="bg-red-700"], [class~="bg-red-800"], [class~="bg-red-900"],
+  [class~="bg-orange-600"], [class~="bg-orange-700"],
+  [class~="bg-amber-600"], [class~="bg-amber-700"], [class~="bg-amber-800"], [class~="bg-amber-900"]
 ) .text-white,
 html.theme-storebox-white :is(
   [class*="bg-[var(--accent-color)]"],
   [class*="bg-[var(--accent-orange)]"],
   [class*="bg-gradient"],
-  [class*="bg-black"],
-  [class*="bg-emerald-500"], [class*="bg-emerald-600"], [class*="bg-emerald-700"], [class*="bg-emerald-800"], [class*="bg-emerald-900"],
-  [class*="bg-green-500"], [class*="bg-green-600"], [class*="bg-green-700"], [class*="bg-green-800"],
-  [class*="bg-teal-500"], [class*="bg-teal-600"], [class*="bg-teal-700"],
-  [class*="bg-cyan-500"], [class*="bg-cyan-600"], [class*="bg-cyan-700"], [class*="bg-cyan-800"], [class*="bg-cyan-900"],
-  [class*="bg-sky-500"], [class*="bg-sky-600"], [class*="bg-sky-700"],
-  [class*="bg-blue-500"], [class*="bg-blue-600"], [class*="bg-blue-700"],
-  [class*="bg-indigo-500"], [class*="bg-indigo-600"], [class*="bg-indigo-700"], [class*="bg-indigo-900"],
-  [class*="bg-violet-500"], [class*="bg-violet-600"], [class*="bg-violet-700"],
-  [class*="bg-purple-500"], [class*="bg-purple-600"], [class*="bg-purple-700"], [class*="bg-purple-900"],
-  [class*="bg-fuchsia-500"], [class*="bg-fuchsia-600"], [class*="bg-pink-500"], [class*="bg-pink-600"],
-  [class*="bg-rose-500"], [class*="bg-rose-600"], [class*="bg-rose-700"],
-  [class*="bg-red-500"], [class*="bg-red-600"], [class*="bg-red-700"], [class*="bg-red-800"], [class*="bg-red-900"],
-  [class*="bg-orange-600"], [class*="bg-orange-700"],
-  [class*="bg-amber-600"], [class*="bg-amber-700"], [class*="bg-amber-800"], [class*="bg-amber-900"]
+  [class~="bg-black"],
+  [class~="bg-emerald-500"], [class~="bg-emerald-600"], [class~="bg-emerald-700"], [class~="bg-emerald-800"], [class~="bg-emerald-900"],
+  [class~="bg-green-500"], [class~="bg-green-600"], [class~="bg-green-700"], [class~="bg-green-800"],
+  [class~="bg-teal-500"], [class~="bg-teal-600"], [class~="bg-teal-700"],
+  [class~="bg-cyan-500"], [class~="bg-cyan-600"], [class~="bg-cyan-700"], [class~="bg-cyan-800"], [class~="bg-cyan-900"],
+  [class~="bg-sky-500"], [class~="bg-sky-600"], [class~="bg-sky-700"],
+  [class~="bg-blue-500"], [class~="bg-blue-600"], [class~="bg-blue-700"],
+  [class~="bg-indigo-500"], [class~="bg-indigo-600"], [class~="bg-indigo-700"], [class~="bg-indigo-900"],
+  [class~="bg-violet-500"], [class~="bg-violet-600"], [class~="bg-violet-700"],
+  [class~="bg-purple-500"], [class~="bg-purple-600"], [class~="bg-purple-700"], [class~="bg-purple-900"],
+  [class~="bg-fuchsia-500"], [class~="bg-fuchsia-600"], [class~="bg-pink-500"], [class~="bg-pink-600"],
+  [class~="bg-rose-500"], [class~="bg-rose-600"], [class~="bg-rose-700"],
+  [class~="bg-red-500"], [class~="bg-red-600"], [class~="bg-red-700"], [class~="bg-red-800"], [class~="bg-red-900"],
+  [class~="bg-orange-600"], [class~="bg-orange-700"],
+  [class~="bg-amber-600"], [class~="bg-amber-700"], [class~="bg-amber-800"], [class~="bg-amber-900"]
 ) svg {
   color: #ffffff !important;
 }
@@ -416,6 +405,335 @@ html.theme-storebox-white .sidebar-nav-btn[data-active="true"] .text-white,
 html.theme-storebox-white .sidebar-nav-btn[data-active="true"] svg,
 html.theme-storebox-white .sidebar-nav-btn[data-active="true"] span {
   color: #ffffff !important;
+}
+
+/* ================= STOREBOX WHITE — READABILITY PASS ================= */
+/* The owner asked for charcoal-black copy everywhere: no grey, no washed-out
+   white text on white. Everything below is scoped to this one theme. */
+
+/* 1. Every grey text utility becomes charcoal. The attribute selector also
+   catches opacity variants such as text-slate-400/70 that a plain class
+   selector would miss. */
+html.theme-storebox-white [class*="text-slate-"],
+html.theme-storebox-white [class*="text-gray-"],
+html.theme-storebox-white [class*="text-zinc-"],
+html.theme-storebox-white [class*="text-neutral-"],
+html.theme-storebox-white [class*="text-stone-"] {
+  color: #1a1a1a !important;
+}
+
+/* 2. Inputs: charcoal value text, dark readable placeholders, and borders
+   dark enough to see the field on a white card. */
+html.theme-storebox-white input,
+html.theme-storebox-white select,
+html.theme-storebox-white textarea {
+  color: #111111 !important;
+  -webkit-text-fill-color: #111111 !important;
+  background-color: #ffffff !important;
+}
+
+/* Field borders must beat the generic border-[#30363d] → #e5e5e5 mapping,
+   otherwise the fields disappear into the white card. */
+html.theme-storebox-white input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.theme-storebox-white select:not([disabled]),
+html.theme-storebox-white textarea:not([disabled]) {
+  border-color: #b3b3b3 !important;
+}
+
+html.theme-storebox-white input::placeholder,
+html.theme-storebox-white textarea::placeholder,
+html.theme-storebox-white select::placeholder {
+  color: #2e2e2e !important;
+  opacity: 1 !important;
+  -webkit-text-fill-color: #2e2e2e !important;
+}
+
+html.theme-storebox-white select option {
+  color: #111111 !important;
+  background-color: #ffffff !important;
+}
+
+/* 3. Light accent copy (pale purple/indigo/amber/red on white) is unreadable
+   on a white surface — darken it to the matching 700/800 shade. */
+html.theme-storebox-white [class*="text-purple-200"],
+html.theme-storebox-white [class*="text-purple-300"],
+html.theme-storebox-white [class*="text-purple-400"] {
+  color: #5b21b6 !important;
+}
+html.theme-storebox-white [class*="text-indigo-300"],
+html.theme-storebox-white [class*="text-indigo-400"] {
+  color: #3730a3 !important;
+}
+html.theme-storebox-white [class*="text-rose-300"],
+html.theme-storebox-white [class*="text-rose-400"] {
+  color: #be123c !important;
+}
+html.theme-storebox-white [class*="text-amber-300"],
+html.theme-storebox-white [class*="text-amber-400"] {
+  color: #92400e !important;
+}
+html.theme-storebox-white [class*="text-red-300"],
+html.theme-storebox-white [class*="text-red-400"] {
+  color: #b91c1c !important;
+}
+html.theme-storebox-white [class*="text-emerald-300"],
+html.theme-storebox-white [class*="text-emerald-400"] {
+  color: #047857 !important;
+}
+html.theme-storebox-white [class*="text-cyan-300"],
+html.theme-storebox-white [class*="text-cyan-400"] {
+  color: #0b6b86 !important;
+}
+html.theme-storebox-white [class*="text-blue-300"],
+html.theme-storebox-white [class*="text-blue-400"] {
+  color: #1e40af !important;
+}
+html.theme-storebox-white [class*="text-sky-300"],
+html.theme-storebox-white [class*="text-sky-400"] {
+  color: #075985 !important;
+}
+html.theme-storebox-white [class*="text-orange-300"],
+html.theme-storebox-white [class*="text-orange-400"] {
+  color: #9a3412 !important;
+}
+html.theme-storebox-white [class*="text-violet-300"],
+html.theme-storebox-white [class*="text-violet-400"] {
+  color: #5b21b6 !important;
+}
+html.theme-storebox-white [class*="text-green-300"],
+html.theme-storebox-white [class*="text-green-400"] {
+  color: #166534 !important;
+}
+html.theme-storebox-white [class*="text-teal-300"],
+html.theme-storebox-white [class*="text-teal-400"] {
+  color: #115e59 !important;
+}
+html.theme-storebox-white [class*="text-pink-300"],
+html.theme-storebox-white [class*="text-pink-400"] {
+  color: #9d174d !important;
+}
+html.theme-storebox-white [class*="text-fuchsia-300"],
+html.theme-storebox-white [class*="text-fuchsia-400"] {
+  color: #86198f !important;
+}
+
+/* 3a. Mid-shade accent text (500/600) is still too pale on a white surface. */
+html.theme-storebox-white [class*="text-amber-500"],
+html.theme-storebox-white [class*="text-amber-600"] { color: #92400e !important; }
+html.theme-storebox-white [class*="text-cyan-500"],
+html.theme-storebox-white [class*="text-cyan-600"] { color: #0b6b86 !important; }
+html.theme-storebox-white [class*="text-emerald-500"],
+html.theme-storebox-white [class*="text-emerald-600"] { color: #047857 !important; }
+html.theme-storebox-white [class*="text-red-500"],
+html.theme-storebox-white [class*="text-red-600"] { color: #b91c1c !important; }
+html.theme-storebox-white [class*="text-rose-500"],
+html.theme-storebox-white [class*="text-rose-600"] { color: #be123c !important; }
+html.theme-storebox-white [class*="text-blue-500"],
+html.theme-storebox-white [class*="text-blue-600"] { color: #1e40af !important; }
+html.theme-storebox-white [class*="text-sky-500"],
+html.theme-storebox-white [class*="text-sky-600"] { color: #075985 !important; }
+html.theme-storebox-white [class*="text-orange-500"],
+html.theme-storebox-white [class*="text-orange-600"] { color: #9a3412 !important; }
+html.theme-storebox-white [class*="text-purple-500"],
+html.theme-storebox-white [class*="text-purple-600"] { color: #5b21b6 !important; }
+html.theme-storebox-white [class*="text-indigo-500"],
+html.theme-storebox-white [class*="text-indigo-600"] { color: #3730a3 !important; }
+html.theme-storebox-white [class*="text-violet-500"],
+html.theme-storebox-white [class*="text-violet-600"] { color: #5b21b6 !important; }
+html.theme-storebox-white [class*="text-green-500"],
+html.theme-storebox-white [class*="text-green-600"] { color: #166534 !important; }
+html.theme-storebox-white [class*="text-teal-500"],
+html.theme-storebox-white [class*="text-teal-600"] { color: #115e59 !important; }
+html.theme-storebox-white [class*="text-pink-500"],
+html.theme-storebox-white [class*="text-pink-600"] { color: #9d174d !important; }
+html.theme-storebox-white [class*="text-fuchsia-500"],
+html.theme-storebox-white [class*="text-fuchsia-600"] { color: #86198f !important; }
+
+/* 3b. Pale 100/200 accent copy (warning text, status banners) is equally
+   unreadable on white. Darken it to the matching 700/800 shade. */
+html.theme-storebox-white [class*="text-amber-100"],
+html.theme-storebox-white [class*="text-amber-200"] { color: #92400e !important; }
+html.theme-storebox-white [class*="text-red-100"],
+html.theme-storebox-white [class*="text-red-200"] { color: #b91c1c !important; }
+html.theme-storebox-white [class*="text-rose-100"],
+html.theme-storebox-white [class*="text-rose-200"] { color: #be123c !important; }
+html.theme-storebox-white [class*="text-purple-100"] { color: #5b21b6 !important; }
+html.theme-storebox-white [class*="text-indigo-100"],
+html.theme-storebox-white [class*="text-indigo-200"] { color: #3730a3 !important; }
+html.theme-storebox-white [class*="text-cyan-100"],
+html.theme-storebox-white [class*="text-cyan-200"] { color: #0e7490 !important; }
+html.theme-storebox-white [class*="text-emerald-100"],
+html.theme-storebox-white [class*="text-emerald-200"] { color: #047857 !important; }
+html.theme-storebox-white [class*="text-sky-100"],
+html.theme-storebox-white [class*="text-sky-200"] { color: #075985 !important; }
+html.theme-storebox-white [class*="text-blue-100"],
+html.theme-storebox-white [class*="text-blue-200"] { color: #1e40af !important; }
+html.theme-storebox-white [class*="text-green-100"],
+html.theme-storebox-white [class*="text-green-200"] { color: #166534 !important; }
+html.theme-storebox-white [class*="text-teal-100"],
+html.theme-storebox-white [class*="text-teal-200"] { color: #115e59 !important; }
+html.theme-storebox-white [class*="text-orange-100"],
+html.theme-storebox-white [class*="text-orange-200"] { color: #9a3412 !important; }
+html.theme-storebox-white [class*="text-violet-100"],
+html.theme-storebox-white [class*="text-violet-200"] { color: #5b21b6 !important; }
+html.theme-storebox-white [class*="text-pink-100"],
+html.theme-storebox-white [class*="text-pink-200"] { color: #9d174d !important; }
+html.theme-storebox-white [class*="text-fuchsia-100"],
+html.theme-storebox-white [class*="text-fuchsia-200"] { color: #86198f !important; }
+
+/* 3c. Translucent dark chips/panels (bg-*-900/xx, bg-*-950/xx at 30-80%) are
+   mid-grey over a white card — neither light nor dark accent text reads well.
+   Turn them into light accent tints so the darkened copy from rules 3/3b
+   passes contrast. Near-opaque banners (/90, /95) stay dark by design. */
+html.theme-storebox-white :is([class*="bg-amber-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #fef3c7 !important; }
+html.theme-storebox-white :is([class*="bg-red-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #fee2e2 !important; }
+html.theme-storebox-white :is([class*="bg-rose-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #ffe4e6 !important; }
+html.theme-storebox-white :is([class*="bg-purple-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #f3e8ff !important; }
+html.theme-storebox-white :is([class*="bg-indigo-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #e0e7ff !important; }
+html.theme-storebox-white :is([class*="bg-violet-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #ede9fe !important; }
+html.theme-storebox-white :is([class*="bg-emerald-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #d1fae5 !important; }
+html.theme-storebox-white :is([class*="bg-cyan-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #cffafe !important; }
+html.theme-storebox-white :is([class*="bg-sky-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #e0f2fe !important; }
+html.theme-storebox-white :is([class*="bg-blue-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #dbeafe !important; }
+html.theme-storebox-white :is([class*="bg-green-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #dcfce7 !important; }
+html.theme-storebox-white :is([class*="bg-teal-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #ccfbf1 !important; }
+html.theme-storebox-white :is([class*="bg-orange-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #ffedd5 !important; }
+html.theme-storebox-white :is([class*="bg-pink-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #fce7f3 !important; }
+html.theme-storebox-white :is([class*="bg-fuchsia-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #fae8ff !important; }
+html.theme-storebox-white :is([class*="bg-slate-9"],[class*="bg-gray-9"],[class*="bg-zinc-9"],[class*="bg-neutral-9"],[class*="bg-stone-9"]):is([class*="/30"],[class*="/40"],[class*="/50"],[class*="/60"],[class*="/70"],[class*="/80"]) { background-color: #f0f0f0 !important; }
+
+/* 4. Deliberately dark / saturated panels are NOT converted to white, so the
+   light copy inside them must stay light. Only SOLID dark surfaces count —
+   translucent tints (bg-red-950/40 etc.) are pale over white and must keep
+   the darkened text from rules 3 and 3b. */
+html.theme-storebox-white :is(
+  [class~="bg-black"],
+  [class*="bg-gradient"],
+  [class~="bg-amber-900"], [class~="bg-amber-950"],
+  [class~="bg-red-900"], [class~="bg-red-950"],
+  [class~="bg-rose-900"], [class~="bg-rose-950"],
+  [class~="bg-purple-900"], [class~="bg-purple-950"],
+  [class~="bg-indigo-900"], [class~="bg-indigo-950"],
+  [class~="bg-violet-900"], [class~="bg-violet-950"],
+  [class~="bg-emerald-900"], [class~="bg-emerald-950"],
+  [class~="bg-cyan-900"], [class~="bg-cyan-950"],
+  [class~="bg-sky-900"], [class~="bg-sky-950"],
+  [class~="bg-blue-900"], [class~="bg-blue-950"],
+  [class~="bg-green-900"], [class~="bg-green-950"],
+  [class~="bg-teal-900"], [class~="bg-teal-950"],
+  [class~="bg-orange-900"], [class~="bg-orange-950"],
+  [class~="bg-slate-900"], [class~="bg-slate-950"],
+  [class~="bg-gray-900"], [class~="bg-gray-950"],
+  [class~="bg-zinc-900"], [class~="bg-zinc-950"],
+  [class~="bg-neutral-900"], [class~="bg-neutral-950"],
+  [class~="bg-stone-900"], [class~="bg-stone-950"],
+  [class~="bg-pink-900"], [class~="bg-pink-950"],
+  [class~="bg-fuchsia-900"], [class~="bg-fuchsia-950"],
+  /* near-opaque banners are dark in practice */
+  [class~="bg-amber-950/95"], [class~="bg-amber-950/90"],
+  [class~="bg-red-950/90"]
+) :is(
+  [class*="text-amber-100"], [class*="text-amber-200"],
+  [class*="text-amber-300"], [class*="text-amber-400"],
+  [class*="text-red-100"], [class*="text-red-200"],
+  [class*="text-red-300"], [class*="text-red-400"],
+  [class*="text-rose-100"], [class*="text-rose-200"],
+  [class*="text-rose-300"], [class*="text-rose-400"],
+  [class*="text-purple-100"], [class*="text-purple-200"],
+  [class*="text-purple-300"], [class*="text-purple-400"],
+  [class*="text-indigo-100"], [class*="text-indigo-200"],
+  [class*="text-indigo-300"], [class*="text-indigo-400"],
+  [class*="text-emerald-100"], [class*="text-emerald-200"],
+  [class*="text-emerald-300"], [class*="text-emerald-400"],
+  [class*="text-cyan-100"], [class*="text-cyan-200"],
+  [class*="text-cyan-300"], [class*="text-cyan-400"],
+  [class*="text-slate-300"], [class*="text-slate-400"],
+  [class*="text-white"]
+) {
+  color: #e5e7eb !important;
+}
+
+/* 4b. A chip that carries BOTH a solid dark background and light accent text
+   on the same element (avatar circles, role badges) must keep light copy. */
+html.theme-storebox-white [class*="bg-"][class*="-950"]:not([class*="/"]):is(
+  [class*="text-amber-100"], [class*="text-amber-200"],
+  [class*="text-amber-300"], [class*="text-amber-400"],
+  [class*="text-red-100"], [class*="text-red-200"],
+  [class*="text-red-300"], [class*="text-red-400"],
+  [class*="text-rose-100"], [class*="text-rose-200"],
+  [class*="text-rose-300"], [class*="text-rose-400"],
+  [class*="text-purple-100"], [class*="text-purple-200"],
+  [class*="text-purple-300"], [class*="text-purple-400"],
+  [class*="text-indigo-100"], [class*="text-indigo-200"],
+  [class*="text-indigo-300"], [class*="text-indigo-400"],
+  [class*="text-emerald-100"], [class*="text-emerald-200"],
+  [class*="text-emerald-300"], [class*="text-emerald-400"],
+  [class*="text-cyan-100"], [class*="text-cyan-200"],
+  [class*="text-cyan-300"], [class*="text-cyan-400"],
+  [class*="text-slate-300"], [class*="text-slate-400"]
+),
+html.theme-storebox-white [class*="bg-"][class*="-900"]:not([class*="/"]):is(
+  [class*="text-amber-100"], [class*="text-amber-200"],
+  [class*="text-amber-300"], [class*="text-amber-400"],
+  [class*="text-red-100"], [class*="text-red-200"],
+  [class*="text-red-300"], [class*="text-red-400"],
+  [class*="text-rose-100"], [class*="text-rose-200"],
+  [class*="text-rose-300"], [class*="text-rose-400"],
+  [class*="text-purple-100"], [class*="text-purple-200"],
+  [class*="text-purple-300"], [class*="text-purple-400"],
+  [class*="text-indigo-100"], [class*="text-indigo-200"],
+  [class*="text-indigo-300"], [class*="text-indigo-400"],
+  [class*="text-emerald-100"], [class*="text-emerald-200"],
+  [class*="text-emerald-300"], [class*="text-emerald-400"],
+  [class*="text-cyan-100"], [class*="text-cyan-200"],
+  [class*="text-cyan-300"], [class*="text-cyan-400"],
+  [class*="text-slate-300"], [class*="text-slate-400"]
+) {
+  color: #e5e7eb !important;
+}
+
+/* 5. Chips that stay dark on a white card. */
+html.theme-storebox-white [class~="bg-black/30"][class*="text-amber-300"] {
+  background-color: #e5e5e5 !important;
+  color: #1a1a1a !important;
+}
+html.theme-storebox-white [class~="bg-black/60"][class*="text-amber-400"] {
+  background-color: #1f1f1f !important;
+  color: #ffffff !important;
+}
+
+/* Table rows hover with bg-slate-800/40, which turns mid-grey over white and
+   swallows the dark copy. Keep the hover tint light. */
+html.theme-storebox-white [class*="hover:bg-slate-800"]:hover {
+  background-color: #eef0f2 !important;
+}
+
+/* Pills and badges coloured through an inline style (POS category pills,
+   stock badges, category swatches) are dark by design — keep their white copy. */html.theme-storebox-white [style*="background-color"][class*="text-white"] {
+  color: #ffffff !important;
+}
+
+/* Category hex-code chips print the code on top of the swatch colour, which is
+   unreadable for light colours. Wash the swatch and use charcoal copy. */
+html.theme-storebox-white [class*="font-mono"][style*="background-color"] {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.62)) !important;
+  color: #1a1a1a !important;
+}
+
+/* 6. The clock-tamper gate is a deliberately dark red modal. Keep its password
+   field dark so the light lock icon and placeholder stay visible. */
+html.theme-storebox-white [class~="bg-red-950"] input,
+html.theme-storebox-white [class~="bg-red-950"] textarea {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  background-color: rgba(0, 0, 0, 0.45) !important;
+  border-color: #fca5a5 !important;
+}
+html.theme-storebox-white [class~="bg-red-950"] input::placeholder,
+html.theme-storebox-white [class~="bg-red-950"] textarea::placeholder {
+  color: #fecaca !important;
+  opacity: 1 !important;
+  -webkit-text-fill-color: #fecaca !important;
 }
 
 /* ================= THERMAL PRINT STYLES ================= */

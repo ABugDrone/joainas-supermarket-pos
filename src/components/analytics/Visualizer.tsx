@@ -25,6 +25,30 @@ export const Visualizer: React.FC<Props> = ({ sales, products }) => {
   const [to, setTo] = React.useState<string>(() => todayLocal());
   const [granularity, setGranularity] = React.useState<'day' | 'week' | 'month'>('day');
 
+  // Chart.js paints to a <canvas>, so it cannot inherit CSS variables. Read the
+  // live theme tokens and re-read them when <html> changes (class/style), so
+  // switching to STOREBOX WHITE while this page is open recolours the chart.
+  const readToken = (name: string, fallback: string) => {
+    if (typeof window === 'undefined') return fallback;
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  };
+  const readPalette = () => ({
+    text: readToken('--text-primary', '#e2e8f0'),
+    muted: readToken('--text-secondary', '#94a3b8'),
+    grid: readToken('--border-color', '#30363d'),
+  });
+  const [chartPalette, setChartPalette] = React.useState(readPalette);
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => setChartPalette(readPalette());
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ['class', 'style'] });
+    sync();
+    return () => observer.disconnect();
+  }, []);
+
   // Keep productX valid when products load async (368 items)
   React.useEffect(() => {
     if (products.length > 0 && productX !== 'all' && !products.find((p) => p.id === productX)) {
@@ -180,15 +204,15 @@ export const Visualizer: React.FC<Props> = ({ sales, products }) => {
   const options: any = {
     responsive: true,
     plugins: {
-      legend: { labels: { color: '#e2e8f0' } },
-      title: { display: true, text: `${productName(productX)}${productY ? ' vs ' + productName(productY) : ''} — ${metric} • ${granularity}`, color: '#e2e8f0' },
+      legend: { labels: { color: chartPalette.text } },
+      title: { display: true, text: `${productName(productX)}${productY ? ' vs ' + productName(productY) : ''} — ${metric} • ${granularity}`, color: chartPalette.text },
     },
     scales:
       chartType === 'pie'
         ? undefined
         : {
-            x: { ticks: { color: '#94a3b8', maxRotation: 45 }, grid: { color: '#30363d' }, title: { display: chartType === 'scatter', text: productName(productX), color: '#94a3b8' } },
-            y: { ticks: { color: '#94a3b8' }, grid: { color: '#30363d' }, title: { display: chartType === 'scatter', text: productY ? productName(productY) : metric, color: '#94a3b8' } },
+            x: { ticks: { color: chartPalette.muted, maxRotation: 45 }, grid: { color: chartPalette.grid }, title: { display: chartType === 'scatter', text: productName(productX), color: chartPalette.muted } },
+            y: { ticks: { color: chartPalette.muted }, grid: { color: chartPalette.grid }, title: { display: chartType === 'scatter', text: productY ? productName(productY) : metric, color: chartPalette.muted } },
           },
   };
 
