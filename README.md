@@ -1,4 +1,4 @@
-# 🛒 Joainas Mart - POS & Inventory Management
+# 🛒 Rabiu Entreprises - POS & Inventory Management
 
 A modern, full-featured **Point of Sale (POS) and Inventory Management System** built specifically for supermarkets and coldstores. This desktop application combines the power of **React**, **TypeScript**, and **Tauri** to deliver a fast, secure, and user-friendly business management solution.
 
@@ -185,7 +185,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🏢 About
 
 **Developed by**: Dronebug Technologies & Services  
-**For**: Joainas Supermarket & Coldstore  
+**For**: Rabiu Entreprises  
 **Purpose**: Modern retail management solution
 
 ## 📞 Support

@@ -32,7 +32,7 @@ const formatDisplayDate = (iso: string): string => {
 
 export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = ({ data, id, periodLabel }) => {
   // Letterhead always mirrors Hardware Config (business identity), never the app name.
-  let businessName = 'Joainas Mart';
+  let businessName = 'Rabiu Entreprises';
   let businessAddress = '';
   let businessPhone = '';
   let logoSrc = '/logo.png';
@@ -146,7 +146,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
       </div>
 
       <p className="text-[10px] text-gray-600 mt-6">
-        This statement was generated automatically by the Joainas Mart system from {data.transactionCount} completed receipt(s) within the selected period.
+        This statement was generated automatically by the Rabiu Entreprises system from {data.transactionCount} completed receipt(s) within the selected period.
       </p>
 
       {/* Signatures */}
@@ -157,7 +157,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
         </div>
         <div className="text-right">
           <p className="font-bold">Software Developer Verification:</p>
-          <p className="mt-1 font-semibold">Joainas Mart</p>
+          <p className="mt-1 font-semibold">Rabiu Entreprises</p>
           <p>dronebugtechnologies@gmail.com</p>
         </div>
       </div>

@@ -93,8 +93,8 @@ import {
 // used when no session exists yet.
 const OPEN_SOURCE_USER: User = {
   id: 'amor-ims-local-user',
-  fullName: 'Joainas Mart User',
-  username: 'Joainas Mart',
+  fullName: 'Rabiu Entreprises User',
+  username: 'Rabiu Entreprises',
   password: '',
   role: 'System Admin',
   capabilities: ['sell', 'inventory', 'view_sales', 'customers', 'expenses', 'view_reports', 'printer_settings', 'admin'],
@@ -665,6 +665,7 @@ function MainAppContent() {
         currentUser={currentUser.username}
         currentUserRole={currentUser.role}
         currentUserCapabilities={currentUser.capabilities || []}
+        businessName={printerConfig.businessName || printerConfig.storeName}
         todaySalesTotal={todaySalesTotal}
         products={products}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
@@ -986,11 +987,11 @@ export default function App() {
   if (!storageReady) {
     return (
       <ToastProvider>
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0c0e12] text-[#e2e8f0]">
-          <img src="/logo.png" alt="Joainas Mart" className="w-20 h-20 object-contain" />
-          <div className="font-extrabold text-lg text-white tracking-wide">Joainas Mart</div>
-          <div className="text-xs text-slate-400">Inventory Management System · Loading…</div>
-          <div className="w-8 h-8 border-[3px] border-[#1e293b] border-t-[#0052d4] rounded-full animate-spin"></div>
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[var(--bg-app)] text-[var(--text-primary)]">
+          <img src="/logo.png" alt="Rabiu Entreprises" className="w-20 h-20 object-contain" />
+          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">Rabiu Entreprises</div>
+          <div className="text-xs text-[var(--text-muted)]">Inventory Management System · Loading…</div>
+          <div className="w-8 h-8 border-[3px] border-[var(--border-color)] border-t-[var(--accent-color)] rounded-full animate-spin"></div>
         </div>
       </ToastProvider>
     );
@@ -1051,7 +1052,7 @@ export default function App() {
           <div className="w-full max-w-md bg-[#161b22] border border-[#30363d] rounded-2xl p-8 text-center text-slate-200">
             <h3 className="text-lg font-bold text-white mb-2">Agreement Declined</h3>
             <p className="text-sm text-slate-400 mb-6">
-              You must accept the license agreement to use Joainas Mart. The app will now close.
+              You must accept the license agreement to use Rabiu Entreprises. The app will now close.
             </p>
             <button
               onClick={() => {
@@ -1123,11 +1124,11 @@ export default function App() {
     // Still determining fresh-install vs update — hold the loading gate.
     return (
       <ToastProvider>
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0c0e12] text-[#e2e8f0]">
-          <img src="/logo.png" alt="Joainas Mart" className="w-20 h-20 object-contain" />
-          <div className="font-extrabold text-lg text-white tracking-wide">Joainas Mart</div>
-          <div className="text-xs text-slate-400">Inventory Management System · Checking installation…</div>
-          <div className="w-8 h-8 border-[3px] border-[#1e293b] border-t-[#0052d4] rounded-full animate-spin"></div>
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[var(--bg-app)] text-[var(--text-primary)]">
+          <img src="/logo.png" alt="Rabiu Entreprises" className="w-20 h-20 object-contain" />
+          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">Rabiu Entreprises</div>
+          <div className="text-xs text-[var(--text-muted)]">Inventory Management System · Checking installation…</div>
+          <div className="w-8 h-8 border-[3px] border-[var(--border-color)] border-t-[var(--accent-color)] rounded-full animate-spin"></div>
         </div>
       </ToastProvider>
     );

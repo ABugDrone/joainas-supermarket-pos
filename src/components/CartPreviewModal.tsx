@@ -64,7 +64,7 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
             <HeaderLogo size="md" />
 
             <div className="text-center sm:text-right text-sm text-[var(--text-secondary)] space-y-0.5">
-              <div className="font-bold text-[var(--text-primary)]">{printerConfig.businessName || printerConfig.storeName || 'Joainas Mart'}</div>
+              <div className="font-bold text-[var(--text-primary)]">{printerConfig.businessName || printerConfig.storeName || 'Rabiu Entreprises'}</div>
               <div className="text-[var(--accent-color)] font-semibold">{printerConfig.tagline}</div>
               <div className="text-[var(--text-muted)]">{printerConfig.address}</div>
             </div>

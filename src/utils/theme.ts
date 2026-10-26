@@ -4,7 +4,8 @@ export type ThemeId =
   | 'emerald-fresh'
   | 'royal-navy'
   | 'warm-amber'
-  | 'midnight-black';
+  | 'midnight-black'
+  | 'storebox-white';
 
 export interface AppTheme {
   id: ThemeId;
@@ -235,14 +236,59 @@ export const APP_THEMES: AppTheme[] = [
       '--info-bg': '#164E63',
     },
   },
+  {
+    id: 'storebox-white',
+    name: 'STOREBOX WHITE',
+    category: 'light',
+    previewBg: '#FFFFFF',
+    previewCard: '#F5F5F5',
+    previewAccent: '#0052D4',
+    previewText: '#0A0A0A',
+    description: 'Pure boiled-rice white. Dark grey text, default menu colours.',
+    cssVars: {
+      '--bg-app': '#FFFFFF',
+      '--bg-surface': '#FFFFFF',
+      '--bg-sidebar': '#FFFFFF',
+      '--bg-header': '#FFFFFF',
+      '--bg-hover': '#F5F5F5',
+      '--bg-input': '#FFFFFF',
+      '--border-color': '#E5E5E5',
+      '--border-strong': '#D4D4D4',
+      '--text-primary': '#0A0A0A',
+      '--text-secondary': '#262626',
+      '--text-muted': '#404040',
+      '--text-inverse': '#FFFFFF',
+      '--accent-color': '#0052D4',
+      '--accent-hover': '#4364F7',
+      '--accent-orange': '#FF512F',
+      '--accent-orange-hover': '#F09819',
+      '--success': '#047857',
+      '--success-bg': '#ECFDF5',
+      '--warning': '#B45309',
+      '--warning-bg': '#FFFBEB',
+      '--error': '#B91C1C',
+      '--error-bg': '#FEF2F2',
+      '--info': '#0E7490',
+      '--info-bg': '#ECFEFF',
+    },
+  },
 ];
 
 // v1.5.1 full build: fresh key (old installs don't carry over) and
 // AMOLED Black is the default theme.
 const THEME_STORAGE_KEY = 'dirms_app_theme_v1';
+// v2.0.6 Rabiu build: once per install, move the saved theme to the new
+// STOREBOX WHITE default. After that the user's choice is respected again.
+const STOREBOX_DEFAULT_MIGRATION_KEY = 'rabiu_storebox_white_default_v1';
+const DEFAULT_THEME: ThemeId = 'storebox-white';
 
 export const getSavedTheme = (): ThemeId => {
   try {
+    if (!localStorage.getItem(STOREBOX_DEFAULT_MIGRATION_KEY)) {
+      localStorage.setItem(STOREBOX_DEFAULT_MIGRATION_KEY, '1');
+      localStorage.setItem(THEME_STORAGE_KEY, DEFAULT_THEME);
+      return DEFAULT_THEME;
+    }
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
     if (saved && APP_THEMES.some((t) => t.id === saved)) {
       return saved as ThemeId;
@@ -250,7 +296,7 @@ export const getSavedTheme = (): ThemeId => {
   } catch (e) {
     console.error('Failed to load theme from localStorage', e);
   }
-  return 'midnight-black';
+  return DEFAULT_THEME;
 };
 
 export const applyThemeToDocument = (themeId: ThemeId) => {
@@ -276,6 +322,13 @@ export const applyThemeToDocument = (themeId: ThemeId) => {
     root.classList.add('dark-theme');
     root.classList.remove('light-theme');
   }
+
+  // Per-theme hook (e.g. theme-storebox-white) so a single theme can add
+  // overrides without leaking them into the other themes.
+  Array.from(root.classList)
+    .filter((c) => c.startsWith('theme-'))
+    .forEach((c) => root.classList.remove(c));
+  root.classList.add(`theme-${themeObj.id}`);
 };
 
 // ================= FONT SIZE TYPOGRAPHY ================= //

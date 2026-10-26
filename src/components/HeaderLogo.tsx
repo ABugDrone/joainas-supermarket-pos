@@ -51,10 +51,10 @@ export const HeaderLogo: React.FC<HeaderLogoProps> = ({
           : 'items-center gap-3'
       }`}
     >
-      {/* Joainas Mart logo */}
+      {/* Rabiu Entreprises logo */}
       <img
         src="/logo.png"
-        alt="Joainas Mart Logo"
+        alt="Rabiu Entreprises Logo"
         className={`${scaleClasses} rounded-xl object-contain flex-shrink-0`}
       />
 
@@ -62,7 +62,7 @@ export const HeaderLogo: React.FC<HeaderLogoProps> = ({
       <div className={`flex flex-col ${layout === 'vertical' ? 'items-center text-center' : 'items-start text-left'}`}>
         <div className="flex items-center gap-1.5 leading-none">
           <span className={`tracking-tight font-extrabold text-[var(--text-primary)] ${textClasses}`}>
-            Joainas Mart
+            Rabiu Entreprises
           </span>
         </div>
 

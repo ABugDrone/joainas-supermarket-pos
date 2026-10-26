@@ -430,7 +430,7 @@ export async function bootstrapSchema(d: Database): Promise<void> {
         receipt_header_note, receipt_footer_note, show_logo,
         paper_width, auto_print_on_sale, point_rate, print_density, printer_name
       ) VALUES (
-        1, 'Joainas Mart', '', '', '', '', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
+        1, 'Rabiu Entreprises', '', '', '', '', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
       )
       ON CONFLICT(id) DO NOTHING`,
       []

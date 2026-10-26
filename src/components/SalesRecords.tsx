@@ -381,7 +381,7 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
 
         <div className="bg-[#0d1117] p-4 border-t border-[#30363d] flex items-center justify-between">
           <span className="text-xs font-bold text-slate-400">
-            Report Summary (Joainas Mart Records Engine) — Click any row to preview full details
+            Report Summary (Rabiu Entreprises Records Engine) — Click any row to preview full details
           </span>
           <div className="text-lg font-black text-white">
             Total: <span className="text-cyan-400">{formatNaira(totalRevenue)}</span>

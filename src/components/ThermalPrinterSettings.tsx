@@ -33,7 +33,14 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
     // One-time upgrade: shops that customized the old Store Name carry it
     // into Business Name; stock app defaults stay blank so the owner is
     // forced to type their real business name (required field).
-    const KNOWN_DEFAULTS = ['Joainas Mart', 'DIRMS Store', 'DIRMS StoreBox PRO', 'Joainas Supermarket & Coldstore', ''];
+    const KNOWN_DEFAULTS = [
+      'Rabiu Entreprises',
+      'Joainas Mart',
+      'Joainas Supermarket & Coldstore',
+      'DIRMS Store',
+      'DIRMS StoreBox PRO',
+      '',
+    ];
     const next = { ...config };
     if (!next.businessName && next.storeName && !KNOWN_DEFAULTS.includes(next.storeName)) {
       next.businessName = next.storeName;
@@ -212,7 +219,7 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
               className="w-full rounded-lg border border-[#30363d] bg-[#0d1117] px-3 py-2 text-sm font-semibold text-white focus:border-cyan-500 outline-none"
               required
             />
-            <p className="text-[11px] text-slate-500 mt-1">This is the bold header printed on receipts and financial reports — not the app name.</p>
+            <p className="text-[11px] text-slate-500 mt-1">This is the bold header printed on receipts and financial reports, and shown in the app header — not the installer name.</p>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
@@ -372,7 +379,7 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
             </div>
 
             <div className="md:col-span-2 p-3 bg-[#161b22] rounded-lg border border-[#30363d]">
-              <label className="block text-xs font-bold text-slate-300 uppercase mb-1">Business Logo (optional — Joainas Mart logo is default)</label>
+              <label className="block text-xs font-bold text-slate-300 uppercase mb-1">Business Logo (optional — Rabiu Entreprises logo is default)</label>
               <div className="flex items-center gap-3">
                 <img src={formData.logoDataUrl || '/logo.png'} alt="Business logo" className="w-12 h-12 object-contain bg-white rounded p-1" />
                 <input
@@ -402,10 +409,10 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
                   className="text-xs text-slate-300"
                 />
                 {formData.logoDataUrl && (
-                  <button type="button" onClick={() => setFormData({ ...formData, logoDataUrl: undefined })} className="text-[11px] text-slate-400 underline">Use Joainas Mart default</button>
+                  <button type="button" onClick={() => setFormData({ ...formData, logoDataUrl: undefined })} className="text-[11px] text-slate-400 underline">Use Rabiu Entreprises default</button>
                 )}
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">Fits 58mm + 80mm. Empty = Joainas Mart logo; untick “Show Store Logo” for bold business-name header instead.</p>
+              <p className="text-[11px] text-slate-500 mt-1">Fits 58mm + 80mm. Empty = Rabiu Entreprises logo; untick “Show Store Logo” for bold business-name header instead.</p>
             </div>
 
             <div className="flex flex-col justify-end space-y-2">
@@ -512,7 +519,7 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
                     Troubleshooting — scanner beeps/flashes but nothing appears
                   </h4>
                   <ol className="space-y-1.5 text-[11px] text-slate-300 list-decimal list-inside leading-relaxed">
-                    <li><strong className="text-white">Focus the app window.</strong> Click anywhere on the Joainas Mart window so it becomes the active window, then scan. Keyboard-style scanners type into whichever window is focused.</li>
+                    <li><strong className="text-white">Focus the app window.</strong> Click anywhere on the Rabiu Entreprises window so it becomes the active window, then scan. Keyboard-style scanners type into whichever window is focused.</li>
                     <li><strong className="text-white">Test in Notepad first.</strong> Open Notepad, click inside it, then scan. If numbers appear, the scanner works and the issue is only about focus in the POS app.</li>
                     <li><strong className="text-white">Try a different USB port.</strong> Unplug and plug the scanner into a port directly on the computer (avoid hubs/dockers). Some PCs power-manage USB ports.</li>
                     <li><strong className="text-white">Check Device Manager.</strong> Press <span className="font-mono">Win+X → Device Manager → Keyboards</span>. You should see the scanner (often as "HID Keyboard Device" or a USB input device). If you see a yellow warning triangle, a driver failed — try unplugging/replugging, or plug into another port.</li>

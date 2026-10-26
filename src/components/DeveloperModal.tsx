@@ -26,10 +26,10 @@ export const DeveloperModal: React.FC<DeveloperModalProps> = ({ isOpen, onClose 
         <div className="bg-gradient-to-r from-[var(--accent-color)] to-[var(--accent-hover)] px-8 py-8 text-center">
           <img
             src="/logo.png"
-            alt="Joainas Mart"
+            alt="Rabiu Entreprises"
             className="w-20 h-20 mx-auto mb-3 rounded-2xl bg-white/20 p-2 object-contain"
           />
-          <h3 className="text-xl font-extrabold text-white">Joainas Mart</h3>
+          <h3 className="text-xl font-extrabold text-white">Rabiu Entreprises</h3>
           <p className="text-sm text-white/80 mt-1">Inventory Management System • v{EDITION.version} {EDITION.editionLabel}</p>
           <span className="inline-block mt-3 text-xs font-semibold text-white bg-white/20 px-3 py-1 rounded-full">
             {DEVELOPER_INFO.appVersion}

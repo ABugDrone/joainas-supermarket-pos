@@ -272,15 +272,17 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 ];
 
 export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
-  storeName: 'Joainas Mart',
+  storeName: 'Rabiu Entreprises',
   tagline: 'Inventory Management System',
-  address: 'Joainas Mart.',
+  // Left blank on purpose: the owner must enter the real shop address in
+  // Hardware Config. (The old brand shipped a placeholder name as the address.)
+  address: '',
   phone: '',
-  receiptHeaderNote: 'WELCOME TO Joainas Mart',
+  receiptHeaderNote: 'WELCOME TO Rabiu Entreprises',
   receiptFooterNote: 'Thank you for your patronage! Please come again.',
   showLogo: true,
   logoDataUrl: undefined,
-  businessName: 'Joainas Mart',
+  businessName: 'Rabiu Entreprises',
   paperWidth: '80mm',
   autoPrintOnSale: true,
   pointRate: 0,
@@ -292,7 +294,7 @@ export const DEVELOPER_INFO: StoreDeveloperInfo = {
   company: 'Dronebug Technologies & Services',
   email: 'dronebugtechnologies@gmail.com',
   phone: '+2347035716349',
-  appVersion: 'v2.0.6 Joainas Mart (React + Vite + Tauri Engine)',
+  appVersion: 'v2.0.6 Rabiu Entreprises (React + Vite + Tauri Engine)',
 };
 
 export const INITIAL_SALES: SaleRecord[] = [

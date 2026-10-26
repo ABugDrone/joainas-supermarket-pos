@@ -47,6 +47,8 @@ interface DesktopShellProps {
   currentUser: string;
   currentUserRole: UserRole;
   currentUserCapabilities: Capability[];
+  /** Editable business name from Hardware Config; used for the app chrome. */
+  businessName?: string;
   todaySalesTotal?: number;
   products: Product[];
   onOpenLoginModal: () => void;
@@ -97,6 +99,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   currentUser,
   currentUserRole,
   currentUserCapabilities,
+  businessName,
   products,
   onOpenLoginModal,
   onLogout,
@@ -106,6 +109,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   children,
 }) => {
   const { showToast } = useToast();
+  const brandName = (businessName || '').trim() || EDITION.shortName;
   const [time, setTime] = React.useState<string>('');
   const [date, setDate] = React.useState<string>('');
   const [isOffline, setIsOffline] = React.useState<boolean>(!navigator.onLine);
@@ -241,12 +245,12 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
         <div className="flex items-center justify-center lg:justify-start lg:px-4 py-3 mb-2 gap-2.5">
           <img
             src="/logo.png"
-            alt="Joainas Mart"
+            alt={brandName}
             className="w-10 h-10 rounded-lg object-contain"
           />
           <div className="hidden lg:block leading-tight">
             <div className="flex items-center gap-1">
-              <span className="font-extrabold text-sm text-[var(--text-primary)]">Joainas Mart</span>
+              <span className="font-extrabold text-sm text-[var(--text-primary)]">{brandName}</span>
             </div>
             <div className="text-[11px] text-[var(--text-muted)] font-medium -mt-0.5">Inventory Management System</div>
           </div>
@@ -265,11 +269,12 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
                 key={id}
                 onClick={() => setActiveTab(id)}
                 title={isLockedTab ? `${label} (Premium — Locked)` : `${label} (${shortcut})`}
-                className={`group flex items-center gap-3 px-3 lg:px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-150 ${
+                className={`sidebar-nav-btn group flex items-center gap-3 px-3 lg:px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-150 ${
                   isActive
                     ? `${activeColor} shadow-md`
                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                 }`}
+                data-active={isActive ? 'true' : 'false'}
               >
                 <span className="relative shrink-0">
                   <Icon
@@ -341,8 +346,8 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
         <header className="h-14 bg-[var(--bg-header)] border-b border-[var(--border-color)] flex items-center justify-between px-6 shrink-0">
           {/* Mobile Logo (visible only on small screens) */}
           <div className="flex items-center gap-2 lg:hidden">
-            <img src="/logo.png" alt="Joainas Mart" className="w-8 h-8 rounded object-contain" />
-            <span className="font-extrabold text-sm text-[var(--text-primary)]">Joainas Mart</span>
+            <img src="/logo.png" alt={brandName} className="w-8 h-8 rounded object-contain" />
+            <span className="font-extrabold text-sm text-[var(--text-primary)]">{brandName}</span>
           </div>
 
           {/* Breadcrumb / Current Tab label */}
@@ -489,7 +494,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
         {/* Bottom Status Bar */}
         <footer className="bg-[var(--bg-header)] border-t border-[var(--border-color)] px-6 py-2 flex items-center justify-between text-xs shrink-0">
           <div className="flex items-center gap-4 text-[var(--text-muted)]">
-            <span>Joainas Mart • Inventory Management • SQLite Synced</span>
+            <span>{brandName} • Inventory Management • SQLite Synced</span>
             <button
               onClick={onOpenDevModal}
               className="text-[var(--accent-color)] hover:underline font-medium transition"
@@ -498,7 +503,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             </button>
           </div>
           <div className="text-[var(--text-muted)]">
-            v{EDITION.version} {EDITION.editionLabel} • Joainas Mart
+            v{EDITION.version} {EDITION.editionLabel} • {brandName}
           </div>
         </footer>
       </div>

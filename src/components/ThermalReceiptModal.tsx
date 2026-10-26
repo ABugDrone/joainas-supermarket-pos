@@ -236,7 +236,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               boxSizing: 'border-box',
             }}
           >
-            {/* Store Header — Joainas Mart logo default, custom override, else bold name */}
+            {/* Store Header — Rabiu Entreprises logo default, custom override, else bold name */}
             <div className="text-center mb-3 pb-3 border-b-2 border-gray-700">
               {config.showLogo ? (
                 <img src={config.logoDataUrl || '/logo.png'} alt="Logo" className="mx-auto mb-2 object-contain" style={{ maxWidth: config.paperWidth === '58mm' ? 96 : 128, maxHeight: 64 }} />

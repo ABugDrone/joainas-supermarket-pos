@@ -21,7 +21,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
     },
     {
       title: 'This app works offline',
-      body: 'Joainas Mart runs completely offline. You do not need the internet to sell, take inventory or print receipts.',
+      body: 'Rabiu Entreprises runs completely offline. You do not need the internet to sell, take inventory or print receipts.',
     },
     {
       title: 'One admin is in charge',
@@ -60,7 +60,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
         <div className="bg-gradient-to-r from-[var(--accent-color)] to-[var(--accent-hover)] px-8 py-6 text-center">
           <img
             src="/logo.png"
-            alt="Joainas Mart"
+            alt="Rabiu Entreprises"
             className="w-16 h-16 mx-auto mb-3 rounded-xl bg-white/20 p-2 object-contain"
           />
           <h3 className="text-xl font-extrabold text-white">Software License Agreement</h3>
@@ -84,7 +84,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
           <div className="mt-2 p-3 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)]">
             <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
               By agreeing, you confirm that you have read and understood these terms, and that you
-              accept them before continuing to set up and use Joainas Mart.
+              accept them before continuing to set up and use Rabiu Entreprises.
             </p>
           </div>
         </div>
@@ -117,7 +117,7 @@ export const LicenseAgreement: React.FC<LicenseAgreementProps> = ({ onAgree, onD
             </button>
           </div>
           <p className="mt-4 text-center text-[10px] text-[var(--text-muted)]">
-            Joainas Mart v{EDITION.version} • Inventory Management System
+            Rabiu Entreprises v{EDITION.version} • Inventory Management System
           </p>
         </div>
       </div>
