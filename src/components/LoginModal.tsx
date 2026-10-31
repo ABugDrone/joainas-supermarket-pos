@@ -173,7 +173,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         <div className="bg-gradient-to-r from-[var(--accent-color)] to-[var(--accent-hover)] px-8 py-8 text-center">
           <img
             src="/logo.png"
-            alt="Rabiu Entreprises"
+            alt="Joainas Mart"
             className="w-16 h-16 mx-auto mb-3 rounded-xl bg-white/20 p-2 object-contain"
           />
           <h3 className="text-xl font-extrabold text-white">Sign In</h3>

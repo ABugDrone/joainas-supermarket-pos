@@ -4,15 +4,15 @@ import { DEVELOPER_INFO, INITIAL_PRINTER_CONFIG } from '../data/initialData';
 import { MANDATORY_RECEIPT_FOOTER } from '../types';
 import { APP_THEMES } from '../utils/theme';
 
-describe('Rabiu Entreprises branding and version', () => {
+describe('Joainas Mart branding and version', () => {
   test('release is 2.0.6 everywhere', () => {
     expect(EDITION.version).toBe('2.0.6');
     expect(DEVELOPER_INFO.appVersion).toContain('2.0.6');
   });
 
-  test('defaults use the Rabiu Entreprises name, not DIRMS StoreBox PRO', () => {
-    expect(INITIAL_PRINTER_CONFIG.storeName).toBe('Rabiu Entreprises');
-    expect(INITIAL_PRINTER_CONFIG.businessName).toBe('Rabiu Entreprises');
+  test('defaults use the Joainas Mart name, not DIRMS StoreBox PRO', () => {
+    expect(INITIAL_PRINTER_CONFIG.storeName).toBe('Joainas Mart');
+    expect(INITIAL_PRINTER_CONFIG.businessName).toBe('Joainas Mart');
     expect(JSON.stringify(INITIAL_PRINTER_CONFIG)).not.toMatch(/DIRMS StoreBox PRO/i);
   });
 

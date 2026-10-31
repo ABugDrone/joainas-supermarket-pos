@@ -1,12 +1,12 @@
-# Rabiu Entreprises POS System - Changelog
+# Joainas Mart POS System - Changelog
 
-## Version 2.0.6 — Rabiu Entreprises (custom build)
+## Version 2.0.6 — Joainas Mart (custom build)
 
-### 🏪 Rebrand — Rabiu Entreprises
-- Product, installer, window title, sidebar, login/setup, license, splash, footer and developer panel now read **Rabiu Entreprises**.
-- Default business/store name and receipt header are **Rabiu Entreprises**. The business name remains editable in **Hardware Config → Receipt Printer → Business Name**.
+### 🏪 Rebrand — Joainas Mart
+- Product, installer, window title, sidebar, login/setup, license, splash, footer and developer panel now read **Joainas Mart**.
+- Default business/store name and receipt header are **Joainas Mart**. The business name remains editable in **Hardware Config → Receipt Printer → Business Name**.
 - Existing installs keep their data directory (`com.dronebug.dirms.desktop`); untouched old-brand receipt defaults are migrated once on startup.
-- App icon, installer icon and every in-app logo now come from `assets/Rabiu Entreprises.png`.
+- App icon, installer icon and every in-app logo now come from `assets/Joainas Mart.png`.
 
 ### 🤍 STOREBOX WHITE theme
 - Added a 7th theme, **STOREBOX WHITE**: pure white surfaces with near-black/dark-grey text.

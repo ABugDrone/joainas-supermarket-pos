@@ -1,4 +1,4 @@
-# Rabiu Entreprises — ADMIN Password Recovery Guide (v2.0.6)
+# Joainas Mart — ADMIN Password Recovery Guide (v2.0.6)
 
 This guide covers the **ADMIN** account only. Staff passwords can be reset by an ADMIN in **Admin → Staff** without this flow.
 

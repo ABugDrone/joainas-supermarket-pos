@@ -30,7 +30,7 @@ const openExternal = (url: string) => {
  * Contact icons are icon-only (no email/number text on the buttons).
  */
 export const PremiumLock: React.FC<PremiumLockProps> = ({ feature, title, whatItDoes, example }) => {
-  const subject = `Rabiu Entreprises Help — ${feature}`;
+  const subject = `Joainas Mart Help — ${feature}`;
   const body =
     `Hello,\n\nI am using ${EDITION.shortName} v${EDITION.version} (Full) ` +
     `and want the PREMIUM version to unlock "${feature}". Please assist.\n\nThank you.`;

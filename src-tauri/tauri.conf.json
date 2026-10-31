@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Rabiu Entreprises",
+  "productName": "Joainas Mart",
   "version": "2.0.6",
   "identifier": "com.dronebug.dirms.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Rabiu Entreprises - Inventory Management System",
+        "title": "Joainas Mart - Inventory Management System",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,
@@ -38,9 +38,9 @@
       "icons/icon.ico"
     ],
     "publisher": "Dronebug Technologies and Services",
-    "copyright": "Copyright (c) 2026 Rabiu Entreprises. Developed by Dronebug Technologies and Services. All Rights Reserved.",
+    "copyright": "Copyright (c) 2026 Joainas Mart. Developed by Dronebug Technologies and Services. All Rights Reserved.",
     "category": "Business",
-      "shortDescription": "Rabiu Entreprises - Inventory Management System (v2.0.6)",
+      "shortDescription": "Joainas Mart - Inventory Management System (v2.0.6)",
     "windows": {
       "nsis": {
         "installMode": "perMachine"

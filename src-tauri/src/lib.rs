@@ -446,7 +446,7 @@ fn print_raw(printer: String, data: Vec<u8>) -> Result<(), String> {
                 }
             }
 
-            let mut doc_name = wide("Rabiu Entreprises Receipt");
+            let mut doc_name = wide("Joainas Mart Receipt");
             let mut datatype = wide("RAW");
             let doc_info = DOC_INFO_1W {
                 pDocName: PWSTR(doc_name.as_mut_ptr()),
@@ -623,5 +623,5 @@ pub fn run() {
             force_exit
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Rabiu Entreprises Windows application");
+        .expect("error while running Joainas Mart Windows application");
 }

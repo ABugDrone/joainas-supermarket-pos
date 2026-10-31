@@ -130,6 +130,21 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
     });
   }, [products, selectedCategory, searchQuery]);
 
+  // 100 rows per page — search still spans the whole catalog, but the DOM
+  // never renders a 1000+ row table in one go.
+  const INVENTORY_PAGE_SIZE = 100;
+  const [page, setPage] = React.useState(1);
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / INVENTORY_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedProducts = React.useMemo(
+    () => filteredProducts.slice((safePage - 1) * INVENTORY_PAGE_SIZE, safePage * INVENTORY_PAGE_SIZE),
+    [filteredProducts, safePage]
+  );
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [searchQuery, selectedCategory]);
+
   const lowStockCount = React.useMemo(() => {
     return products.filter((p) => !isUncountedKind(p) && p.stockQty <= p.reorderLevel).length;
   }, [products]);
@@ -433,7 +448,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#30363d]">
-              {filteredProducts.map((prod) => {
+              {pagedProducts.map((prod) => {
                 const isNegative = prod.stockQty < 0;
                 const isLow = !isNegative && prod.stockQty <= prod.reorderLevel;
                 return (
@@ -461,7 +476,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                           isNegative
                             ? 'bg-red-900/80 border border-red-400 text-red-200 font-black'
                             : isLow
-                              ? 'bg-red-950/60 border border-red-500/40 text-red-400 font-black animate-pulse'
+                              ? 'bg-red-950/60 border border-red-500/40 text-red-400 font-black'
                               : 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-400'
                         }`}
                       >
@@ -496,6 +511,35 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
               })}
             </tbody>
           </table>
+        </div>
+
+        <div className="bg-[#0d1117] px-4 py-2.5 border-t border-[#30363d] flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span className="text-[11px] font-bold text-slate-400">
+            {filteredProducts.length === 0
+              ? 'No matching items'
+              : `Showing ${(safePage - 1) * INVENTORY_PAGE_SIZE + 1}–${Math.min(safePage * INVENTORY_PAGE_SIZE, filteredProducts.length)} of ${filteredProducts.length} items`}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setPage(safePage - 1)}
+              className="px-2.5 py-1 rounded-md border border-[#30363d] bg-[#21262d] text-[11px] font-bold text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <span className="text-[11px] font-bold text-slate-300">
+              Page {safePage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage(safePage + 1)}
+              className="px-2.5 py-1 rounded-md border border-[#30363d] bg-[#21262d] text-[11px] font-bold text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

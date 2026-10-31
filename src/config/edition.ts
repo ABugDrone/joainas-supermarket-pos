@@ -1,14 +1,14 @@
-// Rabiu Entreprises v2.0.6 — full build, all features unlocked.
+// Joainas Mart v2.0.6 — full build, all features unlocked.
 // Carries all v1.5.x trusted-clock hardening plus v1.6.0 currency selection,
 // plus installment ledger, service units and logo receipts.
 
 export const EDITION = {
-  appName: 'Rabiu Entreprises Inventory Management System',
-  shortName: 'Rabiu Entreprises',
+  appName: 'Joainas Mart Inventory Management System',
+  shortName: 'Joainas Mart',
   version: '2.0.6',
   editionLabel: 'Professional',
   isOpenSource: false,
-  // Default theme — STOREBOX WHITE for the Rabiu Entreprises build.
+  // Default theme — STOREBOX WHITE for the Joainas Mart build.
   defaultThemeId: 'storebox-white' as const,
   // Legacy premium price, kept for reference (no upsell in this build).
   premiumPrice: '₦250,000',

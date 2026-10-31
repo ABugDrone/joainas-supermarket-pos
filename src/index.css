@@ -254,7 +254,7 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(0, 82, 212, 0.15);
 }
 
-/* ================= STOREBOX WHITE (Rabiu build) ================= */
+/* ================= STOREBOX WHITE (Joainas build) ================= */
 /* Pure white surfaces with near-black text. The sidebar menu deliberately
    keeps its default per-module accent colours, so .sidebar-nav-btn is
    excluded from the dark-text conversion below. Every rule here is scoped

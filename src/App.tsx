@@ -35,7 +35,9 @@ import {
   loadCategories,
   saveCategories,
   isStorageInitialized,
-  persistAllToDatabase,
+  flushAllIncremental,
+  flushAuditAppend,
+  persistSmallConfig,
   hasLocalAccountsSync,
   isSetupDoneSync,
   getClockGate,
@@ -93,8 +95,8 @@ import {
 // used when no session exists yet.
 const OPEN_SOURCE_USER: User = {
   id: 'amor-ims-local-user',
-  fullName: 'Rabiu Entreprises User',
-  username: 'Rabiu Entreprises',
+  fullName: 'Joainas Mart User',
+  username: 'Joainas Mart',
   password: '',
   role: 'System Admin',
   capabilities: ['sell', 'inventory', 'view_sales', 'customers', 'expenses', 'view_reports', 'printer_settings', 'admin'],
@@ -221,7 +223,15 @@ function MainAppContent() {
       setUsers([...loadUsers()]);
     };
     window.addEventListener('storage-ready', refresh);
-    return () => window.removeEventListener('storage-ready', refresh);
+    const onStorageWarning = (e: Event) => {
+      const msg = (e as CustomEvent<string>).detail;
+      if (msg) showToast(msg, 'warning');
+    };
+    window.addEventListener('storage-warning', onStorageWarning);
+    return () => {
+      window.removeEventListener('storage-ready', refresh);
+      window.removeEventListener('storage-warning', onStorageWarning);
+    };
   }, []);
 
   // Show a one-time note if the live database was moved to Documents\Backup
@@ -442,15 +452,20 @@ function MainAppContent() {
     // persistent FLASHALERT is deliberately NOT cleared here.
     clearClockOverrideSession();
     setClockOverride(null);
-    // Local-first: single snapshot file replaces old (business keeps going
-    // from it); vault gets ONE full replace at this boundary — no per-action
-    // redundancies, storage stays ~constant.
+    // Local-first: the live incremental writer is already current. Push any
+    // last queued rows + small config tables before the session ends.
     try {
-      saveAutosaveSnapshot();
+      saveAutosaveSnapshot(true);
     } catch {}
-    // Fire-and-forget vault replace (close-flush + periodic tick cover the
-    // worst case where logout is instantly followed by a kill).
-    void persistAllToDatabase();
+    void (async () => {
+      try {
+        await flushAllIncremental();
+        await flushAuditAppend();
+        await persistSmallConfig();
+      } catch (e) {
+        console.error('Logout flush failed', e);
+      }
+    })();
     // Clear the outgoing account's in-memory workspace so the next login
     // starts from THEIR snapshot, never the previous user's bill.
     posWsRef.current = null;
@@ -988,8 +1003,8 @@ export default function App() {
     return (
       <ToastProvider>
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[var(--bg-app)] text-[var(--text-primary)]">
-          <img src="/logo.png" alt="Rabiu Entreprises" className="w-20 h-20 object-contain" />
-          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">Rabiu Entreprises</div>
+          <img src="/logo.png" alt="Joainas Mart" className="w-20 h-20 object-contain" />
+          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">Joainas Mart</div>
           <div className="text-xs text-[var(--text-muted)]">Inventory Management System · Loading…</div>
           <div className="w-8 h-8 border-[3px] border-[var(--border-color)] border-t-[var(--accent-color)] rounded-full animate-spin"></div>
         </div>
@@ -1052,7 +1067,7 @@ export default function App() {
           <div className="w-full max-w-md bg-[#161b22] border border-[#30363d] rounded-2xl p-8 text-center text-slate-200">
             <h3 className="text-lg font-bold text-white mb-2">Agreement Declined</h3>
             <p className="text-sm text-slate-400 mb-6">
-              You must accept the license agreement to use Rabiu Entreprises. The app will now close.
+              You must accept the license agreement to use Joainas Mart. The app will now close.
             </p>
             <button
               onClick={() => {
@@ -1125,8 +1140,8 @@ export default function App() {
     return (
       <ToastProvider>
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[var(--bg-app)] text-[var(--text-primary)]">
-          <img src="/logo.png" alt="Rabiu Entreprises" className="w-20 h-20 object-contain" />
-          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">Rabiu Entreprises</div>
+          <img src="/logo.png" alt="Joainas Mart" className="w-20 h-20 object-contain" />
+          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">Joainas Mart</div>
           <div className="text-xs text-[var(--text-muted)]">Inventory Management System · Checking installation…</div>
           <div className="w-8 h-8 border-[3px] border-[var(--border-color)] border-t-[var(--accent-color)] rounded-full animate-spin"></div>
         </div>

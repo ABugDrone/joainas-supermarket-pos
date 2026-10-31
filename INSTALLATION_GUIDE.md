@@ -1,6 +1,6 @@
-# Rabiu Entreprises v2.0.6 — Installation and Upgrade Guide
+# Joainas Mart v2.0.6 — Installation and Upgrade Guide
 
-Rabiu Entreprises is a Windows desktop POS and inventory application. **v2.0.6 has no license activation step** — there is no `.lic` file, no activation password, and no internet check. After installation, a fresh shop creates its admin account; an existing shop goes straight to login.
+Joainas Mart is a Windows desktop POS and inventory application. **v2.0.6 has no license activation step** — there is no `.lic` file, no activation password, and no internet check. After installation, a fresh shop creates its admin account; an existing shop goes straight to login.
 
 ## Requirements
 
@@ -11,9 +11,9 @@ Rabiu Entreprises is a Windows desktop POS and inventory application. **v2.0.6 h
 
 ## Fresh installation
 
-1. Run **`Rabiu Entreprises_2.0.6_x64-setup.exe`**.
+1. Run **`Joainas Mart_2.0.6_x64-setup.exe`**.
 2. Accept the Windows prompt and choose **Install**. The installer is per-machine by default.
-3. Launch **Rabiu Entreprises** from the Start menu or desktop shortcut.
+3. Launch **Joainas Mart** from the Start menu or desktop shortcut.
 4. On first launch, create the administrator account (username, password, recovery details). There is **no activation screen**.
 5. Optionally set the backup folder, store currency, business name, logo and thermal printer in **Admin → Database / Hardware**.
 6. Add products in **Inventory** and start selling at **POS**.
@@ -62,8 +62,8 @@ When a scanned or selected product has no stock:
 - **Printer prints garbage or cuts early** — confirm the correct Windows printer and 58 mm/80 mm width; use a certified XP-80C/XP-58 driver from `hardware-drivers/`.
 - **Data looks empty after an update** — do not reinstall or reset. Exit the app, relaunch once (startup sibling-database merge runs), then use **Restore backup file** with the most recent JSON backup. Check `pos-debug.log` in the database folder for the recovery steps.
 - **Clock warning / FLASHALERT** — normal shutdowns and long closings are no longer treated as tampering; forward time simply advances the trusted anchor. A real **backward** clock move raises a persistent FLASHALERT. Non-admin staff can still sign in and sell, and their sales are tagged for review. An ADMIN login (or **Verify with ADMIN password** on the FLASHALERT) clears the alert and re-anchors the clock. Correcting the Windows date/time first is good practice, but it does not silently clear the alert: the FLASHALERT stays until an ADMIN verifies, so the evidence cannot be erased by simply fixing the clock.
-- **Uninstall** — Windows *Apps & features → Rabiu Entreprises → Uninstall*. This removes the application only; the business database remains in the app-data folder for a later reinstall.
+- **Uninstall** — Windows *Apps & features → Joainas Mart → Uninstall*. This removes the application only; the business database remains in the app-data folder for a later reinstall.
 
 ## Distribution contents
 
-`Rabiu Entreprises_2.0.6_x64-setup.exe` plus the optional `hardware-drivers/` folder (printer drivers, WebView2 runtime, USB-serial drivers). **No license key file is required or distributed with v2.0.6.**
+`Joainas Mart_2.0.6_x64-setup.exe` plus the optional `hardware-drivers/` folder (printer drivers, WebView2 runtime, USB-serial drivers). **No license key file is required or distributed with v2.0.6.**

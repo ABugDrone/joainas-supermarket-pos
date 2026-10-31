@@ -33,6 +33,8 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
   const [toDate, setToDate] = React.useState<string>(todayLocal());
   const [searchQuery, setSearchQuery] = React.useState('');
   const [selectedSale, setSelectedSale] = React.useState<SaleRecord | null>(null);
+  const [page, setPage] = React.useState(1);
+  const SALES_PAGE_SIZE = 100;
 
   const todayStr = todayLocal();
 
@@ -65,6 +67,19 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
   const totalRevenue = React.useMemo(() => {
     return filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
   }, [filteredSales]);
+
+  // 100 rows per page: the whole history stays searchable, but the DOM never
+  // renders thousands of receipt rows at once (the white-screen/stall cause).
+  const totalPages = Math.max(1, Math.ceil(filteredSales.length / SALES_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedSales = React.useMemo(
+    () => filteredSales.slice((safePage - 1) * SALES_PAGE_SIZE, safePage * SALES_PAGE_SIZE),
+    [filteredSales, safePage]
+  );
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [filterMode, singleDate, fromDate, toDate, searchQuery]);
 
   const totalAdvancePaid = React.useMemo(() => {
     return filteredSales.reduce((sum, s) => sum + s.advancePayment, 0);
@@ -295,7 +310,7 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredSales.map((sale) => (
+                pagedSales.map((sale) => (
                   <tr
                     key={sale.id}
                     onClick={() => handlePreviewSale(sale)}
@@ -379,9 +394,38 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
           </table>
         </div>
 
+        <div className="bg-[#0d1117] px-4 py-2.5 border-t border-[#30363d] flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span className="text-[11px] font-bold text-slate-400">
+            {filteredSales.length === 0
+              ? 'No matching records'
+              : `Showing ${(safePage - 1) * SALES_PAGE_SIZE + 1}–${Math.min(safePage * SALES_PAGE_SIZE, filteredSales.length)} of ${filteredSales.length} receipts`}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setPage(safePage - 1)}
+              className="px-2.5 py-1 rounded-md border border-[#30363d] bg-[#21262d] text-[11px] font-bold text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <span className="text-[11px] font-bold text-slate-300">
+              Page {safePage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage(safePage + 1)}
+              className="px-2.5 py-1 rounded-md border border-[#30363d] bg-[#21262d] text-[11px] font-bold text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+
         <div className="bg-[#0d1117] p-4 border-t border-[#30363d] flex items-center justify-between">
           <span className="text-xs font-bold text-slate-400">
-            Report Summary (Rabiu Entreprises Records Engine) — Click any row to preview full details
+            Report Summary (Joainas Mart Records Engine) — Click any row to preview full details
           </span>
           <div className="text-lg font-black text-white">
             Total: <span className="text-cyan-400">{formatNaira(totalRevenue)}</span>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, AuditLog, UserRole, Capability, CAPABILITY_PRESETS, Category } from '../types';
+import { User, AuditLog, UserRole, Capability, CAPABILITY_PRESETS, Category, Product } from '../types';
 import { defaultCapabilitiesFor } from '../utils/permissions';
 import {
   saveUsers,
@@ -29,10 +29,22 @@ import {
   resetAllSystemData,
   flushWrites,
   persistAllToDatabase,
+  pickExportSavePath,
+  writeBinaryFile,
   tryRecoverFromJsonBackup,
   reanchorClock,
 } from '../utils/storage';
+import type {
+  DatasetId,
+  ExportFormat,
+  ImportMode,
+  ImportUndoRecord,
+  ProductImportPlan,
+  SalesImportPlan,
+} from '../utils/exporters';
+
 import { refreshGate } from '../utils/trustedTime';
+import { isTauriRuntime } from '../utils/db';
 import { CURRENCIES, getCurrencyCode, setCurrency } from '../utils/currency';
 import { useClockGate } from '../hooks/useClockGate';
 import { useToast } from './Toast';
@@ -69,7 +81,23 @@ import {
   Lock,
   Eye,
   Globe,
+  Table,
+  FileSpreadsheet,
+  Undo2,
 } from 'lucide-react';
+
+const DATA_DATASET_LABELS: Record<DatasetId, string> = {
+  products: 'Inventory',
+  sales: 'Sales Records',
+  customers: 'Customers',
+  expenditures: 'Expenditures',
+  categories: 'Categories',
+};
+const DATA_FORMAT_LABELS: Record<ExportFormat, string> = {
+  csv: 'CSV',
+  xlsx: 'Excel (XLSX)',
+  pdf: 'PDF',
+};
 
 interface AdminModuleProps {
   currentUser: string;
@@ -283,6 +311,258 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       showToast('Could not change the currency. Please try again.', 'error');
     } finally {
       setCurrencyBusy(false);
+    }
+  };
+
+  // ---- Dataset import/export (CSV / XLSX / PDF) ----
+  const [dataDataset, setDataDataset] = useState<DatasetId>('products');
+  const [dataFormat, setDataFormat] = useState<ExportFormat>('xlsx');
+  const [importDataset, setImportDataset] = useState<'products' | 'sales'>('products');
+  const [importMode, setImportMode] = useState<ImportMode>('add');
+  const [importPreview, setImportPreview] = useState<
+    | { kind: 'products'; filename: string; plan: ProductImportPlan }
+    | { kind: 'sales'; filename: string; plan: SalesImportPlan }
+    | null
+  >(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [lastImportUndo, setLastImportUndo] = useState<ImportUndoRecord | null>(null);
+
+  // The exporter module pulls in xlsx + jsPDF, so load it lazily.
+  React.useEffect(() => {
+    let alive = true;
+    import('../utils/exporters')
+      .then((ex) => {
+        if (alive) setLastImportUndo(ex.loadImportUndo());
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const handleExportData = async () => {
+    try {
+      const ex = await import('../utils/exporters');
+      const payload = {
+        products: loadProducts(),
+        sales: loadSales(),
+        customers: loadCustomers(),
+        expenditures: loadExpenditures(),
+        categories: loadCategories(),
+      };
+      const { bytes, text } = ex.buildExportBytes(dataDataset, dataFormat, payload);
+      const fileName = ex.exportFileName(dataDataset, dataFormat);
+      const path = await pickExportSavePath(
+        fileName,
+        dataFormat,
+        `Save ${DATA_DATASET_LABELS[dataDataset]} Export`
+      );
+
+      if (!path) {
+        if (isTauriRuntime()) return; // dialog cancelled
+        // Browser fallback: normal download.
+        const blob =
+          text !== null
+            ? new Blob([text], { type: 'text/csv;charset=utf-8' })
+            : new Blob([bytes as BlobPart], {
+                type:
+                  dataFormat === 'pdf'
+                    ? 'application/pdf'
+                    : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (text !== null) {
+        await writeBackupFile(path, text);
+      } else if (bytes) {
+        await writeBinaryFile(path, bytes);
+      }
+
+      recordAuditLog(
+        currentUser,
+        currentUserRole,
+        'Exported Data',
+        `Exported ${DATA_DATASET_LABELS[dataDataset]} as ${DATA_FORMAT_LABELS[dataFormat]} (${fileName}).`
+      );
+      setAuditLogs(loadAuditLogs());
+      showToast(
+        `${DATA_DATASET_LABELS[dataDataset]} exported as ${DATA_FORMAT_LABELS[dataFormat]}.`,
+        'success'
+      );
+    } catch (e) {
+      console.error('Dataset export failed', e);
+      showToast('Export failed. Please try again.', 'error');
+    }
+  };
+
+  const handleDataFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportBusy(true);
+    try {
+      const ex = await import('../utils/exporters');
+      let raw: string[][];
+      if (/\.csv$/i.test(file.name)) {
+        raw = ex.parseCsv(await file.text());
+      } else if (/\.(xlsx|xls)$/i.test(file.name)) {
+        raw = ex.parseXlsxBytes(new Uint8Array(await file.arrayBuffer()));
+      } else {
+        showToast('Choose a .csv, .xlsx or .xls file.', 'error');
+        return;
+      }
+      const parsed = ex.normalizeImportTable(raw);
+      if (parsed.rows.length === 0) {
+        showToast('That file has no data rows.', 'error');
+        return;
+      }
+
+      if (importDataset === 'products') {
+        const plan = ex.planProductImport(parsed, loadProducts(), importMode, file.name);
+        const previous = ex.readImportFingerprints()[plan.fingerprint];
+        if (previous) {
+          plan.warnings.unshift(
+            `This exact file was already imported on ${new Date(previous.at).toLocaleString()}. ` +
+              (importMode === 'add'
+                ? 'Applying it again will ADD the quantities a second time.'
+                : 'Applying it again will apply the same values again.')
+          );
+        }
+        setImportPreview({ kind: 'products', filename: file.name, plan });
+      } else {
+        const plan = ex.planSalesImport(parsed, loadSales(), file.name);
+        const previous = ex.readImportFingerprints()[plan.fingerprint];
+        if (previous) {
+          plan.errors.unshift(
+            `This exact file was already imported on ${new Date(previous.at).toLocaleString()}.`
+          );
+        }
+        setImportPreview({ kind: 'sales', filename: file.name, plan });
+      }
+    } catch (err) {
+      console.error('Data import preview failed', err);
+      showToast('Could not read that file. Use a clean CSV or XLSX export.', 'error');
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const handleApplyImport = async () => {
+    if (!importPreview) return;
+    try {
+      const ex = await import('../utils/exporters');
+      if (importPreview.kind === 'products') {
+        const plan = importPreview.plan;
+        const beforeAll = loadProducts();
+        const beforeIds = new Set(beforeAll.map((p) => p.id));
+        const touched = new Set(
+          plan.rows
+            .filter((r) => r.action === 'add' || r.action === 'update')
+            .map((r) => r.barcode.trim().toLowerCase())
+        );
+        const beforeProducts = beforeAll.filter((p) =>
+          touched.has(p.barcode.trim().toLowerCase())
+        );
+        const addedProductIds = plan.products
+          .filter((p) => !beforeIds.has(p.id))
+          .map((p) => p.id);
+
+        saveProducts(plan.products);
+        if (plan.newCategories.length > 0) {
+          saveCategories([...loadCategories(), ...plan.newCategories]);
+        }
+
+        const undo: ImportUndoRecord = {
+          at: Date.now(),
+          filename: importPreview.filename,
+          dataset: 'products',
+          beforeProducts,
+          addedProductIds,
+          beforeSales: [],
+          addedSaleIds: [],
+        };
+        ex.saveImportUndo(undo);
+        setLastImportUndo(undo);
+        ex.rememberImportFingerprint(plan.fingerprint, importPreview.filename);
+        recordAuditLog(
+          currentUser,
+          currentUserRole,
+          'Imported Inventory',
+          `${importPreview.filename}: ${plan.counts.add} added, ${plan.counts.update} updated, ` +
+            `${plan.counts.skip} skipped, ${plan.counts.error} errors (stock mode: ${importMode}).`
+        );
+        showToast(
+          `Inventory import applied — ${plan.counts.add} added, ${plan.counts.update} updated.`,
+          'success'
+        );
+      } else {
+        const plan = importPreview.plan;
+        const beforeSales = loadSales();
+        saveSales([...plan.sales, ...beforeSales]);
+        const undo: ImportUndoRecord = {
+          at: Date.now(),
+          filename: importPreview.filename,
+          dataset: 'sales',
+          beforeProducts: [],
+          addedProductIds: [],
+          beforeSales: [],
+          addedSaleIds: plan.sales.map((s) => s.id),
+        };
+        ex.saveImportUndo(undo);
+        setLastImportUndo(undo);
+        ex.rememberImportFingerprint(plan.fingerprint, importPreview.filename);
+        recordAuditLog(
+          currentUser,
+          currentUserRole,
+          'Imported Sales Records',
+          `${importPreview.filename}: ${plan.added} receipt(s) added, ${plan.skipped} already existed.`
+        );
+        showToast(`Imported ${plan.added} receipt(s).`, 'success');
+      }
+      setImportPreview(null);
+      setAuditLogs(loadAuditLogs());
+      onDataReset();
+    } catch (e) {
+      console.error('Import apply failed', e);
+      showToast('Import failed. Nothing was changed.', 'error');
+    }
+  };
+
+  const handleUndoImport = async () => {
+    if (!lastImportUndo) return;
+    try {
+      const ex = await import('../utils/exporters');
+      if (lastImportUndo.dataset === 'products') {
+        const added = new Set(lastImportUndo.addedProductIds);
+        const beforeById = new Map<string, Product>(
+          lastImportUndo.beforeProducts.map((p) => [p.id, p] as [string, Product])
+        );
+        const restored = loadProducts()
+          .filter((p) => !added.has(p.id))
+          .map((p) => beforeById.get(p.id) || p);
+        saveProducts(restored);
+      } else {
+        const added = new Set(lastImportUndo.addedSaleIds);
+        saveSales(loadSales().filter((s) => !added.has(s.id)));
+      }
+      recordAuditLog(
+        currentUser,
+        currentUserRole,
+        'Undid Data Import',
+        `Rolled back the import from ${lastImportUndo.filename}.`
+      );
+      ex.clearImportUndo();
+      setLastImportUndo(null);
+      setAuditLogs(loadAuditLogs());
+      showToast('Last import was undone.', 'success');
+      onDataReset();
+    } catch (e) {
+      console.error('Undo import failed', e);
+      showToast('Could not undo the import.', 'error');
     }
   };
 
@@ -699,7 +979,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const handleExportBackup = async () => {
     try {
       const backupData = {
-        app: 'Rabiu Entreprises',
+        app: 'Joainas Mart',
         version: EDITION.version,
         schemaVersion: 2,
         timestamp: new Date().toISOString(),
@@ -716,7 +996,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 
       const backupFolderPath = getBackupFolderPath();
       const currentDate = new Date().toISOString().split('T')[0];
-      const fileName = `rabiu_entreprises_backup_${currentDate}.json`;
+      const fileName = `joainas_entreprises_backup_${currentDate}.json`;
       const dataStr = JSON.stringify(backupData, null, 2);
 
       // Native save dialog: the admin picks exactly where the backup file
@@ -1638,7 +1918,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
                   <span>Warning: Restoring will overwrite existing data.</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Make sure you select a valid Rabiu Entreprises backup file generated by this system.
+                  Make sure you select a valid Joainas Mart backup file generated by this system.
                   {getBackupFolderPath() && (
                     <span className="block mt-1 text-cyan-400 font-bold">
                       💡 Look for backup files in your BACKUP folder: {getBackupFolderPath()}
@@ -1689,6 +1969,134 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
               <p className="text-[11px] text-slate-500 leading-relaxed">
                 Merges missing old receipts from a backup JSON in your BACKUP folder — never overwrites or duplicates existing records.
               </p>
+            </div>
+          </div>
+
+          {/* Dataset import/export — clean table formats beside the JSON
+              full-system backup: inventory/sales/customers/expenses in CSV,
+              XLSX or PDF, with a preview + undo for imports. */}
+          <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-2xl shadow-xl space-y-4">
+            <div className="flex items-center gap-3 border-b border-[#30363d] pb-4">
+              <div className="p-3 bg-indigo-950 border border-indigo-800 text-indigo-300 rounded-xl">
+                <Table className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-white">Import / Export Data — CSV, Excel &amp; PDF</h3>
+                <p className="text-xs text-slate-400">
+                  Clean, structured tables. Export everything or one dataset; import inventory or sales from CSV/XLSX.
+                  PDF is a print-ready export.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Export */}
+              <div className="p-4 bg-[#0d1117] border border-[#30363d] rounded-xl space-y-3">
+                <div className="flex items-center gap-2 text-emerald-400 text-xs font-extrabold uppercase tracking-wider">
+                  <Download className="w-4 h-4" /> Export a dataset
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={dataDataset}
+                    onChange={(e) => setDataDataset(e.target.value as DatasetId)}
+                    className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-slate-200 text-xs font-bold outline-none focus:border-cyan-500"
+                  >
+                    {(Object.keys(DATA_DATASET_LABELS) as DatasetId[]).map((id) => (
+                      <option key={id} value={id}>{DATA_DATASET_LABELS[id]}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={dataFormat}
+                    onChange={(e) => setDataFormat(e.target.value as ExportFormat)}
+                    className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-slate-200 text-xs font-bold outline-none focus:border-cyan-500"
+                  >
+                    {(Object.keys(DATA_FORMAT_LABELS) as ExportFormat[]).map((f) => (
+                      <option key={f} value={f}>{DATA_FORMAT_LABELS[f]}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportData}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Export {DATA_DATASET_LABELS[dataDataset]} as {DATA_FORMAT_LABELS[dataFormat]}
+                </button>
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  Inventory columns: S/N, Barcode, Product Name, Category, Subcategory, Cost, Min, Max, Available Qty, Unit.
+                  Services and edibles show <span className="font-mono text-slate-300">NULL</span> in Available Qty.
+                </p>
+              </div>
+
+              {/* Import */}
+              <div className="p-4 bg-[#0d1117] border border-[#30363d] rounded-xl space-y-3">
+                <div className="flex items-center gap-2 text-cyan-400 text-xs font-extrabold uppercase tracking-wider">
+                  <Upload className="w-4 h-4" /> Import from CSV / XLSX
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={importDataset}
+                    onChange={(e) => setImportDataset(e.target.value as 'products' | 'sales')}
+                    className="w-full px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-slate-200 text-xs font-bold outline-none focus:border-cyan-500"
+                  >
+                    <option value="products">Inventory</option>
+                    <option value="sales">Sales Records</option>
+                  </select>
+                  <label className={`w-full py-2 rounded-lg text-center text-xs font-extrabold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-2 ${importBusy ? 'bg-slate-700 text-slate-400' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}>
+                    <Upload className="w-3.5 h-3.5" />
+                    {importBusy ? 'Reading…' : 'Choose File'}
+                    <input
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      onChange={handleDataFilePicked}
+                      disabled={importBusy}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {importDataset === 'products' && (
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Stock handling</div>
+                    {([
+                      ['add', 'Add to existing stock', 'Deliveries / restock lists'],
+                      ['replace', 'Replace with counted stock', 'Physical stock-take'],
+                      ['none', 'Do not change stock', 'Names, prices & categories only'],
+                    ] as const).map(([value, label, hint]) => (
+                      <label key={value} className="flex items-start gap-2 text-[11px] text-slate-300 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="import-mode"
+                          checked={importMode === value}
+                          onChange={() => setImportMode(value)}
+                          className="mt-0.5 accent-cyan-500"
+                        />
+                        <span>
+                          <strong className="text-white">{label}</strong>
+                          <span className="block text-[10px] text-slate-500">{hint}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  Barcode is the identity: new barcodes are added, existing ones update details and stock by the selected
+                  mode. <span className="font-mono text-slate-300">NULL</span> or empty quantity leaves stock untouched.
+                  You will see a preview before anything is written.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={handleUndoImport}
+                  disabled={!lastImportUndo}
+                  className="w-full py-2 bg-[#21262d] hover:bg-[#2d333d] disabled:opacity-40 disabled:cursor-not-allowed border border-[#30363d] text-slate-300 font-bold text-[11px] uppercase tracking-wider rounded-lg transition flex items-center justify-center gap-2"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  Undo Last Import{lastImportUndo ? ` (${lastImportUndo.filename})` : ''}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2523,6 +2931,158 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           </div>
         </div>
       )}
+    {/* Data import preview modal — nothing is written until Apply. */}
+      {importPreview && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="w-full max-w-4xl bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl p-6 text-slate-200 space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center gap-2 border-b border-[#30363d] pb-3">
+              <FileSpreadsheet className="w-5 h-5 text-cyan-400" />
+              <div className="flex-1">
+                <h3 className="font-black text-sm text-white uppercase tracking-wide">Import Preview</h3>
+                <p className="text-[11px] text-slate-400 font-mono break-all">{importPreview.filename}</p>
+              </div>
+              <button
+                onClick={() => setImportPreview(null)}
+                className="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 rounded bg-[#21262d]"
+              >
+                Cancel
+              </button>
+            </div>
+
+            {importPreview.kind === 'products' ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                  {[
+                    ['New', importPreview.plan.counts.add, 'text-emerald-400'],
+                    ['Updated', importPreview.plan.counts.update, 'text-cyan-400'],
+                    ['Skipped', importPreview.plan.counts.skip, 'text-slate-400'],
+                    ['Errors', importPreview.plan.counts.error, 'text-red-400'],
+                  ].map(([label, value, color]) => (
+                    <div key={String(label)} className="p-2 rounded-lg bg-[#0d1117] border border-[#30363d]">
+                      <div className={`text-lg font-black ${color}`}>{value as number}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">{label as string}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {importPreview.plan.warnings.length > 0 && (
+                  <div className="p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg text-[11px] text-amber-200 space-y-1 max-h-28 overflow-y-auto">
+                    {importPreview.plan.warnings.slice(0, 12).map((w, i) => (
+                      <p key={i}>⚠ {w}</p>
+                    ))}
+                    {importPreview.plan.warnings.length > 12 && (
+                      <p className="text-amber-400">…and {importPreview.plan.warnings.length - 12} more.</p>
+                    )}
+                  </div>
+                )}
+
+                <div className="overflow-x-auto border border-[#30363d] rounded-lg">
+                  <table className="w-full text-left text-[11px]">
+                    <thead>
+                      <tr className="bg-[#0d1117] text-slate-400 uppercase text-[9px] tracking-wide">
+                        <th className="py-2 px-2">Row</th>
+                        <th className="py-2 px-2">Barcode</th>
+                        <th className="py-2 px-2">Product</th>
+                        <th className="py-2 px-2">Action</th>
+                        <th className="py-2 px-2 text-right">Before</th>
+                        <th className="py-2 px-2 text-right">After</th>
+                        <th className="py-2 px-2">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#30363d]">
+                      {importPreview.plan.rows.slice(0, 25).map((r) => (
+                        <tr key={`${r.rowNumber}-${r.barcode}`} className="text-slate-300">
+                          <td className="py-1.5 px-2 font-mono text-slate-500">{r.rowNumber}</td>
+                          <td className="py-1.5 px-2 font-mono">{r.barcode}</td>
+                          <td className="py-1.5 px-2 font-bold text-white">{r.name}</td>
+                          <td className="py-1.5 px-2">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                              r.action === 'add' ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                              : r.action === 'update' ? 'bg-cyan-950 text-cyan-300 border border-cyan-700'
+                              : r.action === 'error' ? 'bg-red-950 text-red-300 border border-red-700'
+                              : 'bg-[#21262d] text-slate-400 border border-[#30363d]'
+                            }`}>{r.action}</span>
+                          </td>
+                          <td className="py-1.5 px-2 text-right font-mono">{r.beforeQty === null ? 'NULL' : r.beforeQty}</td>
+                          <td className="py-1.5 px-2 text-right font-mono">{r.afterQty === null ? 'NULL' : r.afterQty}</td>
+                          <td className="py-1.5 px-2 text-slate-500">{r.message || ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {importPreview.plan.rows.length > 25 && (
+                  <p className="text-[10px] text-slate-500">Showing the first 25 of {importPreview.plan.rows.length} rows.</p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2 text-center">
+                  <div className="p-2 rounded-lg bg-[#0d1117] border border-[#30363d]">
+                    <div className="text-lg font-black text-emerald-400">{importPreview.plan.added}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Receipts to add</div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-[#0d1117] border border-[#30363d]">
+                    <div className="text-lg font-black text-slate-400">{importPreview.plan.skipped}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Already exist</div>
+                  </div>
+                </div>
+                {importPreview.plan.errors.length > 0 && (
+                  <div className="p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg text-[11px] text-amber-200 space-y-1 max-h-28 overflow-y-auto">
+                    {importPreview.plan.errors.slice(0, 10).map((w, i) => <p key={i}>⚠ {w}</p>)}
+                  </div>
+                )}
+                <div className="overflow-x-auto border border-[#30363d] rounded-lg">
+                  <table className="w-full text-left text-[11px]">
+                    <thead>
+                      <tr className="bg-[#0d1117] text-slate-400 uppercase text-[9px] tracking-wide">
+                        <th className="py-2 px-2">Receipt</th>
+                        <th className="py-2 px-2">Date</th>
+                        <th className="py-2 px-2">Cashier</th>
+                        <th className="py-2 px-2">Customer</th>
+                        <th className="py-2 px-2 text-right">Items</th>
+                        <th className="py-2 px-2 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#30363d]">
+                      {importPreview.plan.sales.slice(0, 25).map((s) => (
+                        <tr key={s.id} className="text-slate-300">
+                          <td className="py-1.5 px-2 font-mono text-cyan-400">{s.receiptNo}</td>
+                          <td className="py-1.5 px-2">{s.date}</td>
+                          <td className="py-1.5 px-2">{s.cashier}</td>
+                          <td className="py-1.5 px-2">{s.customerName || 'General'}</td>
+                          <td className="py-1.5 px-2 text-right">{s.items.length}</td>
+                          <td className="py-1.5 px-2 text-right font-mono">{s.totalAmount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  Historical records only — stock is not changed and existing receipt numbers are never overwritten.
+                </p>
+              </>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setImportPreview(null)}
+                className="flex-1 py-2.5 rounded-xl bg-[#21262d] border border-[#30363d] text-slate-300 font-bold uppercase tracking-wider text-xs hover:bg-[#2d333d] transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApplyImport}
+                disabled={importPreview.kind === 'products' ? importPreview.plan.rows.every((r) => r.action === 'error' || r.action === 'skip') : importPreview.plan.added === 0}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold uppercase tracking-wider text-xs transition shadow-lg"
+              >
+                Apply Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     {/* Full System Reset Confirmation Modal */}
       {isResetConfirmOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">

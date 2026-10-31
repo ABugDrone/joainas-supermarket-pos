@@ -125,13 +125,13 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({
 
         {/* Content Area */}
         <div className="p-6 max-h-[55vh] overflow-y-auto">
-          {/* Tab 1: Color Themes — all unlocked in Full; dark-only in Rabiu Entreprises open-source */}
+          {/* Tab 1: Color Themes — all unlocked in Full; dark-only in Joainas Mart open-source */}
           {activeTab === 'theme' && (
             <div className="space-y-3">
               <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-[var(--text-secondary)]">
                 {EDITION.isOpenSource ? (
                   <>
-                    <span className="font-bold text-emerald-300">Rabiu Entreprises: </span>
+                    <span className="font-bold text-emerald-300">Joainas Mart: </span>
                     dark theme included. More themes unlock with the Full edition.
                   </>
                 ) : (
@@ -148,7 +148,7 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({
                 if (isLocked) {
                   const waUrl = whatsappDmUrl(premiumInquiryText(`Theme: ${theme.name}`));
                   const mailUrl = gmailComposeUrl(
-                    `Rabiu Entreprises Theme: ${theme.name}`,
+                    `Joainas Mart Theme: ${theme.name}`,
                     `Hello,\n\nI am using ${EDITION.shortName} v${EDITION.version} and need help with the theme "${theme.name}". Please assist.\n\nThank you.`
                   );
                   const openUrl = (url: string) => {

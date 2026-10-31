@@ -277,9 +277,9 @@ export const APP_THEMES: AppTheme[] = [
 // v1.5.1 full build: fresh key (old installs don't carry over) and
 // AMOLED Black is the default theme.
 const THEME_STORAGE_KEY = 'dirms_app_theme_v1';
-// v2.0.6 Rabiu build: once per install, move the saved theme to the new
+// v2.0.6 Joainas build: once per install, move the saved theme to the new
 // STOREBOX WHITE default. After that the user's choice is respected again.
-const STOREBOX_DEFAULT_MIGRATION_KEY = 'rabiu_storebox_white_default_v1';
+const STOREBOX_DEFAULT_MIGRATION_KEY = 'joainas_storebox_white_default_v1';
 const DEFAULT_THEME: ThemeId = 'storebox-white';
 
 export const getSavedTheme = (): ThemeId => {

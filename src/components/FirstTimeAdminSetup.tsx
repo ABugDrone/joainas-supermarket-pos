@@ -215,7 +215,7 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
         <div className="flex flex-col items-center text-center space-y-4 pb-6 border-b border-[var(--border-color)]">
           <img
             src="/logo.png"
-            alt="Rabiu Entreprises"
+            alt="Joainas Mart"
             className="w-24 h-24 rounded-2xl object-contain"
           />
           <div>
@@ -227,7 +227,7 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
               {step === 'account'
                 ? upgradeMode
                   ? 'Create Your Admin Account — Your Data Is Kept'
-                  : 'Welcome to Rabiu Entreprises'
+                  : 'Welcome to Joainas Mart'
                 : step === 'backup' ? 'Configure Backup Storage' : 'Secure Your ADMIN Account'}
             </h2>
             <p className="text-sm text-[var(--text-muted)] mt-2 max-w-sm mx-auto">
@@ -525,7 +525,7 @@ export const FirstTimeAdminSetup: React.FC<FirstTimeAdminSetupProps> = ({ onSetu
         )}
 
         <div className="mt-6 pt-4 border-t border-[var(--border-color)] text-center text-xs text-[var(--text-muted)]">
-          Powered by Rabiu Entreprises
+          Powered by Joainas Mart
         </div>
       </div>
     </div>

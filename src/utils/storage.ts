@@ -19,8 +19,12 @@ import {
   isTauriRuntime,
   dbLoadProducts,
   dbSaveProducts,
+  dbUpsertProducts,
+  dbDeleteProducts,
   dbLoadCustomers,
   dbSaveCustomers,
+  dbUpsertCustomers,
+  dbDeleteCustomers,
   dbLoadContracts,
   dbSaveContracts,
   dbLoadMicroPayments,
@@ -30,14 +34,20 @@ import {
   dbSetContractDownRemitted,
   dbLoadSales,
   dbSaveSales,
+  dbUpsertSales,
+  dbDeleteSales,
   dbLoadExpenditures,
   dbSaveExpenditures,
+  dbUpsertExpenditures,
+  dbDeleteExpenditures,
   dbLoadPrinterConfig,
   dbSavePrinterConfig,
   dbLoadUsers,
   dbSaveUsers,
   dbLoadAuditLogs,
   dbSaveAuditLogs,
+  dbAppendAuditLogs,
+  dbCheckpointWal,
   dbLoadCategories,
   dbSaveCategories,
   dbGetSetting,
@@ -125,7 +135,7 @@ export function debugLog(msg: string): void {
 
 // Serialized write queue — keeps DB writes in order.
 let writeQueue: Promise<void> = Promise.resolve();
-function enqueueWrite(task: () => Promise<void>): void {
+function enqueueWrite(task: () => Promise<void>): Promise<void> {
   const withRetry = async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -142,6 +152,7 @@ function enqueueWrite(task: () => Promise<void>): void {
     }
   };
   writeQueue = writeQueue.then(withRetry).catch((e) => console.error('SQLite write failed after retries', e));
+  return writeQueue;
 }
 
 // Wait until every queued SQLite write has completed. Critical before
@@ -409,26 +420,94 @@ interface AutosaveSnapshot {
   appVersion?: string;
 }
 
-export function saveAutosaveSnapshot(): void {
+const SNAPSHOT_MAX_SALES_TAURI = 1500;
+const SNAPSHOT_DEBOUNCE_TAURI = 1500;
+const SNAPSHOT_DEBOUNCE_BROWSER = 400;
+const AUDIT_CACHE_CAP = 2000;
+
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+function notifyStorageWarning(message: string): void {
   try {
-    const snap: AutosaveSnapshot = {
-      products: cacheProducts,
-      sales: cacheSales,
-      customers: cacheCustomers,
-      expenditures: cacheExpenditures,
-      users: cacheUsers,
-      categories: cacheCategories,
-      printerConfig: cachePrinterConfig,
-      timestamp: Date.now(),
-      version: 1,
-      appName: 'Rabiu Entreprises',
-      appVersion: '2.0.6',
-    };
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snap));
+    window.dispatchEvent(new CustomEvent('storage-warning', { detail: message }));
+  } catch {}
+}
+
+function buildAutosaveSnapshot(slim: boolean): AutosaveSnapshot {
+  const sales =
+    slim && cacheSales.length > SNAPSHOT_MAX_SALES_TAURI
+      ? cacheSales.slice(0, SNAPSHOT_MAX_SALES_TAURI)
+      : cacheSales;
+  return {
+    products: cacheProducts,
+    sales,
+    customers: cacheCustomers,
+    expenditures: cacheExpenditures,
+    users: cacheUsers,
+    categories: cacheCategories,
+    printerConfig: cachePrinterConfig,
+    timestamp: Date.now(),
+    version: 1,
+    appName: 'Joainas Mart',
+    appVersion: '2.0.6',
+  };
+}
+
+function writeAutosaveSnapshotNow(): void {
+  const slim = isTauriRuntime();
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(buildAutosaveSnapshot(slim)));
   } catch (e) {
-    console.error('Autosave snapshot failed', e);
+    // Quota exceeded — retry with the smallest useful recovery copy, then
+    // warn visibly. SQLite is the live store, so nothing is lost.
+    try {
+      const tiny: AutosaveSnapshot = {
+        ...buildAutosaveSnapshot(true),
+        sales: cacheSales.slice(0, 200),
+        expenditures: [],
+      };
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(tiny));
+      console.warn('Browser cache full — emergency snapshot trimmed.', e);
+      notifyStorageWarning(
+        'Browser cache is full — the emergency copy was trimmed. Your data is saved in the database.'
+      );
+    } catch {
+      try {
+        localStorage.removeItem(AUTOSAVE_KEY);
+      } catch {}
+      console.error('Autosave snapshot failed (quota)', e);
+      notifyStorageWarning(
+        'Browser cache is full — the emergency copy was skipped. Your data is still saved in the database.'
+      );
+    }
   }
   markDirty();
+}
+
+/**
+ * Write the emergency browser-storage copy. Debounced by default so a burst
+ * of edits (or a 1000+ item save) never blocks the UI thread; pass
+ * `immediate` at boundaries (logout, close, pagehide) where the process is
+ * about to disappear.
+ */
+export function saveAutosaveSnapshot(immediate: boolean = false): void {
+  markDirty();
+  if (immediate) {
+    if (snapshotTimer) {
+      clearTimeout(snapshotTimer);
+      snapshotTimer = null;
+    }
+    writeAutosaveSnapshotNow();
+    return;
+  }
+  if (snapshotTimer) return;
+  snapshotTimer = setTimeout(
+    () => {
+      snapshotTimer = null;
+      writeAutosaveSnapshotNow();
+    },
+    isTauriRuntime() ? SNAPSHOT_DEBOUNCE_TAURI : SNAPSHOT_DEBOUNCE_BROWSER
+  );
 }
 
 export function loadAutosaveSnapshot(): AutosaveSnapshot | null {
@@ -445,6 +524,10 @@ export function loadAutosaveSnapshot(): AutosaveSnapshot | null {
 }
 
 export function clearAutosaveSnapshot(): void {
+  if (snapshotTimer) {
+    clearTimeout(snapshotTimer);
+    snapshotTimer = null;
+  }
   try {
     localStorage.removeItem(AUTOSAVE_KEY);
   } catch {}
@@ -467,6 +550,186 @@ export function markDirty(): void {
 
 export function isVaultDirty(): boolean {
   return vaultDirty;
+}
+
+// ============================================================
+// LIVE INCREMENTAL SAVE (v2.0.7)
+// SQLite is the live store. Every mutation schedules a diff of the affected
+// collection; 400 ms later ONLY the rows that actually changed are upserted
+// (and removed ids deleted). A 1000-item catalog therefore costs one small
+// write per edit instead of rewriting every table — no UI stalls, no
+// localStorage quota blow-up, no lost deletions on the next launch.
+// ============================================================
+
+type PersistKind = 'products' | 'sales' | 'customers' | 'expenditures';
+
+const PERSIST_KINDS: PersistKind[] = ['products', 'sales', 'customers', 'expenditures'];
+const INCREMENTAL_DEBOUNCE_MS = 400;
+
+const persistedSigs: Record<PersistKind, Map<string, string>> = {
+  products: new Map(),
+  sales: new Map(),
+  customers: new Map(),
+  expenditures: new Map(),
+};
+
+const pendingKinds = new Set<PersistKind>();
+let incrementalTimer: ReturnType<typeof setTimeout> | null = null;
+let incrementalChain: Promise<void> = Promise.resolve();
+
+function rowsFor(kind: PersistKind): any[] {
+  switch (kind) {
+    case 'products':
+      return cacheProducts;
+    case 'sales':
+      return cacheSales;
+    case 'customers':
+      return cacheCustomers;
+    case 'expenditures':
+      return cacheExpenditures;
+  }
+}
+
+function rowSignature(row: any): string {
+  try {
+    return JSON.stringify(row);
+  } catch {
+    return `${Math.random()}`;
+  }
+}
+
+/**
+ * Record the rows currently on disk as "already saved". Called once after the
+ * startup read (before any snapshot adoption/migration) so only genuine
+ * changes are written afterwards.
+ */
+export function resetPersistedSignatures(): void {
+  for (const kind of PERSIST_KINDS) {
+    const map = new Map<string, string>();
+    for (const row of rowsFor(kind)) {
+      if (row && row.id) map.set(row.id, rowSignature(row));
+    }
+    persistedSigs[kind] = map;
+  }
+}
+
+async function persistKind(kind: PersistKind): Promise<void> {
+  const rows = rowsFor(kind);
+  const prev = persistedSigs[kind];
+  const next = new Map<string, string>();
+  const changed: any[] = [];
+
+  for (const row of rows) {
+    if (!row || !row.id) continue;
+    const sig = rowSignature(row);
+    next.set(row.id, sig);
+    if (prev.get(row.id) !== sig) changed.push(row);
+  }
+
+  const removed: string[] = [];
+  prev.forEach((_sig, id) => {
+    if (!next.has(id)) removed.push(id);
+  });
+
+  if (kind === 'products') {
+    if (changed.length > 0) await dbUpsertProducts(changed);
+    if (removed.length > 0) await dbDeleteProducts(removed);
+  } else if (kind === 'sales') {
+    if (changed.length > 0) await dbUpsertSales(changed);
+    if (removed.length > 0) await dbDeleteSales(removed);
+  } else if (kind === 'customers') {
+    if (changed.length > 0) await dbUpsertCustomers(changed);
+    if (removed.length > 0) await dbDeleteCustomers(removed);
+  } else {
+    if (changed.length > 0) await dbUpsertExpenditures(changed);
+    if (removed.length > 0) await dbDeleteExpenditures(removed);
+  }
+
+  persistedSigs[kind] = next;
+}
+
+function scheduleIncremental(kind: PersistKind): void {
+  markDirty();
+  pendingKinds.add(kind);
+  if (!isTauriRuntime()) return;
+  if (incrementalTimer) return;
+  incrementalTimer = setTimeout(() => {
+    incrementalTimer = null;
+    void flushIncremental();
+  }, INCREMENTAL_DEBOUNCE_MS);
+}
+
+/** Write every pending change now (order preserved by the write queue). */
+export function flushIncremental(): Promise<void> {
+  if (!isTauriRuntime()) return Promise.resolve();
+  if (pendingKinds.size === 0) return incrementalChain;
+  const kinds = Array.from(pendingKinds);
+  pendingKinds.clear();
+  incrementalChain = incrementalChain
+    .then(() =>
+      enqueueWrite(async () => {
+        for (const kind of kinds) {
+          try {
+            await persistKind(kind);
+          } catch (e) {
+            console.error(`Incremental save failed: ${kind}`, e);
+          }
+        }
+      })
+    )
+    .catch((e) => console.error('Incremental save chain failed', e));
+  return incrementalChain;
+}
+
+/** Diff-and-save every collection (startup migrations, logout, close). */
+export async function flushAllIncremental(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  for (const kind of PERSIST_KINDS) pendingKinds.add(kind);
+  if (incrementalTimer) {
+    clearTimeout(incrementalTimer);
+    incrementalTimer = null;
+  }
+  await flushIncremental();
+}
+
+// Users, categories, printer config and the setup flag are small tables; write
+// them directly at boundaries (never table-wide when the cache is empty — a
+// failed read must not wipe real accounts).
+export async function persistSmallConfig(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await enqueueWrite(async () => {
+    if (cacheUsers.length > 0) await dbSaveUsers([...cacheUsers]);
+    if (cacheCategories.length > 0) await dbSaveCategories([...cacheCategories]);
+    if (cachePrinterConfig) await dbSavePrinterConfig({ ...cachePrinterConfig });
+    await dbSetSetting('admin_setup_done', String(cacheAdminSetupDone));
+  });
+}
+
+// Audit rows are append-only and batched: one small insert per burst instead
+// of rewriting the whole trail (which used to grow without limit).
+let auditAppendBuffer: AuditLog[] = [];
+let auditAppendTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleAuditAppend(log: AuditLog): void {
+  if (!isTauriRuntime()) return;
+  auditAppendBuffer.push(log);
+  if (auditAppendTimer) return;
+  auditAppendTimer = setTimeout(() => {
+    auditAppendTimer = null;
+    void flushAuditAppend();
+  }, 800);
+}
+
+export function flushAuditAppend(): Promise<void> {
+  if (!isTauriRuntime()) return Promise.resolve();
+  if (auditAppendTimer) {
+    clearTimeout(auditAppendTimer);
+    auditAppendTimer = null;
+  }
+  const batch = auditAppendBuffer;
+  auditAppendBuffer = [];
+  if (batch.length === 0) return Promise.resolve();
+  return enqueueWrite(() => dbAppendAuditLogs(batch));
 }
 
 export async function persistAllToDatabase(force: boolean = false, timeoutMs: number = 12000): Promise<boolean> {
@@ -771,8 +1034,12 @@ function registerAutosaveHooks(): void {
   autosaveHooksRegistered = true;
   const doSave = () => {
     try {
-      saveAutosaveSnapshot();
+      saveAutosaveSnapshot(true);
     } catch {}
+    // The live store is already current within ~400 ms; these make sure the
+    // last keystroke before a pagehide also reaches SQLite.
+    void flushIncremental();
+    void flushAuditAppend();
   };
   // Synchronous localStorage writes survive pagehide/beforeunload even when SQLite queue is lost
   window.addEventListener('beforeunload', doSave);
@@ -887,6 +1154,9 @@ export async function initStorage(): Promise<void> {
       `init: caches ready — products=${cacheProducts.length} sales=${cacheSales.length} ` +
       `users=${cacheUsers.length} setupFlag=${cacheAdminSetupDone} (db=${setupDone})`
     );
+    // Everything currently in SQLite is already durable: record it so the
+    // live incremental writer only sends genuine changes from here on.
+    resetPersistedSignatures();
     // v2.0.6 trusted-clock anchor: merge the vault + local high-water mark,
     // then verify the OS clock. Only a BACKWARD rollback blocks; a forward
     // difference is normal downtime after a shutdown and is accepted (this
@@ -955,73 +1225,73 @@ export async function initStorage(): Promise<void> {
     // clears it (sessionStorage is per-tab and dies with the window).
     cacheActiveUser = readSessionUser();
 
-    // Seed default category colors on a fresh database so the POS grid has
-    // color-coded classification from the first launch. Existing data is kept.
-    if (categories.length === 0) {
-      saveCategories(DEFAULT_CATEGORIES);
-    }
-
-    // LOCAL-FIRST restore: the single snapshot file is the primary store.
-    // Adopt every slice where it beats the vault; the vault (just united)
-    // wins wherever the snapshot is empty or stale. Extended fields (users,
-    // categories, printerConfig) included. Legacy per-table keys fill any
-    // remaining gaps one-time for pre-1.4.8 profiles.
+    // SQLite is the live store. The browser snapshot is used ONLY when the
+    // database has no business data at all (fresh install / first launch after
+    // an upgrade). It is never allowed to "win" by having more rows — that is
+    // exactly what used to resurrect deleted items and undo stock reductions.
     try {
       const snap = loadAutosaveSnapshot();
       const fresh = snap && snap.timestamp && Date.now() - snap.timestamp < 7 * 24 * 3600 * 1000 ? snap : null;
-      if (fresh) {
-        if (fresh.sales.length > cacheSales.length) cacheSales = fresh.sales;
-        if (fresh.products.length > cacheProducts.length) cacheProducts = fresh.products;
-        if (Array.isArray(fresh.customers) && fresh.customers.length > cacheCustomers.length) {
-          cacheCustomers = fresh.customers;
-        }
-        if (Array.isArray(fresh.expenditures) && fresh.expenditures.length > cacheExpenditures.length) {
-          cacheExpenditures = fresh.expenditures;
-        }
-        if (Array.isArray(fresh.users) && fresh.users.length > cacheUsers.length) {
+      const dbHasBusinessData = cacheProducts.length > 0 || cacheSales.length > 0;
+
+      if (!dbHasBusinessData && fresh) {
+        if (fresh.products.length > 0) cacheProducts = fresh.products;
+        if (fresh.sales.length > 0) cacheSales = fresh.sales;
+        if (Array.isArray(fresh.customers) && fresh.customers.length > 0) cacheCustomers = fresh.customers;
+        if (Array.isArray(fresh.expenditures) && fresh.expenditures.length > 0) cacheExpenditures = fresh.expenditures;
+        if (Array.isArray(fresh.users) && fresh.users.length > 0) cacheUsers = fresh.users;
+        if (Array.isArray(fresh.categories) && fresh.categories.length > 0) cacheCategories = fresh.categories;
+        if (fresh.printerConfig && !cachePrinterConfig) cachePrinterConfig = fresh.printerConfig;
+        debugLog('init: database empty — adopted the browser snapshot');
+      } else if (dbHasBusinessData && fresh) {
+        // Safe additive fallbacks only: a slice that is completely absent in
+        // SQLite (accounts, categories, printer settings) may come from the
+        // snapshot. Products/sales/customers/expenditures never do.
+        if (cacheUsers.length === 0 && Array.isArray(fresh.users) && fresh.users.length > 0) {
           cacheUsers = fresh.users;
         }
-        if (Array.isArray(fresh.categories) && fresh.categories.length > cacheCategories.length) {
+        if (cacheCategories.length === 0 && Array.isArray(fresh.categories) && fresh.categories.length > 0) {
           cacheCategories = fresh.categories;
         }
-        if (fresh.printerConfig && !cachePrinterConfig) {
-          cachePrinterConfig = fresh.printerConfig;
+        if (!cachePrinterConfig && fresh.printerConfig) cachePrinterConfig = fresh.printerConfig;
+      }
+
+      // Legacy per-table keys only fill a completely empty database.
+      if (cacheProducts.length === 0 && cacheSales.length === 0) {
+        const vProducts = lsGet<Product[]>(LKEYS.PRODUCTS, []);
+        if (vProducts.length > 0) cacheProducts = vProducts;
+        const vSales = lsGet<SaleRecord[]>(LKEYS.SALES, []);
+        if (vSales.length > 0) cacheSales = vSales;
+        const vCustomers = lsGet<Customer[]>(LKEYS.CUSTOMERS, []);
+        if (vCustomers.length > 0) cacheCustomers = vCustomers;
+        const vExpenditures = lsGet<Expenditure[]>(LKEYS.EXPENDITURES, []);
+        if (vExpenditures.length > 0) cacheExpenditures = vExpenditures;
+        if (cacheUsers.length === 0) {
+          const vUsers = lsGet<User[]>(LKEYS.USERS, []);
+          if (vUsers.length > 0) cacheUsers = vUsers;
+        }
+        if (cacheCategories.length === 0) {
+          const vCategories = lsGet<Category[]>(LKEYS.CATEGORIES, []);
+          if (vCategories.length > 0) cacheCategories = vCategories;
+        }
+        if (!cachePrinterConfig) {
+          const vPrinter = lsGet<ThermalPrinterConfig | null>(LKEYS.PRINTER_CONFIG, null);
+          if (vPrinter) cachePrinterConfig = vPrinter;
         }
       }
-      if (cacheProducts.length === 0) {
-        const v = lsGet<Product[]>(LKEYS.PRODUCTS, []);
-        if (v.length > 0) cacheProducts = v;
-      }
-      if (cacheSales.length === 0) {
-        const v = lsGet<SaleRecord[]>(LKEYS.SALES, []);
-        if (v.length > 0) cacheSales = v;
-      }
-      if (cacheCustomers.length === 0) {
-        const v = lsGet<Customer[]>(LKEYS.CUSTOMERS, []);
-        if (v.length > 0) cacheCustomers = v;
-      }
-      if (cacheExpenditures.length === 0) {
-        const v = lsGet<Expenditure[]>(LKEYS.EXPENDITURES, []);
-        if (v.length > 0) cacheExpenditures = v;
-      }
-      if (cacheUsers.length === 0) {
-        const v = lsGet<User[]>(LKEYS.USERS, []);
-        if (v.length > 0) cacheUsers = v;
-      }
-      if (cacheCategories.length === 0) {
-        const v = lsGet<Category[]>(LKEYS.CATEGORIES, []);
-        if (v.length > 0) cacheCategories = v;
-      }
-      if (!cachePrinterConfig) {
-        const v = lsGet<ThermalPrinterConfig | null>(LKEYS.PRINTER_CONFIG, null);
-        if (v) cachePrinterConfig = v;
-      }
+
       const logs = lsGet<AuditLog[]>(LKEYS.AUDIT_LOGS, []);
-      if (logs.length > cacheAuditLogs.length) cacheAuditLogs = logs;
-      // Re-consolidate everything back into the single file.
-      saveAutosaveSnapshot();
+      if (logs.length > cacheAuditLogs.length) cacheAuditLogs = logs.slice(0, AUDIT_CACHE_CAP);
+      // Re-consolidate the (possibly adopted) state into the emergency copy.
+      saveAutosaveSnapshot(true);
     } catch (e) {
       console.error('Local-first restore failed', e);
+    }
+
+    // Seed default category colors only after the restore attempt, so an
+    // upgraded profile keeps the categories stored in its snapshot.
+    if (cacheCategories.length === 0) {
+      saveCategories(DEFAULT_CATEGORIES);
     }
 
     // JSON backup auto-recovery: if the live DB has no sales at all, merge
@@ -1055,7 +1325,7 @@ export async function initStorage(): Promise<void> {
     } catch (e) {
       console.error('Receipt footer migration failed', e);
     }
-    // v2.0.6: replace untouched old-brand receipt identity with Rabiu.
+    // v2.0.6: replace untouched old-brand receipt identity with Joainas.
     try {
       migrateLegacyBusinessBranding();
     } catch (e) {
@@ -1070,10 +1340,14 @@ export async function initStorage(): Promise<void> {
       console.error('Min-price backfill failed', e);
     }
     try {
-      saveAutosaveSnapshot();
+      saveAutosaveSnapshot(true);
     } catch {}
+    // Startup sync: diff against what was on disk and write ONLY the rows a
+    // migration/restore actually changed (plus the small config tables).
     try {
-      await persistAllToDatabase(true);
+      await flushAllIncremental();
+      await persistSmallConfig();
+      await flushWrites(3000);
     } catch (e) {
       console.error('Startup vault sync failed', e);
     }
@@ -1137,7 +1411,7 @@ export async function initStorage(): Promise<void> {
     } catch {}
 
     registerAutosaveHooks();
-    saveAutosaveSnapshot();
+    saveAutosaveSnapshot(true);
   }
 }
 
@@ -1161,8 +1435,9 @@ export const saveProducts = (products: Product[]) => {
     return;
   }
   cacheProducts = products;
-  // Auto-save single-file cache (replaces old) — survives sign-out / crash.
-  // Vault catches up at the next session boundary.
+  // Live store: write only the rows that changed, within ~400 ms.
+  scheduleIncremental('products');
+  // Emergency browser-storage copy (debounced; survives abrupt closure).
   saveAutosaveSnapshot();
 };
 
@@ -1178,6 +1453,7 @@ export const saveCustomers = (customers: Customer[]) => {
     return;
   }
   cacheCustomers = customers;
+  scheduleIncremental('customers');
   saveAutosaveSnapshot();
 };
 
@@ -1285,6 +1561,7 @@ export const saveSales = (sales: SaleRecord[]) => {
     return;
   }
   cacheSales = sales;
+  scheduleIncremental('sales');
   // Single-file cache replaces old snapshot — vault catches up at boundary.
   saveAutosaveSnapshot();
 };
@@ -1329,12 +1606,16 @@ export const recordSaleWithStockUpdate = async (sale: SaleRecord, updatedProduct
     cacheCustomers = cacheCustomers.map((c) =>
       c.id === sale.customerId ? { ...c, balance: c.balance + sale.balanceDue } : c
     );
+    scheduleIncremental('customers');
   }
+  // Live store: the receipt and ONLY the products it touched are written.
+  scheduleIncremental('sales');
+  scheduleIncremental('products');
   // Raise the trusted high-water mark + bump the monotonic sale sequence.
   try {
     advanceForSale(Date.now());
   } catch {}
-  // Single-file autosave — replaces old snapshot, survives abrupt closure
+  // Emergency browser-storage copy (debounced).
   saveAutosaveSnapshot();
   return true;
 };
@@ -1415,6 +1696,7 @@ export const saveExpenditures = (expenditures: Expenditure[]) => {
     return;
   }
   cacheExpenditures = expenditures;
+  scheduleIncremental('expenditures');
   saveAutosaveSnapshot();
 };
 
@@ -1427,6 +1709,9 @@ export const loadPrinterConfig = (): ThermalPrinterConfig =>
 
 export const savePrinterConfig = (config: ThermalPrinterConfig) => {
   cachePrinterConfig = config;
+  if (isTauriRuntime()) {
+    void enqueueWrite(() => dbSavePrinterConfig({ ...config }));
+  }
   saveAutosaveSnapshot();
 };
 
@@ -1448,15 +1733,19 @@ export const migrateLegacyReceiptFooter = (): boolean => {
   }
 };
 
-// v2.0.6 Rabiu rebrand: existing installs still hold the old brand defaults
-// in SQLite/localStorage. Rewrite ONLY untouched defaults so a business name
-// the owner typed is never overwritten.
+// v2.0.6 Joainas Mart rebrand: existing installs still hold the old brand
+// defaults in SQLite/localStorage. Rewrite ONLY untouched defaults so a
+// business name the owner typed is never overwritten.
 const LEGACY_BRAND_DEFAULTS = [
-  'Joainas Mart',
+  'Rabiu Entreprises',
   'Joainas Supermarket & Coldstore',
   'DIRMS Store',
   'DIRMS StoreBox PRO',
 ];
+// Joainas Mart is the NEW default — never rewrite an already-migrated
+// install's owner-entered name/address. Only true legacy installs (Rabiu)
+// should be rewritten here.
+const LEGACY_BRAND_MIGRATION_ONLY = ['Rabiu Entreprises'];
 export const migrateLegacyBusinessBranding = (): boolean => {
   try {
     if (!cachePrinterConfig) return false;
@@ -1468,13 +1757,14 @@ export const migrateLegacyBusinessBranding = (): boolean => {
     if (isLegacyName(next.storeName)) next.storeName = INITIAL_PRINTER_CONFIG.storeName;
     if (
       !next.address ||
-      next.address.trim() === 'Joainas Mart.' ||
-      next.address.trim() === 'Rabiu Entreprises.'
+      next.address.trim() === 'Rabiu Entreprises.' ||
+      next.address.trim() === 'Joainas Mart.'
     ) {
       next.address = INITIAL_PRINTER_CONFIG.address;
     }
     if (
       !next.receiptHeaderNote ||
+      next.receiptHeaderNote.trim() === 'WELCOME TO Rabiu Entreprises' ||
       next.receiptHeaderNote.trim() === 'WELCOME TO Joainas Mart'
     ) {
       next.receiptHeaderNote = INITIAL_PRINTER_CONFIG.receiptHeaderNote;
@@ -1500,6 +1790,9 @@ export const saveUsers = (users: User[]) => {
     return;
   }
   cacheUsers = users;
+  if (isTauriRuntime()) {
+    void enqueueWrite(() => dbSaveUsers([...cacheUsers]));
+  }
   saveAutosaveSnapshot();
 };
 
@@ -1510,8 +1803,12 @@ export const saveUsers = (users: User[]) => {
 export const loadAuditLogs = (): AuditLog[] => cacheAuditLogs;
 
 export const saveAuditLogs = (logs: AuditLog[]) => {
-  cacheAuditLogs = logs;
-  lsSet(LKEYS.AUDIT_LOGS, logs);
+  cacheAuditLogs = logs.slice(0, AUDIT_CACHE_CAP);
+  if (isTauriRuntime()) {
+    void enqueueWrite(() => dbSaveAuditLogs([...cacheAuditLogs]));
+  } else {
+    lsSet(LKEYS.AUDIT_LOGS, cacheAuditLogs);
+  }
   markDirty();
 };
 
@@ -1529,23 +1826,31 @@ export async function registerCloseFlush(): Promise<void> {
   if (closeFlushRegistered) return;
   closeFlushRegistered = true;
 
-  // Boundary flushes: the single snapshot file is already current (every
-  // mutation replaces it synchronously); these move the vault to match.
+  // Boundary flushes: the live incremental writer is already current; these
+  // only drain anything still queued and keep the emergency copy fresh.
   const boundaryFlush = () => {
     try {
-      saveAutosaveSnapshot();
+      saveAutosaveSnapshot(true);
     } catch {}
-    void persistAllToDatabase();
+    void flushIncremental();
+    void flushAuditAppend();
   };
   window.addEventListener('pagehide', boundaryFlush);
   window.addEventListener('beforeunload', boundaryFlush);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') boundaryFlush();
   });
-  // Periodic safety net (dirty-gated inside — idle ticks cost nothing): if
-  // the OS kills the app without firing close, the vault is still recent.
+  // Periodic safety net: drain the queue and keep the WAL from growing.
+  // (The old build rewrote every table here every 15 s — the source of the
+  // 15× write amplification and the UI stalls.)
+  let lastCheckpoint = 0;
   setInterval(() => {
-    void persistAllToDatabase();
+    void flushIncremental();
+    void flushAuditAppend();
+    if (Date.now() - lastCheckpoint > 60000) {
+      lastCheckpoint = Date.now();
+      void enqueueWrite(() => dbCheckpointWal());
+    }
   }, 15000);
 
   if (!isTauriRuntime()) return;
@@ -1583,12 +1888,20 @@ export async function registerCloseFlush(): Promise<void> {
           forceQuit();
         }, 2500);
         try {
-          saveAutosaveSnapshot();
+          saveAutosaveSnapshot(true);
         } catch {}
-        // Vault flush: single replace of every table, then quit. The 2.5s
-        // failsafe above guarantees the app still dies on a stuck vault.
+        // Drain the live write queue only. There is no full-table rewrite on
+        // close anymore, so this finishes well inside the 2.5 s failsafe even
+        // with a 1000+ item catalog.
         try {
-          await persistAllToDatabase(true, 2500);
+          await Promise.race([
+            (async () => {
+              await flushIncremental();
+              await flushAuditAppend();
+              await flushWrites(1500);
+            })(),
+            new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+          ]);
         } catch (e) {
           console.error('Vault flush on close failed', e);
         } finally {
@@ -1633,9 +1946,9 @@ export const recordAuditLog = (
     time: timeStr,
   };
 
-  cacheAuditLogs = [newLog, ...cacheAuditLogs];
-  // Local-first: audit lives in its own key; vault catches up at boundary.
-  lsSet(LKEYS.AUDIT_LOGS, cacheAuditLogs);
+  cacheAuditLogs = [newLog, ...cacheAuditLogs].slice(0, AUDIT_CACHE_CAP);
+  // Append-only live write (batched); never rewrites the whole trail.
+  scheduleAuditAppend(newLog);
   markDirty();
   return newLog;
 };
@@ -1859,6 +2172,9 @@ export const saveCategories = (categories: Category[]) => {
     return;
   }
   cacheCategories = categories;
+  if (isTauriRuntime()) {
+    void enqueueWrite(() => dbSaveCategories([...cacheCategories]));
+  }
   saveAutosaveSnapshot();
 };
 
@@ -2005,6 +2321,32 @@ export async function pickBackupSavePath(defaultFileName: string): Promise<strin
     return typeof selected === 'string' ? selected : null;
   } catch (e) {
     console.error('Failed to pick backup save path', e);
+    return null;
+  }
+}
+
+// Open a native save dialog for a data export (CSV/XLSX/PDF) and seed it in
+// the configured BACKUP folder. Returns the chosen path or null.
+export async function pickExportSavePath(
+  defaultFileName: string,
+  extension: string,
+  title: string = 'Save Export'
+): Promise<string | null> {
+  const dialog = await loadDialogPlugin();
+  if (!dialog) return null;
+  try {
+    const backupFolder = getBackupFolderPath();
+    const defaultPath = backupFolder
+      ? `${backupFolder.replace(/[/\\]+$/, '')}\\${defaultFileName}`
+      : defaultFileName;
+    const selected = await dialog.save({
+      title,
+      defaultPath,
+      filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
+    });
+    return typeof selected === 'string' ? selected : null;
+  } catch (e) {
+    console.error('Failed to pick export save path', e);
     return null;
   }
 }

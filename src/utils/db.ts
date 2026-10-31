@@ -65,6 +65,20 @@ export async function openDb(url: string): Promise<Database | null> {
   return next;
 }
 
+// Keep the write-ahead log from growing without bound. The old build rewrote
+// every table on a 15s timer, which inflated the WAL to many times the size of
+// the database itself; incremental writes plus this periodic truncate keep the
+// on-disk footprint proportional to what actually changed.
+export async function dbCheckpointWal(): Promise<void> {
+  const d = await getDb();
+  if (!d) return;
+  try {
+    await d.execute('PRAGMA wal_checkpoint(TRUNCATE)', []);
+  } catch (e) {
+    console.warn('WAL checkpoint skipped', e);
+  }
+}
+
 // ============================================================
 // IDEMPOTENT SCHEMA BOOTSTRAP
 // Creates every table/index it needs and adds any columns that may be
@@ -430,7 +444,7 @@ export async function bootstrapSchema(d: Database): Promise<void> {
         receipt_header_note, receipt_footer_note, show_logo,
         paper_width, auto_print_on_sale, point_rate, print_density, printer_name
       ) VALUES (
-        1, 'Rabiu Entreprises', '', '', '', '', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
+        1, 'Joainas Mart', '', '', '', '', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
       )
       ON CONFLICT(id) DO NOTHING`,
       []
@@ -836,31 +850,50 @@ export async function dbLoadProducts(): Promise<Product[]> {
   return rows.map(mapProduct);
 }
 
+const PRODUCT_COLUMNS: ColumnSpec[] = [
+  { col: 'barcode', value: (p) => p.barcode },
+  { col: 'name', value: (p) => p.name },
+  { col: 'category_name', value: (p) => p.category },
+  {
+    col: 'kind',
+    value: (p) => {
+      if (p.kind === 'service' || p.kind === 'edible' || p.kind === 'product') return p.kind;
+      const cat = ((p as any).category || '').toLowerCase();
+      return cat === 'services' ? 'service' : cat === 'edibles' ? 'edible' : 'product';
+    },
+  },
+  { col: 'unit', value: (p) => p.unit },
+  { col: 'cost_price', value: (p) => p.costPrice },
+  { col: 'retail_price', value: (p) => p.retailPrice },
+  { col: 'wholesale_price', value: (p) => p.wholesalePrice ?? p.retailPrice },
+  { col: 'min_price', value: (p) => (p as any).minPrice ?? null },
+  { col: 'price_tiers', value: (p) => JSON.stringify((p as any).priceTiers || []) },
+  { col: 'stock_qty', value: (p) => p.stockQty },
+  { col: 'reorder_level', value: (p) => p.reorderLevel },
+];
+
 export async function dbSaveProducts(products: Product[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await upsertRows(d, 'products', 'id', [
-    { col: 'barcode', value: (p) => p.barcode },
-    { col: 'name', value: (p) => p.name },
-    { col: 'category_name', value: (p) => p.category },
-    {
-      col: 'kind',
-      value: (p) => {
-        if (p.kind === 'service' || p.kind === 'edible' || p.kind === 'product') return p.kind;
-        const cat = ((p as any).category || '').toLowerCase();
-        return cat === 'services' ? 'service' : cat === 'edibles' ? 'edible' : 'product';
-      },
-    },
-    { col: 'unit', value: (p) => p.unit },
-    { col: 'cost_price', value: (p) => p.costPrice },
-    { col: 'retail_price', value: (p) => p.retailPrice },
-    { col: 'wholesale_price', value: (p) => p.wholesalePrice ?? p.retailPrice },
-    { col: 'min_price', value: (p) => (p as any).minPrice ?? null },
-    { col: 'price_tiers', value: (p) => JSON.stringify((p as any).priceTiers || []) },
-    { col: 'stock_qty', value: (p) => p.stockQty },
-    { col: 'reorder_level', value: (p) => p.reorderLevel },
-  ], products);
+  await upsertRows(d, 'products', 'id', PRODUCT_COLUMNS, products);
   await deleteIdsNotIn(d, 'products', 'id', products.map((p) => p.id));
+}
+
+// Incremental (live) writes: upsert ONLY the rows that changed. No table-wide
+// prune — the caller supplies explicit ids to delete. This is what keeps a
+// 1000+ item catalog cheap to save on every edit.
+export async function dbUpsertProducts(products: Product[]): Promise<void> {
+  if (products.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await upsertRows(d, 'products', 'id', PRODUCT_COLUMNS, products);
+}
+
+export async function dbDeleteProducts(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await d.execute(`DELETE FROM products WHERE id IN (SELECT value FROM json_each(?))`, [JSON.stringify(ids)]);
 }
 
 // ============================================================
@@ -874,23 +907,39 @@ export async function dbLoadCustomers(): Promise<Customer[]> {
   return rows.map(mapCustomer);
 }
 
+const CUSTOMER_COLUMNS: ColumnSpec[] = [
+  { col: 'full_name', value: (c) => c.fullName },
+  { col: 'account_type', value: (c) => c.accountType || 'individual' },
+  { col: 'phone', value: (c) => c.phone || null },
+  { col: 'address', value: (c) => c.address || '' },
+  { col: 'nin', value: (c) => (c as any).nin || null },
+  { col: 'bvn', value: (c) => (c as any).bvn || null },
+  { col: 'balance', value: (c) => c.balance },
+  { col: 'points', value: (c) => c.points ?? 0 },
+  { col: 'advance_payment', value: (c) => c.advancePayment ?? 0 },
+  { col: 'assigned_cashier', value: (c) => c.assignedCashier || null },
+  { col: 'created_at', value: (c) => c.createdAt },
+];
+
 export async function dbSaveCustomers(customers: Customer[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await upsertRows(d, 'customers', 'id', [
-    { col: 'full_name', value: (c) => c.fullName },
-    { col: 'account_type', value: (c) => c.accountType || 'individual' },
-    { col: 'phone', value: (c) => c.phone || null },
-    { col: 'address', value: (c) => c.address || '' },
-    { col: 'nin', value: (c) => (c as any).nin || null },
-    { col: 'bvn', value: (c) => (c as any).bvn || null },
-    { col: 'balance', value: (c) => c.balance },
-    { col: 'points', value: (c) => c.points ?? 0 },
-    { col: 'advance_payment', value: (c) => c.advancePayment ?? 0 },
-    { col: 'assigned_cashier', value: (c) => c.assignedCashier || null },
-    { col: 'created_at', value: (c) => c.createdAt },
-  ], customers);
+  await upsertRows(d, 'customers', 'id', CUSTOMER_COLUMNS, customers);
   await deleteIdsNotIn(d, 'customers', 'id', customers.map((c) => c.id));
+}
+
+export async function dbUpsertCustomers(customers: Customer[]): Promise<void> {
+  if (customers.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await upsertRows(d, 'customers', 'id', CUSTOMER_COLUMNS, customers);
+}
+
+export async function dbDeleteCustomers(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await d.execute(`DELETE FROM customers WHERE id IN (SELECT value FROM json_each(?))`, [JSON.stringify(ids)]);
 }
 
 // ============================================================
@@ -920,45 +969,39 @@ export async function dbLoadSales(): Promise<SaleRecord[]> {
   return saleRows.map((row: any) => mapSale({ ...row, items: itemsBySale.get(row.id) || [] }, productLookup));
 }
 
-export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
-  const d = await getDb();
-  if (!d) return;
+const SALE_COLUMNS: ColumnSpec[] = [
+  { col: 'receipt_no', value: (s) => s.receiptNo },
+  { col: 'subtotal', value: (s) => s.subtotal },
+  { col: 'total_amount', value: (s) => s.totalAmount },
+  { col: 'advance_payment', value: (s) => s.advancePayment },
+  { col: 'balance_due', value: (s) => s.balanceDue },
+  { col: 'payment_method', value: (s) => s.paymentMethod },
+  { col: 'price_type', value: (s) => s.priceType },
+  { col: 'customer_id', value: (s) => s.customerId || null },
+  { col: 'customer_name', value: (s) => s.customerName || null },
+  { col: 'customer_phone', value: (s) => s.customerPhone || null },
+  { col: 'points_earned', value: (s) => s.pointsEarned || 0 },
+  { col: 'cash_amount', value: (s) => (s as any).cashAmount ?? null },
+  { col: 'transfer_amount', value: (s) => (s as any).transferAmount ?? null },
+  { col: 'payment_note', value: (s) => (s as any).paymentNote || null },
+  { col: 'cashier_username', value: (s) => s.cashier },
+  { col: 'sale_date', value: (s) => s.date },
+  { col: 'sale_time', value: (s) => s.time },
+  { col: 'currency', value: (s) => s.currency || null },
+];
 
-  // 1. Upsert every sale header (never deletes first).
-  await upsertRows(d, 'sales', 'id', [
-    { col: 'receipt_no', value: (s) => s.receiptNo },
-    { col: 'subtotal', value: (s) => s.subtotal },
-    { col: 'total_amount', value: (s) => s.totalAmount },
-    { col: 'advance_payment', value: (s) => s.advancePayment },
-    { col: 'balance_due', value: (s) => s.balanceDue },
-    { col: 'payment_method', value: (s) => s.paymentMethod },
-    { col: 'price_type', value: (s) => s.priceType },
-    { col: 'customer_id', value: (s) => s.customerId || null },
-    { col: 'customer_name', value: (s) => s.customerName || null },
-    { col: 'customer_phone', value: (s) => s.customerPhone || null },
-    { col: 'points_earned', value: (s) => s.pointsEarned || 0 },
-    { col: 'cash_amount', value: (s) => (s as any).cashAmount ?? null },
-    { col: 'transfer_amount', value: (s) => (s as any).transferAmount ?? null },
-    { col: 'payment_note', value: (s) => (s as any).paymentNote || null },
-    { col: 'cashier_username', value: (s) => s.cashier },
-    { col: 'sale_date', value: (s) => s.date },
-    { col: 'sale_time', value: (s) => s.time },
-    { col: 'currency', value: (s) => s.currency || null },
-  ], sales);
+const SALE_ITEM_COLUMNS: ColumnSpec[] = [
+  { col: 'sale_id', value: (it) => it.saleId },
+  { col: 'product_id', value: (it) => it.productId },
+  { col: 'product_name', value: (it) => it.productName },
+  { col: 'quantity', value: (it) => it.quantity },
+  { col: 'price_type', value: (it) => it.priceType },
+  { col: 'rate', value: (it) => it.rate },
+  { col: 'amount', value: (it) => it.amount },
+];
 
-  // 2. Upsert sale items (stable ids keyed off sale+product so re-saves
-  //    replace instead of duplicating).
-  type ItemRow = { id: string };
-  const itemRows: ItemRow[] = [];
-  const itemColumns: ColumnSpec[] = [
-    { col: 'sale_id', value: (it) => it.saleId },
-    { col: 'product_id', value: (it) => it.productId },
-    { col: 'product_name', value: (it) => it.productName },
-    { col: 'quantity', value: (it) => it.quantity },
-    { col: 'price_type', value: (it) => it.priceType },
-    { col: 'rate', value: (it) => it.rate },
-    { col: 'amount', value: (it) => it.amount },
-  ];
+function saleItemRows(sales: SaleRecord[]): Array<{ id: string }> {
+  const itemRows: Array<{ id: string }> = [];
   for (const s of sales) {
     for (const item of s.items) {
       itemRows.push({
@@ -973,11 +1016,37 @@ export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
       } as any);
     }
   }
-  await upsertRows(d, 'sale_items', 'id', itemColumns, itemRows);
+  return itemRows;
+}
 
-  // 3. Only NOW prune receipts/items that no longer exist in the list.
+async function upsertSalesRows(d: Database, sales: SaleRecord[]): Promise<void> {
+  await upsertRows(d, 'sales', 'id', SALE_COLUMNS, sales);
+  await upsertRows(d, 'sale_items', 'id', SALE_ITEM_COLUMNS, saleItemRows(sales));
+}
+
+export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
+  const d = await getDb();
+  if (!d) return;
+  await upsertSalesRows(d, sales);
+  // Only NOW prune receipts/items that no longer exist in the list.
   await deleteIdsNotIn(d, 'sales', 'id', sales.map((s) => s.id));
   await deleteIdsNotIn(d, 'sale_items', 'sale_id', sales.map((s) => s.id));
+}
+
+// Incremental sale write: upsert the receipt + its items, never prune.
+export async function dbUpsertSales(sales: SaleRecord[]): Promise<void> {
+  if (sales.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await upsertSalesRows(d, sales);
+}
+
+export async function dbDeleteSales(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await d.execute(`DELETE FROM sale_items WHERE sale_id IN (SELECT value FROM json_each(?))`, [JSON.stringify(ids)]);
+  await d.execute(`DELETE FROM sales WHERE id IN (SELECT value FROM json_each(?))`, [JSON.stringify(ids)]);
 }
 
 // ============================================================
@@ -1063,18 +1132,34 @@ export async function dbLoadExpenditures(): Promise<Expenditure[]> {
   return rows.map(mapExpenditure);
 }
 
+const EXPENDITURE_COLUMNS: ColumnSpec[] = [
+  { col: 'description', value: (e) => e.description },
+  { col: 'category', value: (e) => e.category },
+  { col: 'amount', value: (e) => e.amount },
+  { col: 'expense_date', value: (e) => e.date },
+  { col: 'created_by', value: (e) => e.createdBy },
+  { col: 'currency', value: (e) => e.currency || null },
+];
+
 export async function dbSaveExpenditures(expenditures: Expenditure[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
-  await upsertRows(d, 'expenditures', 'id', [
-    { col: 'description', value: (e) => e.description },
-    { col: 'category', value: (e) => e.category },
-    { col: 'amount', value: (e) => e.amount },
-    { col: 'expense_date', value: (e) => e.date },
-    { col: 'created_by', value: (e) => e.createdBy },
-    { col: 'currency', value: (e) => e.currency || null },
-  ], expenditures);
+  await upsertRows(d, 'expenditures', 'id', EXPENDITURE_COLUMNS, expenditures);
   await deleteIdsNotIn(d, 'expenditures', 'id', expenditures.map((e) => e.id));
+}
+
+export async function dbUpsertExpenditures(expenditures: Expenditure[]): Promise<void> {
+  if (expenditures.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await upsertRows(d, 'expenditures', 'id', EXPENDITURE_COLUMNS, expenditures);
+}
+
+export async function dbDeleteExpenditures(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await d.execute(`DELETE FROM expenditures WHERE id IN (SELECT value FROM json_each(?))`, [JSON.stringify(ids)]);
 }
 
 // ============================================================
@@ -1245,19 +1330,28 @@ export async function dbLoadAuditLogs(): Promise<AuditLog[]> {
   return rows.map(mapAuditLog);
 }
 
+const AUDIT_COLUMNS: ColumnSpec[] = [
+  { col: 'username', value: (l: AuditLog) => l.username },
+  { col: 'user_role', value: (l: AuditLog) => l.userRole },
+  { col: 'action', value: (l: AuditLog) => l.action },
+  { col: 'details', value: (l: AuditLog) => l.details },
+  { col: 'log_timestamp', value: (l: AuditLog) => l.timestamp },
+  { col: 'log_date', value: (l: AuditLog) => l.date },
+  { col: 'log_time', value: (l: AuditLog) => l.time },
+];
+
+// Audit rows are append-only: an upsert without a table-wide prune. Deleting
+// "everything not in this list" here used to rewrite the whole table on every
+// save, which is exactly the write amplification that filled the WAL.
 export async function dbSaveAuditLogs(logs: AuditLog[]): Promise<void> {
+  if (logs.length === 0) return;
   const d = await getDb();
   if (!d) return;
-  await upsertRows(d, 'audit_logs', 'id', [
-    { col: 'username', value: (l: AuditLog) => l.username },
-    { col: 'user_role', value: (l: AuditLog) => l.userRole },
-    { col: 'action', value: (l: AuditLog) => l.action },
-    { col: 'details', value: (l: AuditLog) => l.details },
-    { col: 'log_timestamp', value: (l: AuditLog) => l.timestamp },
-    { col: 'log_date', value: (l: AuditLog) => l.date },
-    { col: 'log_time', value: (l: AuditLog) => l.time },
-  ], logs);
-  await deleteIdsNotIn(d, 'audit_logs', 'id', logs.map((l) => l.id));
+  await upsertRows(d, 'audit_logs', 'id', AUDIT_COLUMNS, logs);
+}
+
+export async function dbAppendAuditLogs(logs: AuditLog[]): Promise<void> {
+  await dbSaveAuditLogs(logs);
 }
 
 // ============================================================
