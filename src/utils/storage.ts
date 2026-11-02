@@ -20,6 +20,7 @@ import {
   dbLoadProducts,
   dbSaveProducts,
   dbUpsertProducts,
+  dbApplyProductsAtomic,
   dbDeleteProducts,
   dbLoadCustomers,
   dbSaveCustomers,
@@ -1566,9 +1567,9 @@ export const saveSales = (sales: SaleRecord[]) => {
   saveAutosaveSnapshot();
 };
 
-// Checkout path: caches + single snapshot only. Stock/sale durability comes
-// from the snapshot immediately and the vault at the next boundary —
-// no dual-write that could half-fail on close.
+// Checkout path: caches are updated synchronously, then the live incremental
+// writer is flushed IMMEDIATELY so the receipt and the decremented stock are
+// durable in SQLite before the next paint (no 400 ms crash window).
 //
 // v2.0.6: non-admin sessions signed in under a clock warning carry a runtime
 // override. Those sales are ALLOWED and recorded normally so the shop keeps
@@ -1617,7 +1618,61 @@ export const recordSaleWithStockUpdate = async (sale: SaleRecord, updatedProduct
   } catch {}
   // Emergency browser-storage copy (debounced).
   saveAutosaveSnapshot();
+  // Close the debounce window: the sale + stock change are on disk now.
+  await flushIncremental();
   return true;
+};
+
+// ---- Dataset import apply (atomic) ----
+// Products go in through ONE SQL statement, so a failure applies nothing.
+export const applyProductImport = async (
+  allProducts: Product[],
+  changedProducts: Product[]
+): Promise<void> => {
+  if (isTauriRuntime() && changedProducts.length > 0) {
+    await flushIncremental();
+    let failed = false;
+    await enqueueWrite(async () => {
+      failed = false;
+      try {
+        await dbApplyProductsAtomic(changedProducts);
+      } catch (e) {
+        failed = true;
+        throw e;
+      }
+    });
+    if (failed) throw new Error('Atomic product import failed');
+  }
+  cacheProducts = allProducts;
+  resetPersistedSignatures();
+  saveAutosaveSnapshot(true);
+};
+
+// Sales import adds historical receipts only. The header + items are written
+// in one queued pass; if anything fails, the inserted receipts are deleted
+// again so the import is all-or-nothing.
+export const applySalesImport = async (newSales: SaleRecord[]): Promise<void> => {
+  if (isTauriRuntime() && newSales.length > 0) {
+    await flushIncremental();
+    const ids = newSales.map((s) => s.id);
+    let failed = false;
+    await enqueueWrite(async () => {
+      failed = false;
+      try {
+        await dbUpsertSales(newSales);
+      } catch (e) {
+        failed = true;
+        try {
+          await dbDeleteSales(ids);
+        } catch {}
+        throw e;
+      }
+    });
+    if (failed) throw new Error('Sales import failed');
+  }
+  cacheSales = [...newSales, ...cacheSales];
+  resetPersistedSignatures();
+  saveAutosaveSnapshot(true);
 };
 
 // ============================================================
@@ -1742,10 +1797,6 @@ const LEGACY_BRAND_DEFAULTS = [
   'DIRMS Store',
   'DIRMS StoreBox PRO',
 ];
-// Joainas Mart is the NEW default — never rewrite an already-migrated
-// install's owner-entered name/address. Only true legacy installs (Rabiu)
-// should be rewritten here.
-const LEGACY_BRAND_MIGRATION_ONLY = ['Rabiu Entreprises'];
 export const migrateLegacyBusinessBranding = (): boolean => {
   try {
     if (!cachePrinterConfig) return false;

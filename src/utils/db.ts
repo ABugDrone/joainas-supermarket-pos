@@ -889,6 +889,29 @@ export async function dbUpsertProducts(products: Product[]): Promise<void> {
   await upsertRows(d, 'products', 'id', PRODUCT_COLUMNS, products);
 }
 
+// Import-only bulk upsert. Every row goes in through ONE INSERT…SELECT so the
+// whole batch is atomic: SQLite either applies all rows or none. This is what
+// makes a failed import leave the catalog exactly as it was.
+export async function dbApplyProductsAtomic(products: Product[]): Promise<void> {
+  if (products.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  const cols = PRODUCT_COLUMNS.map((c) => c.col);
+  const payload = products.map((p) => {
+    const row: Record<string, unknown> = { id: p.id };
+    for (const c of PRODUCT_COLUMNS) row[c.col] = c.value(p);
+    return row;
+  });
+  const selects = cols.map((c) => `json_extract(value, '$.${c}')`).join(', ');
+  const updates = cols.map((c) => `${c} = excluded.${c}`).join(', ');
+  await d.execute(
+    `INSERT INTO products (${cols.join(', ')}, id)
+     SELECT ${selects}, json_extract(value, '$.id') FROM json_each(?) WHERE true
+     ON CONFLICT(id) DO UPDATE SET ${updates}`,
+    [JSON.stringify(payload)]
+  );
+}
+
 export async function dbDeleteProducts(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const d = await getDb();
@@ -1049,77 +1072,10 @@ export async function dbDeleteSales(ids: string[]): Promise<void> {
   await d.execute(`DELETE FROM sales WHERE id IN (SELECT value FROM json_each(?))`, [JSON.stringify(ids)]);
 }
 
-// ============================================================
-// ATOMIC SALE + STOCK UPDATE
-// Records a single sale and decrements stock in one sequential DB call
-// using `stock_qty - qty` so an intentional depleted-stock sale can go
-// negative. This replaces the old dual-write (saveSales + saveProducts full table rewrite) that
-// could revert if the second write was lost on close.
-// ============================================================
-
-export async function dbRecordSaleWithStockUpdate(sale: SaleRecord): Promise<void> {
-  const d = await getDb();
-  if (!d) return;
-
-  // 1. Insert sale header
-  await d.execute(
-    `INSERT INTO sales (id, receipt_no, subtotal, total_amount, advance_payment, balance_due, payment_method, price_type, customer_id, customer_name, customer_phone, points_earned, cash_amount, transfer_amount, payment_note, cashier_username, sale_date, sale_time, currency)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       receipt_no=excluded.receipt_no, subtotal=excluded.subtotal, total_amount=excluded.total_amount, advance_payment=excluded.advance_payment, balance_due=excluded.balance_due, payment_method=excluded.payment_method, price_type=excluded.price_type, customer_id=excluded.customer_id, customer_name=excluded.customer_name, customer_phone=excluded.customer_phone, points_earned=excluded.points_earned, cash_amount=excluded.cash_amount, transfer_amount=excluded.transfer_amount, payment_note=excluded.payment_note, cashier_username=excluded.cashier_username, sale_date=excluded.sale_date, sale_time=excluded.sale_time, currency=excluded.currency`,
-    [
-      sale.id,
-      sale.receiptNo,
-      sale.subtotal,
-      sale.totalAmount,
-      sale.advancePayment,
-      sale.balanceDue,
-      sale.paymentMethod,
-      sale.priceType,
-      sale.customerId || null,
-      sale.customerName || null,
-      sale.customerPhone || null,
-      sale.pointsEarned || 0,
-      (sale as any).cashAmount ?? null,
-      (sale as any).transferAmount ?? null,
-      (sale as any).paymentNote || null,
-      sale.cashier,
-      sale.date,
-      sale.time,
-      sale.currency || null,
-    ]
-  );
-
-  // 2. Insert sale items
-  for (const item of sale.items) {
-    await d.execute(
-      `INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, price_type, rate, amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET sale_id=excluded.sale_id, product_id=excluded.product_id, product_name=excluded.product_name, quantity=excluded.quantity, price_type=excluded.price_type, rate=excluded.rate, amount=excluded.amount`,
-      [
-        `item-${sale.id}-${item.product.id}`,
-        sale.id,
-        item.product.id,
-        item.product.name,
-        item.quantity,
-        item.priceType,
-        item.rate,
-        item.amount,
-      ]
-    );
-  }
-
-  // 3. Decrement stock atomically per item (services & edibles are uncounted — skip)
-  for (const item of sale.items) {
-    const kind = (item.product as any).kind;
-    const cat = String((item.product as any).category || '').toLowerCase();
-    if (kind === 'service' || kind === 'edible' || cat === 'services' || cat === 'edibles') continue;
-    await d.execute(
-      `UPDATE products SET stock_qty = stock_qty - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [item.quantity, item.product.id]
-    );
-  }
-}
+// Sales are written through dbUpsertSales (receipt + items) by the live
+// incremental writer. Checkout calls flushIncremental() immediately after the
+// sale so the receipt and the new stock level are durable before the next
+// paint — no dead "second write" path is kept here.
 
 // ============================================================
 // EXPENDITURES

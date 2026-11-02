@@ -449,27 +449,57 @@ export function planProductImport(
   const newCategories: Category[] = [];
   const rows: ProductImportRow[] = [];
   const warnings: string[] = [];
-  const seenBarcodes = new Map<string, number>();
-  const counts = { add: 0, update: 0, skip: 0, error: 0 };
-
   const cell = (row: string[], i: number): string => (i >= 0 ? String(row[i] ?? '').trim() : '');
+  // The LAST occurrence of a barcode wins. Earlier duplicates are ignored so
+  // an "add stock" import never counts the same delivery twice.
+  const indicesByBarcode = new Map<string, number[]>();
+  parsed.rows.forEach((raw, i) => {
+    const bc = cell(raw, idx.barcode).toLowerCase();
+    if (!bc) return;
+    const list = indicesByBarcode.get(bc);
+    if (list) list.push(i);
+    else indicesByBarcode.set(bc, [i]);
+  });
+  const counts = { add: 0, update: 0, skip: 0, error: 0 };
 
   parsed.rows.forEach((raw, i) => {
     const rowNumber = i + 2; // header is row 1
-    let barcode = cell(raw, idx.barcode);
+    const explicitBarcode = cell(raw, idx.barcode);
+    let barcode = explicitBarcode;
     const name = cell(raw, idx.name);
     if (!name && !barcode) return; // blank line
 
     if (!barcode) {
       barcode = `AUTO-${Date.now().toString().slice(-6)}${String(rowNumber).padStart(3, '0')}`;
       warnings.push(`Row ${rowNumber}: no barcode — assigned ${barcode}. Print a label for it.`);
+    } else {
+      const occurrences = indicesByBarcode.get(explicitBarcode.toLowerCase()) || [];
+      const lastIndex = occurrences[occurrences.length - 1];
+      if (lastIndex !== i) {
+        const lastRowNumber = lastIndex + 2;
+        warnings.push(
+          `Row ${rowNumber}: barcode ${barcode} also appears on row ${lastRowNumber} — the last row wins; this row is ignored.`
+        );
+        rows.push({
+          rowNumber,
+          barcode,
+          name: name || barcode,
+          action: 'skip',
+          beforeQty: null,
+          afterQty: null,
+          message: `Duplicate barcode — merged into row ${lastRowNumber}.`,
+        });
+        counts.skip++;
+        return;
+      }
+      if (occurrences.length > 1) {
+        warnings.push(
+          `Barcode ${barcode} appears ${occurrences.length} times; row ${rowNumber} (the last) is used.`
+        );
+      }
     }
 
     const key = barcode.toLowerCase();
-    if (seenBarcodes.has(key)) {
-      warnings.push(`Row ${rowNumber}: barcode ${barcode} also appears on row ${seenBarcodes.get(key)} — the last row wins.`);
-    }
-    seenBarcodes.set(key, rowNumber);
 
     const cost = parseNumber(cell(raw, idx.cost));
     const min = parseNumber(cell(raw, idx.min));

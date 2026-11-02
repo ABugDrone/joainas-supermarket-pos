@@ -31,6 +31,8 @@ import {
   persistAllToDatabase,
   pickExportSavePath,
   writeBinaryFile,
+  applyProductImport,
+  applySalesImport,
   tryRecoverFromJsonBackup,
   reanchorClock,
 } from '../utils/storage';
@@ -470,8 +472,11 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         const addedProductIds = plan.products
           .filter((p) => !beforeIds.has(p.id))
           .map((p) => p.id);
+        const changedProducts = plan.products.filter((p) =>
+          touched.has(p.barcode.trim().toLowerCase())
+        );
 
-        saveProducts(plan.products);
+        await applyProductImport(plan.products, changedProducts);
         if (plan.newCategories.length > 0) {
           saveCategories([...loadCategories(), ...plan.newCategories]);
         }
@@ -501,8 +506,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         );
       } else {
         const plan = importPreview.plan;
-        const beforeSales = loadSales();
-        saveSales([...plan.sales, ...beforeSales]);
+        await applySalesImport(plan.sales);
         const undo: ImportUndoRecord = {
           at: Date.now(),
           filename: importPreview.filename,

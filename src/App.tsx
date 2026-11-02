@@ -270,8 +270,9 @@ function MainAppContent() {
     };
   }, [showToast]);
 
-  // Atomic sale + stock update — single enqueued transaction so stock
-  // never reverts if the app closes before a second write flushes.
+  // Sale + stock update — caches update immediately, then the live writer is
+  // flushed before the next paint so the receipt and new stock level are on
+  // disk even if the app is killed right after checkout.
   const handleCompleteSale = (newSale: SaleRecord, opts?: { saveOnly?: boolean }) => {
     // Compute updated products synchronously (services & edibles never decrement)
     const updatedProducts = products.map((prod) => {
