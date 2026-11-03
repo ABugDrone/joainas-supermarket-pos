@@ -1,7 +1,7 @@
 import React from 'react';
 import { Search, Trash2, ShoppingCart, Printer, Package, ScanBarcode, Table2, LayoutGrid, ArrowLeft } from 'lucide-react';
 import { Product, Customer, CartItem, SaleRecord, ThermalPrinterConfig, UserRole, Category, Capability, isUncountedKind } from '../types';
-import { formatNaira, playPOSBeep, recordAuditLog, getClockGate } from '../utils/storage';
+import { formatNaira, playPOSBeep, recordAuditLog, getClockGate, nextReceiptNo } from '../utils/storage';
 import { useCurrency } from '../hooks/useCurrency';
 import { refreshGate, signalClockLogout } from '../utils/trustedTime';
 import { getCurrencyCode } from '../utils/currency';
@@ -646,7 +646,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
 
     let newSale: SaleRecord = {
       id: `sale-${Date.now()}`,
-      receiptNo: `RCT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`,
+      receiptNo: nextReceiptNo(),
       items: cart,
       subtotal: totalAmount,
       totalAmount,

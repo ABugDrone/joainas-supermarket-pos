@@ -1,11 +1,11 @@
-// Joainas Mart v2.0.6 — full build, all features unlocked.
+// Joainas Mart v2.0.7 — full build, all features unlocked.
 // Carries all v1.5.x trusted-clock hardening plus v1.6.0 currency selection,
 // plus installment ledger, service units and logo receipts.
 
 export const EDITION = {
   appName: 'Joainas Mart Inventory Management System',
   shortName: 'Joainas Mart',
-  version: '2.0.6',
+  version: '2.0.7',
   editionLabel: 'Professional',
   isOpenSource: false,
   // Default theme — STOREBOX WHITE for the Joainas Mart build.

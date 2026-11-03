@@ -1023,45 +1023,208 @@ const SALE_ITEM_COLUMNS: ColumnSpec[] = [
   { col: 'amount', value: (it) => it.amount },
 ];
 
-function saleItemRows(sales: SaleRecord[]): Array<{ id: string }> {
-  const itemRows: Array<{ id: string }> = [];
-  for (const s of sales) {
-    for (const item of s.items) {
+// Build sale-item rows from the in-memory receipt.
+//
+// v2.0.7: this function must NEVER throw. A single legacy/restored receipt
+// whose `items` was missing (or carried a malformed line) used to make
+// `for (const item of s.items)` throw inside the item write. Because headers
+// are written first, that left a perfectly valid receipt with a total but no
+// item lines — and the error was swallowed by the incremental writer.
+export function saleItemRows(sales: SaleRecord[]): Array<Record<string, unknown>> {
+  const itemRows: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  for (const s of sales || []) {
+    if (!s || !s.id) continue;
+    const items = Array.isArray((s as any).items) ? ((s as any).items as CartItem[]) : [];
+    for (const item of items) {
+      if (!item || !item.product || !item.product.id) continue;
+      const productId = String(item.product.id);
+      const quantity = Number(item.quantity);
+      const rate = Number(item.rate);
+      const amount = Number(item.amount);
+      if (
+        !Number.isFinite(quantity) ||
+        !Number.isFinite(rate) ||
+        !Number.isFinite(amount)
+      ) {
+        continue;
+      }
+      const id = `item-${s.id}-${productId}`;
+      if (seen.has(id)) continue; // one stored line per product per receipt
+      seen.add(id);
       itemRows.push({
-        id: `item-${s.id}-${item.product.id}`,
+        id,
         saleId: s.id,
-        productId: item.product.id,
-        productName: item.product.name,
-        quantity: item.quantity,
-        priceType: item.priceType,
-        rate: item.rate,
-        amount: item.amount,
-      } as any);
+        productId,
+        productName: String(item.product.name ?? ''),
+        quantity,
+        // The column has CHECK(price_type IN ('retail','wholesale')) and no
+        // default, so anything unexpected is stored as retail instead of
+        // aborting the whole receipt.
+        priceType: item.priceType === 'wholesale' ? 'wholesale' : 'retail',
+        rate,
+        amount,
+      });
     }
   }
   return itemRows;
 }
 
+// Headers FIRST: sale_items may carry a foreign key to sales(id) on databases
+// created by older releases (PRAGMA foreign_keys is ON).
 async function upsertSalesRows(d: Database, sales: SaleRecord[]): Promise<void> {
   await upsertRows(d, 'sales', 'id', SALE_COLUMNS, sales);
   await upsertRows(d, 'sale_items', 'id', SALE_ITEM_COLUMNS, saleItemRows(sales));
 }
 
-export async function dbSaveSales(sales: SaleRecord[]): Promise<void> {
+export interface SalesWriteResult {
+  /** Receipt ids that could not be written at all. */
+  failed: string[];
+  /** Receipts whose number was changed on disk to escape a UNIQUE collision. */
+  renumbered: SaleRecord[];
+}
+
+// A receipt that keeps failing must never take the rest of the batch down with
+// it. Failing ids are quarantined for the rest of the session and retried on
+// the next launch; every other receipt still saves normally.
+let salesWriteQuarantine = new Set<string>();
+
+export function resetSalesWriteQuarantine(): void {
+  salesWriteQuarantine = new Set<string>();
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  const text = String((error as any)?.message ?? error ?? '').toLowerCase();
+  return text.includes('unique constraint failed') || text.includes('receipt_no');
+}
+
+async function writeOneSale(d: Database, sale: SaleRecord): Promise<SaleRecord> {
+  try {
+    await upsertSalesRows(d, [sale]);
+    return sale;
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) throw error;
+    // Receipt numbers exist so humans can tell receipts apart; they are not
+    // business data. If the stored number is already taken, renumber this
+    // receipt instead of losing the sale and its item lines.
+    const base = String(sale.receiptNo || 'RCT');
+    for (let n = 2; n <= 20; n++) {
+      const candidate = { ...sale, receiptNo: `${base}~${n}` };
+      try {
+        await upsertSalesRows(d, [candidate]);
+        return candidate;
+      } catch (retryError) {
+        if (!isUniqueConstraintError(retryError)) throw retryError;
+      }
+    }
+    throw error;
+  }
+}
+
+async function writeSalesResilient(d: Database, sales: SaleRecord[]): Promise<SalesWriteResult> {
+  const result: SalesWriteResult = { failed: [], renumbered: [] };
+  const wanted = (sales || []).filter((s) => s && s.id && !salesWriteQuarantine.has(s.id));
+  if (wanted.length === 0) return result;
+
+  try {
+    await upsertSalesRows(d, wanted);
+    return result;
+  } catch (batchError) {
+    console.error('Sales batch write failed — retrying one receipt at a time', batchError);
+  }
+
+  for (const sale of wanted) {
+    try {
+      const written = await writeOneSale(d, sale);
+      if (written.receiptNo !== sale.receiptNo) result.renumbered.push(written);
+    } catch (error) {
+      result.failed.push(sale.id);
+      salesWriteQuarantine.add(sale.id);
+      console.error(`Receipt ${sale.receiptNo} (${sale.id}) could not be saved`, error);
+    }
+  }
+  return result;
+}
+
+export async function dbSaveSales(sales: SaleRecord[]): Promise<SalesWriteResult> {
   const d = await getDb();
-  if (!d) return;
-  await upsertSalesRows(d, sales);
-  // Only NOW prune receipts/items that no longer exist in the list.
+  const empty: SalesWriteResult = { failed: [], renumbered: [] };
+  if (!d) return empty;
+  const result = await writeSalesResilient(d, sales);
+  // The boundary flush receives the live cache objects; mirror any collision
+  // renumbering in place so the next flush does not retry the taken number.
+  for (const written of result.renumbered) {
+    const target = sales.find((s) => s.id === written.id);
+    if (target) target.receiptNo = written.receiptNo;
+  }
+  // Only NOW prune receipts/items that no longer exist in the list. The keep
+  // list is the full in-memory list (not just the rows that succeeded), so a
+  // quarantined receipt is never deleted by a later boundary flush.
   await deleteIdsNotIn(d, 'sales', 'id', sales.map((s) => s.id));
   await deleteIdsNotIn(d, 'sale_items', 'sale_id', sales.map((s) => s.id));
+  return result;
 }
 
 // Incremental sale write: upsert the receipt + its items, never prune.
-export async function dbUpsertSales(sales: SaleRecord[]): Promise<void> {
-  if (sales.length === 0) return;
+export async function dbUpsertSales(sales: SaleRecord[]): Promise<SalesWriteResult> {
+  const empty: SalesWriteResult = { failed: [], renumbered: [] };
+  if (sales.length === 0) return empty;
   const d = await getDb();
-  if (!d) return;
-  await upsertSalesRows(d, sales);
+  if (!d) return empty;
+  return writeSalesResilient(d, sales);
+}
+
+// Add-only repair: INSERT OR IGNORE the given item rows. Existing item rows are
+// never updated or deleted, so this is idempotent and cannot alter a receipt
+// that already has its lines.
+export async function dbInsertSaleItemsIfMissing(
+  items: Array<Record<string, unknown>>
+): Promise<number> {
+  if (items.length === 0) return 0;
+  const d = await getDb();
+  if (!d) return 0;
+  const cols = SALE_ITEM_COLUMNS.map((c) => c.col);
+  const payload = items
+    .filter((row) => row && row.id)
+    .map((row) => {
+      const out: Record<string, unknown> = { id: row.id };
+      for (const c of SALE_ITEM_COLUMNS) out[c.col] = c.value(row);
+      return out;
+    });
+  if (payload.length === 0) return 0;
+  const selects = [...cols, 'id'].map((c) => `json_extract(value, '$.${c}')`).join(', ');
+  const res = await d.execute(
+    `INSERT OR IGNORE INTO sale_items (${cols.join(', ')}, id)
+     SELECT ${selects} FROM json_each(?) WHERE true`,
+    [JSON.stringify(payload)]
+  );
+  return Number((res as any)?.rowsAffected ?? 0);
+}
+
+// Read-only health check used at startup to prove whether receipts are missing
+// their item lines.
+export async function dbSaleIntegrityCounts(): Promise<{
+  sales: number;
+  headerOnly: number;
+  orphanItems: number;
+}> {
+  const d = await getDb();
+  if (!d) return { sales: 0, headerOnly: 0, orphanItems: 0 };
+  const rows = await d.select<any[]>(
+    `SELECT
+       (SELECT COUNT(*) FROM sales) AS sales,
+       (SELECT COUNT(*) FROM sales s
+          WHERE s.total_amount > 0
+            AND NOT EXISTS (SELECT 1 FROM sale_items i WHERE i.sale_id = s.id)) AS header_only,
+       (SELECT COUNT(*) FROM sale_items i
+          WHERE NOT EXISTS (SELECT 1 FROM sales s WHERE s.id = i.sale_id)) AS orphan_items`
+  );
+  const row = rows?.[0] || {};
+  return {
+    sales: Number(row.sales) || 0,
+    headerOnly: Number(row.header_only) || 0,
+    orphanItems: Number(row.orphan_items) || 0,
+  };
 }
 
 export async function dbDeleteSales(ids: string[]): Promise<void> {

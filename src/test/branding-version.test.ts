@@ -5,9 +5,9 @@ import { MANDATORY_RECEIPT_FOOTER } from '../types';
 import { APP_THEMES } from '../utils/theme';
 
 describe('Joainas Mart branding and version', () => {
-  test('release is 2.0.6 everywhere', () => {
-    expect(EDITION.version).toBe('2.0.6');
-    expect(DEVELOPER_INFO.appVersion).toContain('2.0.6');
+  test('release is 2.0.7 everywhere', () => {
+    expect(EDITION.version).toBe('2.0.7');
+    expect(DEVELOPER_INFO.appVersion).toContain('2.0.7');
   });
 
   test('defaults use the Joainas Mart name, not DIRMS StoreBox PRO', () => {

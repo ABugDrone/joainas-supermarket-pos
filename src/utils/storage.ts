@@ -37,6 +37,9 @@ import {
   dbSaveSales,
   dbUpsertSales,
   dbDeleteSales,
+  dbInsertSaleItemsIfMissing,
+  dbSaleIntegrityCounts,
+  saleItemRows,
   dbLoadExpenditures,
   dbSaveExpenditures,
   dbUpsertExpenditures,
@@ -450,7 +453,7 @@ function buildAutosaveSnapshot(slim: boolean): AutosaveSnapshot {
     timestamp: Date.now(),
     version: 1,
     appName: 'Joainas Mart',
-    appVersion: '2.0.6',
+    appVersion: '2.0.7',
   };
 }
 
@@ -599,6 +602,34 @@ function rowSignature(row: any): string {
   }
 }
 
+let salesWriteWarningShown = false;
+
+/**
+ * v2.0.7: a sales write failure used to be invisible (console only). Surface it
+ * once per session through the existing storage-warning toast AND the audit
+ * trail, so a receipt that loses its item lines is never a silent event again.
+ */
+function reportSalesWriteFailure(ids: string[]): void {
+  if (salesWriteWarningShown) return;
+  salesWriteWarningShown = true;
+  const message =
+    `${ids.length} receipt(s) could not be written to the database. ` +
+    `The totals are safe; item lines for those receipts may be missing. ` +
+    `Restart the app, then export your records so support can repair them.`;
+  console.error(message, ids);
+  try {
+    notifyStorageWarning(message);
+  } catch {}
+  try {
+    recordAuditLog(
+      'System',
+      'System Admin',
+      'Receipt Save Failed',
+      `${ids.length} receipt(s) failed to save: ${ids.join(', ')}. Totals were kept; item lines may be missing.`
+    );
+  } catch {}
+}
+
 /**
  * Record the rows currently on disk as "already saved". Called once after the
  * startup read (before any snapshot adoption/migration) so only genuine
@@ -636,7 +667,23 @@ async function persistKind(kind: PersistKind): Promise<void> {
     if (changed.length > 0) await dbUpsertProducts(changed);
     if (removed.length > 0) await dbDeleteProducts(removed);
   } else if (kind === 'sales') {
-    if (changed.length > 0) await dbUpsertSales(changed);
+    if (changed.length > 0) {
+      const res = await dbUpsertSales(changed);
+      // A receipt may have been renumbered on disk to escape a UNIQUE
+      // collision. Mirror that here so the next diff does not retry the old
+      // number forever.
+      for (const sale of res.renumbered) {
+        const idx = cacheSales.findIndex((s) => s.id === sale.id);
+        if (idx >= 0) {
+          cacheSales[idx] = { ...cacheSales[idx], receiptNo: sale.receiptNo };
+          next.set(sale.id, rowSignature(cacheSales[idx]));
+        }
+      }
+      // Do not record failed receipts as saved: they are retried next flush.
+      // The quarantine inside the db layer keeps them from blocking anyone.
+      for (const id of res.failed) next.delete(id);
+      if (res.failed.length > 0) reportSalesWriteFailure(res.failed);
+    }
     if (removed.length > 0) await dbDeleteSales(removed);
   } else if (kind === 'customers') {
     if (changed.length > 0) await dbUpsertCustomers(changed);
@@ -749,7 +796,10 @@ export async function persistAllToDatabase(force: boolean = false, timeoutMs: nu
   };
   const run = (async () => {
     await step('products', () => dbSaveProducts([...cacheProducts]));
-    await step('sales', () => dbSaveSales([...cacheSales]));
+    await step('sales', async () => {
+      const result = await dbSaveSales([...cacheSales]);
+      if (result.failed.length > 0) reportSalesWriteFailure(result.failed);
+    });
     await step('customers', () => dbSaveCustomers([...cacheCustomers]));
     await step('expenditures', () => dbSaveExpenditures([...cacheExpenditures]));
     await step('users', () => dbSaveUsers([...cacheUsers]));
@@ -1027,6 +1077,130 @@ export function importBackupText(text: string): { sales: number; users: number; 
   } catch {
     return null;
   }
+}
+
+// ============================================================
+// SALE-ITEM REPAIR (v2.0.7)
+// Receipts written before the sales-write fix may exist in SQLite with a
+// header but no item lines. This looks for the same receipt in the emergency
+// snapshot and any *backup*.json beside the database and re-inserts ONLY the
+// missing item rows. It never deletes, never updates, never touches headers,
+// stock or any other table, and is idempotent.
+// ============================================================
+
+export interface SaleItemRepairReport {
+  headerOnly: number;
+  restoredReceipts: number;
+  restoredRows: number;
+  sourceSales: number;
+}
+
+/** Sale records from the snapshot + the newest backup JSON files. Read-only. */
+async function collectSaleRepairSources(): Promise<SaleRecord[]> {
+  const sources: SaleRecord[] = [];
+  try {
+    const snap = loadAutosaveSnapshot();
+    if (snap && Array.isArray(snap.sales)) sources.push(...snap.sales);
+  } catch {}
+  if (!isTauriRuntime()) return sources;
+  try {
+    const info = await getDbInfo();
+    const dir = info?.folder;
+    if (!dir) return sources;
+    const fs = await loadFsPlugin();
+    if (!fs) return sources;
+    let entries: any[] = [];
+    try {
+      entries = await (fs as any).readDir(dir);
+    } catch {
+      return sources;
+    }
+    const files = (entries || [])
+      .map((e: any) => (typeof e === 'string' ? e : e.name || e.path || ''))
+      .map((n: string) => String(n).split(/[/\\]/).pop() || '')
+      .filter((n) => n.toLowerCase().includes('backup') && n.toLowerCase().endsWith('.json'))
+      .sort()
+      .reverse()
+      .slice(0, 10);
+    for (const file of files) {
+      try {
+        const fullPath = `${dir.replace(/[/\\]+$/, '')}\\${file}`;
+        const text: string = await (fs as any).readTextFile(fullPath);
+        if (!text || text.length > 50 * 1024 * 1024) continue;
+        const parsed = JSON.parse(text);
+        if (parsed && Array.isArray(parsed.sales)) sources.push(...parsed.sales);
+      } catch {}
+    }
+  } catch (e) {
+    console.warn('Sale-item repair could not read backup sources', e);
+  }
+  return sources;
+}
+
+export async function repairMissingSaleItems(): Promise<SaleItemRepairReport> {
+  const report: SaleItemRepairReport = {
+    headerOnly: 0,
+    restoredReceipts: 0,
+    restoredRows: 0,
+    sourceSales: 0,
+  };
+  if (!isTauriRuntime()) return report;
+  try {
+    const live = await dbLoadSales();
+    const missing = live.filter(
+      (s) => s && s.totalAmount > 0 && (!Array.isArray(s.items) || s.items.length === 0)
+    );
+    report.headerOnly = missing.length;
+    if (missing.length === 0) return report;
+
+    const sources = await collectSaleRepairSources();
+    const usable = sources.filter(
+      (s) => s && Array.isArray(s.items) && s.items.length > 0
+    );
+    report.sourceSales = usable.length;
+    if (usable.length === 0) return report;
+
+    const byId = new Map<string, SaleRecord>();
+    const byReceipt = new Map<string, SaleRecord>();
+    for (const s of usable) {
+      if (s.id && !byId.has(s.id)) byId.set(s.id, s);
+      const key = String(s.receiptNo || '').trim().toLowerCase();
+      if (key && !byReceipt.has(key)) byReceipt.set(key, s);
+    }
+
+    for (const target of missing) {
+      const key = String(target.receiptNo || '').trim().toLowerCase();
+      const source = byId.get(target.id) || (key ? byReceipt.get(key) : undefined);
+      if (!source) continue;
+      // Reuse the same row builder as the live writer, but key the rows to the
+      // live receipt id so they attach to the header that already exists.
+      const rows = saleItemRows([{ ...source, id: target.id } as SaleRecord]);
+      if (rows.length === 0) continue;
+      try {
+        const inserted = await dbInsertSaleItemsIfMissing(rows);
+        if (inserted > 0) {
+          report.restoredReceipts++;
+          report.restoredRows += inserted;
+          const idx = cacheSales.findIndex((s) => s.id === target.id);
+          if (idx >= 0) {
+            cacheSales[idx] = { ...cacheSales[idx], items: source.items };
+          }
+        }
+      } catch (e) {
+        console.warn(`Sale-item repair skipped for receipt ${target.receiptNo}`, e);
+      }
+    }
+
+    if (report.restoredRows > 0) {
+      resetPersistedSignatures();
+      try {
+        saveAutosaveSnapshot(true);
+      } catch {}
+    }
+  } catch (e) {
+    console.error('Sale-item repair failed', e);
+  }
+  return report;
 }
 
 let autosaveHooksRegistered = false;
@@ -1353,6 +1527,35 @@ export async function initStorage(): Promise<void> {
       console.error('Startup vault sync failed', e);
     }
 
+    // v2.0.7: prove whether any receipt is missing its item lines and, when an
+    // older backup copy still has them, restore them additively. Read-only
+    // unless a matching copy with items is found; never deletes or updates.
+    try {
+      const counts = await dbSaleIntegrityCounts();
+      if (counts.headerOnly > 0 || counts.orphanItems > 0) {
+        console.warn(
+          `Sales integrity: ${counts.sales} receipts, ${counts.headerOnly} without item lines, ` +
+          `${counts.orphanItems} orphan item rows.`
+        );
+      } else {
+        debugLog(`Sales integrity OK: ${counts.sales} receipts, every receipt has its item lines.`);
+      }
+      const repair = await repairMissingSaleItems();
+      if (repair.restoredReceipts > 0) {
+        recoveryNotice =
+          `Restored item details for ${repair.restoredReceipts} past receipt(s) ` +
+          `(${repair.restoredRows} line(s)) from a backup copy.`;
+        console.info(recoveryNotice);
+      } else if (repair.headerOnly > 0) {
+        console.warn(
+          `Sales repair: ${repair.headerOnly} receipt(s) are missing item lines and no backup copy contained them. ` +
+          `${repair.sourceSales} sale record(s) were searchable.`
+        );
+      }
+    } catch (e) {
+      console.error('Sales integrity check failed', e);
+    }
+
     registerAutosaveHooks();
   } else {
     // Browser: snapshot file first, legacy per-table keys as fallback.
@@ -1551,6 +1754,27 @@ export const clearDemoLedgerData = async (): Promise<void> => {
 
 export const loadSales = (): SaleRecord[] => cacheSales;
 
+/**
+ * v2.0.7: collision-free receipt numbers.
+ *
+ * The old generator used a random 100–999 suffix, so `receipt_no` (UNIQUE in
+ * SQLite) collided with existing receipts. A collision aborted the sales write
+ * after the headers had already committed, silently stripping the item lines.
+ * Numbering is now a per-day sequence: RCT-YYYYMMDD-001, -002, …
+ */
+export function nextReceiptNo(): string {
+  const day = todayLocal().replace(/-/g, '');
+  const prefix = `RCT-${day}-`;
+  let highest = 0;
+  for (const sale of cacheSales) {
+    const value = String(sale?.receiptNo || '');
+    if (!value.startsWith(prefix)) continue;
+    const n = parseInt(value.slice(prefix.length).split('~')[0], 10);
+    if (Number.isFinite(n) && n > highest) highest = n;
+  }
+  return `${prefix}${String(highest + 1).padStart(3, '0')}`;
+}
+
 // NOTE (v1.4.8 architecture): every save below writes caches + the SINGLE
 // localStorage snapshot file and marks the vault dirty. SQLite is written
 // ONLY by persistAllToDatabase() at session boundaries (logout, close,
@@ -1659,7 +1883,18 @@ export const applySalesImport = async (newSales: SaleRecord[]): Promise<void> =>
     await enqueueWrite(async () => {
       failed = false;
       try {
-        await dbUpsertSales(newSales);
+        const result = await dbUpsertSales(newSales);
+        // Keep the imported list in step with any collision renumbering.
+        for (const written of result.renumbered) {
+          const idx = newSales.findIndex((s) => s.id === written.id);
+          if (idx >= 0) newSales[idx] = { ...newSales[idx], receiptNo: written.receiptNo };
+        }
+        // Imports are all-or-nothing: if any receipt could not be written,
+        // undo the ones that did so the dataset is never half-applied.
+        if (result.failed.length > 0) {
+          failed = true;
+          throw new Error(`${result.failed.length} receipt(s) could not be imported`);
+        }
       } catch (e) {
         failed = true;
         try {

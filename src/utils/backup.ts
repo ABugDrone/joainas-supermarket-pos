@@ -10,7 +10,7 @@ import { Category, Product, SaleRecord } from '../types';
  * floor below its ceiling) is preserved because it was deliberate.
  */
 
-export const CURRENT_APP_VERSION = '2.0.6';
+export const CURRENT_APP_VERSION = '2.0.7';
 
 export interface BackupPayload {
   version?: string;

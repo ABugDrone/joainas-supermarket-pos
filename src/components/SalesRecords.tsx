@@ -27,7 +27,7 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
   const { showToast } = useToast();
   const { symbol: curSym } = useCurrency();
 
-  const [filterMode, setFilterMode] = React.useState<'today' | 'date' | 'range' | 'all'>('today');
+  const [filterMode, setFilterMode] = React.useState<'today' | 'date' | 'range' | 'all'>('all');
   const [singleDate, setSingleDate] = React.useState<string>(todayLocal());
   const [fromDate, setFromDate] = React.useState<string>(todayLocal());
   const [toDate, setToDate] = React.useState<string>(todayLocal());

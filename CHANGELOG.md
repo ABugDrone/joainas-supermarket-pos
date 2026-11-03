@@ -1,5 +1,23 @@
 # Joainas Mart POS System - Changelog
 
+## Version 2.0.7 — Sale-item durability (2026-11-04)
+
+### 🧾 Past sales keep their item lines
+- Fixed the defect that could save a receipt's header and total but silently drop its **product, quantity, rate and unit** lines. Items are now written with a defensive mapper that can never abort the write, and every receipt is retried on its own so one bad record cannot block the rest.
+- Sales-write failures are no longer silent: they raise the existing storage warning and write a **"Receipt Save Failed"** audit entry.
+- Failed receipts are quarantined for the session (retried on the next launch) instead of poisoning every later receipt.
+
+### 🔢 Receipt numbers
+- Receipt numbers are now a per-day sequence (`RCT-YYYYMMDD-001`, `-002`, …) instead of a random 3-digit suffix. The old scheme collided with the `UNIQUE` receipt number and aborted the item write.
+- If a stored number is somehow already taken, the receipt is renumbered (`~2`, `~3`, …) rather than losing the sale. Numbers are for human reference only; totals, items and dates are unchanged.
+
+### 📋 Sales Records
+- **Past Sales now opens on “All”** instead of “Today”, so yesterday's receipts no longer appear to vanish each morning.
+
+### 🛠️ Recovery
+- Startup now logs a read-only integrity count (receipts, receipts without item lines, orphan item rows).
+- When an older backup copy still contains a damaged receipt's items, they are restored with an **additive, idempotent** insert. Existing item rows are never updated or deleted, and nothing outside `sale_items` is touched.
+
 ## Version 2.0.6 — Joainas Mart (custom build)
 
 ### 🏪 Rebrand — Joainas Mart

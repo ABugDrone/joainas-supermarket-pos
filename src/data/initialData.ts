@@ -294,7 +294,7 @@ export const DEVELOPER_INFO: StoreDeveloperInfo = {
   company: 'Dronebug Technologies & Services',
   email: 'dronebugtechnologies@gmail.com',
   phone: '+2347035716349',
-  appVersion: 'v2.0.6 Joainas Mart (React + Vite + Tauri Engine)',
+  appVersion: 'v2.0.7 Joainas Mart (React + Vite + Tauri Engine)',
 };
 
 export const INITIAL_SALES: SaleRecord[] = [
