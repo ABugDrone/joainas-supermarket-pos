@@ -272,17 +272,17 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 ];
 
 export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
-  storeName: 'Joainas Mart',
+  storeName: 'Kingzzy Akamelu Resources',
   tagline: 'Inventory Management System',
-  // Left blank on purpose: the owner must enter the real shop address in
-  // Hardware Config. (The old brand shipped a placeholder name as the address.)
-  address: '',
-  phone: '',
-  receiptHeaderNote: 'WELCOME TO Joainas Mart',
+  // Shop address and phone numbers supplied by the owner. Editable in
+  // Hardware Config -> Receipt Printer.
+  address: 'New Motor Park Road, Opposite NNPC filing station, Jimeta Car wash, Jimeta Yola.',
+  phone: '07043344706 / 07039809970',
+  receiptHeaderNote: 'WELCOME TO Kingzzy Akamelu Resources',
   receiptFooterNote: 'Thank you for your patronage! Please come again.',
   showLogo: true,
   logoDataUrl: undefined,
-  businessName: 'Joainas Mart',
+  businessName: 'Kingzzy Akamelu Resources',
   paperWidth: '80mm',
   autoPrintOnSale: true,
   pointRate: 0,
@@ -294,7 +294,7 @@ export const DEVELOPER_INFO: StoreDeveloperInfo = {
   company: 'Dronebug Technologies & Services',
   email: 'dronebugtechnologies@gmail.com',
   phone: '+2347035716349',
-  appVersion: 'v2.0.7 Joainas Mart (React + Vite + Tauri Engine)',
+  appVersion: 'v2.0.7 Kingzzy Akamelu Resources (React + Vite + Tauri Engine)',
 };
 
 export const INITIAL_SALES: SaleRecord[] = [

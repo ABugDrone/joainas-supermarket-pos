@@ -1,5 +1,5 @@
 -- ====================================================================
--- JOAINAS SUPERMARKET & COLDSTORE - DESKTOP TAURI (GO + SQLITE) SCHEMA
+-- KINGZZY AKAMELU RESOURCES - DESKTOP TAURI (GO + SQLITE) SCHEMA
 -- Database Engine: SQLite 3 (WAL Mode Enabled at runtime by the app)
 -- Full Admin Control: All tables support complete CRUD (Create, Read, Update, Delete)
 -- ====================================================================

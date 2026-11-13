@@ -1,8 +1,8 @@
-# Joainas Mart — ADMIN Password Recovery Guide (v2.0.6)
+# Kingzzy Akamelu Resources — ADMIN Password Recovery Guide (v2.0.7)
 
 This guide covers the **ADMIN** account only. Staff passwords can be reset by an ADMIN in **Admin → Staff** without this flow.
 
-## What changed in 2.0.6
+## What changed in 2.0.7
 
 - New installs set **one** private security question, not five. The recovery modal now accepts a 1-question vault.
 - Changing the ADMIN password in **Admin → Staff** now syncs the encrypted recovery-vault copy, so recovery reveals the current password.
@@ -89,4 +89,4 @@ localStorage.getItem('senior_citizen_accessories_admin_recovery_v1')
 
 ## Build and version
 
-This flow ships in **v2.0.6**. After upgrading an older install, sign in as ADMIN and open **Admin → Security & Recovery** to create or refresh the vault. Until then, the login screen shows **No recovery vault found** after 5 failures and offers the developer path.
+This flow ships in **v2.0.7**. After upgrading an older install, sign in as ADMIN and open **Admin → Security & Recovery** to create or refresh the vault. Until then, the login screen shows **No recovery vault found** after 5 failures and offers the developer path.

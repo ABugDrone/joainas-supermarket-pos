@@ -295,7 +295,7 @@ export function toPdfBytes(table: DataTable, subtitle?: string): Uint8Array {
   const pageWidth = doc.internal.pageSize.getWidth();
 
   doc.setFontSize(14);
-  doc.text(`Joainas Mart — ${table.title}`, 40, 40);
+  doc.text(`Kingzzy Akamelu Resources — ${table.title}`, 40, 40);
   doc.setFontSize(9);
   doc.setTextColor(90);
   doc.text(
@@ -331,7 +331,7 @@ export function toPdfBytes(table: DataTable, subtitle?: string): Uint8Array {
 export function exportFileName(id: DatasetId, format: ExportFormat): string {
   const date = new Date().toISOString().split('T')[0];
   const slug = id === 'products' ? 'inventory' : id === 'sales' ? 'sales_records' : id;
-  return `joainas_${slug}_${date}.${format}`;
+  return `kingzzy_${slug}_${date}.${format}`;
 }
 
 export function buildExportBytes(

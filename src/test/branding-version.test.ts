@@ -4,15 +4,15 @@ import { DEVELOPER_INFO, INITIAL_PRINTER_CONFIG } from '../data/initialData';
 import { MANDATORY_RECEIPT_FOOTER } from '../types';
 import { APP_THEMES } from '../utils/theme';
 
-describe('Joainas Mart branding and version', () => {
+describe('Kingzzy Akamelu Resources branding and version', () => {
   test('release is 2.0.7 everywhere', () => {
     expect(EDITION.version).toBe('2.0.7');
     expect(DEVELOPER_INFO.appVersion).toContain('2.0.7');
   });
 
-  test('defaults use the Joainas Mart name, not DIRMS StoreBox PRO', () => {
-    expect(INITIAL_PRINTER_CONFIG.storeName).toBe('Joainas Mart');
-    expect(INITIAL_PRINTER_CONFIG.businessName).toBe('Joainas Mart');
+  test('defaults use the Kingzzy Akamelu Resources name, not DIRMS StoreBox PRO', () => {
+    expect(INITIAL_PRINTER_CONFIG.storeName).toBe('Kingzzy Akamelu Resources');
+    expect(INITIAL_PRINTER_CONFIG.businessName).toBe('Kingzzy Akamelu Resources');
     expect(JSON.stringify(INITIAL_PRINTER_CONFIG)).not.toMatch(/DIRMS StoreBox PRO/i);
   });
 

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the Joainas Mart main window",
+  "description": "Capabilities for the Kingzzy Akamelu Resources main window",
   "windows": ["main"],
   "permissions": [
     "core:default",

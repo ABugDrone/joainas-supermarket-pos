@@ -1,14 +1,14 @@
-// Joainas Mart v2.0.7 — full build, all features unlocked.
+// Kingzzy Akamelu Resources v2.0.7 — full build, all features unlocked.
 // Carries all v1.5.x trusted-clock hardening plus v1.6.0 currency selection,
 // plus installment ledger, service units and logo receipts.
 
 export const EDITION = {
-  appName: 'Joainas Mart Inventory Management System',
-  shortName: 'Joainas Mart',
+  appName: 'Kingzzy Akamelu Resources Inventory Management System',
+  shortName: 'Kingzzy Akamelu Resources',
   version: '2.0.7',
   editionLabel: 'Professional',
   isOpenSource: false,
-  // Default theme — STOREBOX WHITE for the Joainas Mart build.
+  // Default theme — STOREBOX WHITE for the Kingzzy Akamelu Resources build.
   defaultThemeId: 'storebox-white' as const,
   // Legacy premium price, kept for reference (no upsell in this build).
   premiumPrice: '₦250,000',

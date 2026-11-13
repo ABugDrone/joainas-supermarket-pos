@@ -452,7 +452,7 @@ function buildAutosaveSnapshot(slim: boolean): AutosaveSnapshot {
     printerConfig: cachePrinterConfig,
     timestamp: Date.now(),
     version: 1,
-    appName: 'Joainas Mart',
+    appName: 'Kingzzy Akamelu Resources',
     appVersion: '2.0.7',
   };
 }
