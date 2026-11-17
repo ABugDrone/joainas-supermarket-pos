@@ -314,6 +314,25 @@ export const applyThemeToDocument = (themeId: ThemeId) => {
     root.style.setProperty(key, val);
   });
 
+  // The legacy WebView2 compatibility stylesheet (Chromium <= 110) has no
+  // color-mix(), so a few tinted accent utilities need plain RGB triplets.
+  const cssVars = themeObj.cssVars as Record<string, string>;
+  const rgbTriplet = (hex: string): string => {
+    const match = /^#([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!match) return '0, 0, 0';
+    const n = Number.parseInt(match[1], 16);
+    return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+  };
+  Object.entries({
+    '--accent-color': '--accent-color-rgb',
+    '--accent-orange': '--accent-orange-rgb',
+    '--info': '--info-rgb',
+    '--warning': '--warning-rgb',
+  }).forEach(([key, rgbKey]) => {
+    const hex = cssVars[key];
+    if (hex) root.style.setProperty(rgbKey, rgbTriplet(hex));
+  });
+
   // Toggle dark/light class on html element
   if (themeObj.category === 'light') {
     root.classList.add('light-theme');

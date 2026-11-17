@@ -1,0 +1,237 @@
+/* ============================================================
+   Legacy WebView2 / Chromium <= 110 compatibility layer
+
+   Tailwind CSS v4 requires Chromium 111+. WebView2 100.x is Chromium 100,
+   which drops oklch(), color-mix() and `in oklab` gradient interpolation.
+   Every declaration below is an equivalent sRGB value that Chromium 100
+   understands. Values match Tailwind's output, so this is safe on modern
+   engines too. Loaded LAST, after index.css.
+
+   Generated from the built stylesheet. Re-run after upgrading Tailwind.
+   ============================================================ */
+
+:root {
+  --color-amber-100: #fef3c6;
+  --color-amber-200: #fee685;
+  --color-amber-300: #ffd230;
+  --color-amber-400: #ffb900;
+  --color-amber-50: #fffbeb;
+  --color-amber-500: #fe9a00;
+  --color-amber-600: #e17100;
+  --color-amber-700: #bb4d00;
+  --color-amber-800: #973c00;
+  --color-amber-900: #7b3306;
+  --color-amber-950: #461901;
+  --color-blue-300: #8ec5ff;
+  --color-blue-600: #155dfc;
+  --color-blue-800: #193cb8;
+  --color-blue-950: #162456;
+  --color-cyan-100: #cefafe;
+  --color-cyan-200: #a2f4fd;
+  --color-cyan-300: #53eafd;
+  --color-cyan-400: #00d3f2;
+  --color-cyan-500: #00b8db;
+  --color-cyan-600: #0092b8;
+  --color-cyan-700: #007595;
+  --color-cyan-800: #005f78;
+  --color-cyan-900: #104e64;
+  --color-cyan-950: #053345;
+  --color-emerald-200: #a4f4cf;
+  --color-emerald-300: #5ee9b5;
+  --color-emerald-400: #00d492;
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-500: #00bc7d;
+  --color-emerald-600: #009966;
+  --color-emerald-700: #007a55;
+  --color-emerald-800: #006045;
+  --color-emerald-900: #004f3b;
+  --color-emerald-950: #002c22;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5dc;
+  --color-gray-400: #99a1af;
+  --color-gray-50: #f9fafb;
+  --color-gray-500: #6a7282;
+  --color-gray-600: #4a5565;
+  --color-gray-700: #364153;
+  --color-gray-800: #1e2939;
+  --color-gray-900: #101828;
+  --color-indigo-300: #a3b3ff;
+  --color-indigo-400: #7c86ff;
+  --color-indigo-500: #615fff;
+  --color-indigo-600: #4f39f6;
+  --color-indigo-800: #372aac;
+  --color-indigo-900: #312c85;
+  --color-indigo-950: #1e1a4d;
+  --color-orange-400: #ff8904;
+  --color-orange-600: #f54900;
+  --color-orange-700: #ca3500;
+  --color-orange-800: #9f2d00;
+  --color-orange-950: #441306;
+  --color-purple-200: #e9d4ff;
+  --color-purple-300: #dab2ff;
+  --color-purple-400: #c27aff;
+  --color-purple-500: #ad46ff;
+  --color-purple-600: #9810fa;
+  --color-purple-700: #8200db;
+  --color-purple-800: #6e11b0;
+  --color-purple-900: #59168b;
+  --color-purple-950: #3c0366;
+  --color-red-100: #ffe2e2;
+  --color-red-200: #ffc9c9;
+  --color-red-300: #ffa2a2;
+  --color-red-400: #ff6467;
+  --color-red-500: #fb2c36;
+  --color-red-600: #e7000b;
+  --color-red-700: #c10007;
+  --color-red-800: #9f0712;
+  --color-red-900: #82181a;
+  --color-red-950: #460809;
+  --color-rose-400: #ff637e;
+  --color-rose-500: #ff2056;
+  --color-rose-600: #ec003f;
+  --color-rose-800: #a50036;
+  --color-rose-950: #4d0218;
+  --color-sky-300: #74d4ff;
+  --color-sky-400: #00bcff;
+  --color-sky-500: #00a6f4;
+  --color-sky-600: #0084d1;
+  --color-sky-800: #00598a;
+  --color-sky-950: #052f4a;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cad5e2;
+  --color-slate-400: #90a1b9;
+  --color-slate-50: #f8fafc;
+  --color-slate-500: #62748e;
+  --color-slate-600: #45556c;
+  --color-slate-700: #314158;
+  --color-slate-800: #1d293d;
+  --color-teal-600: #009689;
+  --color-violet-600: #7f22fe;
+}
+
+/* Gradient interpolation without `in oklab`. */
+.bg-gradient-to-r { --tw-gradient-position: to right; }
+.bg-gradient-to-br { --tw-gradient-position: to bottom right; }
+
+/* Static stand-ins for color-mix() opacity utilities. */
+.bg-\[var\(--accent-color\)\]\/10 { background-color: rgba(var(--accent-color-rgb), 0.1); }
+.bg-\[var\(--accent-color\)\]\/5 { background-color: rgba(var(--accent-color-rgb), 0.05); }
+.bg-amber-500\/10 { background-color: #fe9a001a; }
+.bg-amber-500\/15 { background-color: #fe9a0026; }
+.bg-amber-500\/20 { background-color: #fe9a0033; }
+.bg-amber-950\/30 { background-color: #4619014c; }
+.bg-amber-950\/40 { background-color: #46190166; }
+.bg-amber-950\/90 { background-color: #461901e6; }
+.bg-amber-950\/95 { background-color: #461901f2; }
+.bg-cyan-500\/10 { background-color: #00b8db1a; }
+.bg-cyan-500\/20 { background-color: #00b8db33; }
+.bg-cyan-600\/20 { background-color: #0092b833; }
+.bg-cyan-900\/40 { background-color: #104e6466; }
+.bg-cyan-900\/60 { background-color: #104e6499; }
+.bg-cyan-950\/40 { background-color: #05334566; }
+.bg-cyan-950\/60 { background-color: #05334599; }
+.bg-emerald-500\/10 { background-color: #00bc7d1a; }
+.bg-emerald-900\/40 { background-color: #004f3b66; }
+.bg-emerald-950\/40 { background-color: #002c2266; }
+.bg-emerald-950\/50 { background-color: #002c2280; }
+.bg-emerald-950\/60 { background-color: #002c2299; }
+.bg-indigo-950\/40 { background-color: #1e1a4d66; }
+.bg-indigo-950\/60 { background-color: #1e1a4d99; }
+.bg-orange-950\/60 { background-color: #44130699; }
+.bg-purple-600\/20 { background-color: #9810fa33; }
+.bg-purple-900\/60 { background-color: #59168b99; }
+.bg-red-900\/40 { background-color: #82181a66; }
+.bg-red-900\/60 { background-color: #82181a99; }
+.bg-red-900\/80 { background-color: #82181acc; }
+.bg-red-950\/40 { background-color: #46080966; }
+.bg-red-950\/60 { background-color: #46080999; }
+.bg-red-950\/90 { background-color: #460809e6; }
+.bg-rose-950\/60 { background-color: #4d021899; }
+.border-\[var\(--accent-color\)\]\/30 { border-color: rgba(var(--accent-color-rgb), 0.3); }
+.border-\[var\(--info\)\]\/20 { border-color: rgba(var(--info-rgb), 0.2); }
+.border-\[var\(--warning\)\]\/40 { border-color: rgba(var(--warning-rgb), 0.4); }
+.border-amber-500\/30 { border-color: #fe9a004c; }
+.border-amber-500\/40 { border-color: #fe9a0066; }
+.border-amber-500\/50 { border-color: #fe9a0080; }
+.border-amber-500\/60 { border-color: #fe9a0099; }
+.border-amber-700\/50 { border-color: #bb4d0080; }
+.border-amber-800\/20 { border-color: #973c0033; }
+.border-amber-800\/30 { border-color: #973c004c; }
+.border-amber-800\/50 { border-color: #973c0080; }
+.border-amber-800\/60 { border-color: #973c0099; }
+.border-cyan-400\/30 { border-color: #00d3f24c; }
+.border-cyan-400\/40 { border-color: #00d3f266; }
+.border-cyan-400\/50 { border-color: #00d3f280; }
+.border-cyan-500\/30 { border-color: #00b8db4c; }
+.border-cyan-800\/40 { border-color: #005f7866; }
+.border-cyan-800\/50 { border-color: #005f7880; }
+.border-cyan-800\/60 { border-color: #005f7899; }
+.border-emerald-400\/30 { border-color: #00d4924c; }
+.border-emerald-400\/40 { border-color: #00d49266; }
+.border-emerald-500\/30 { border-color: #00bc7d4c; }
+.border-emerald-500\/40 { border-color: #00bc7d66; }
+.border-emerald-700\/50 { border-color: #007a5580; }
+.border-emerald-800\/30 { border-color: #0060454c; }
+.border-emerald-800\/40 { border-color: #00604566; }
+.border-emerald-800\/50 { border-color: #00604580; }
+.border-emerald-800\/60 { border-color: #00604599; }
+.border-indigo-800\/40 { border-color: #372aac66; }
+.border-indigo-800\/60 { border-color: #372aac99; }
+.border-orange-800\/40 { border-color: #9f2d0066; }
+.border-red-500\/30 { border-color: #fb2c364c; }
+.border-red-500\/40 { border-color: #fb2c3666; }
+.border-red-500\/50 { border-color: #fb2c3680; }
+.border-red-500\/60 { border-color: #fb2c3699; }
+.border-red-500\/70 { border-color: #fb2c36b2; }
+.border-red-800\/40 { border-color: #9f071266; }
+.border-red-800\/50 { border-color: #9f071280; }
+.border-red-800\/60 { border-color: #9f071299; }
+.border-red-900\/40 { border-color: #82181a66; }
+.border-red-900\/60 { border-color: #82181a99; }
+.border-rose-800\/60 { border-color: #a5003699; }
+.from-\[var\(--accent-color\)\]\/5 { --tw-gradient-from: rgba(var(--accent-color-rgb), 0.05); }
+.from-amber-500\/25 { --tw-gradient-from: #fe9a0040; }
+.hover\:bg-\[var\(--accent-color\)\]\/5:hover { background-color: rgba(var(--accent-color-rgb), 0.05); }
+.hover\:bg-amber-900\/60:hover { background-color: #7b330699; }
+.hover\:bg-cyan-800\/50:hover { background-color: #005f7880; }
+.hover\:bg-cyan-900\/40:hover { background-color: #104e6466; }
+.hover\:bg-cyan-900\/60:hover { background-color: #104e6499; }
+.hover\:bg-cyan-900\/70:hover { background-color: #104e64b2; }
+.hover\:bg-cyan-950\/50:hover { background-color: #05334580; }
+.hover\:bg-emerald-800\/50:hover { background-color: #00604580; }
+.hover\:bg-emerald-900\/50:hover { background-color: #004f3b80; }
+.hover\:bg-emerald-900\/60:hover { background-color: #004f3b99; }
+.hover\:bg-emerald-950\/50:hover { background-color: #002c2280; }
+.hover\:bg-indigo-900\/60:hover { background-color: #312c8599; }
+.hover\:bg-red-500\/10:hover { background-color: #fb2c361a; }
+.hover\:bg-red-900\/60:hover { background-color: #82181a99; }
+.hover\:bg-red-950\/50:hover { background-color: #46080980; }
+.hover\:bg-rose-500\/10:hover { background-color: #ff20561a; }
+.hover\:bg-rose-950\/60:hover { background-color: #4d021899; }
+.hover\:bg-slate-800\/40:hover { background-color: #1d293d66; }
+.placeholder\:text-red-300\/50::placeholder { color: #ffa2a280; }
+.ring-\[var\(--accent-color\)\]\/30 { --tw-ring-color: rgba(var(--accent-color-rgb), 0.3); }
+.ring-emerald-500\/30 { --tw-ring-color: #00bc7d4c; }
+.shadow-amber-950\/40 { --tw-shadow-color: #46190166; }
+.shadow-blue-950\/40 { --tw-shadow-color: #16245666; }
+.shadow-cyan-900\/30 { --tw-shadow-color: #104e644c; }
+.shadow-emerald-950\/60 { --tw-shadow-color: #002c2299; }
+.shadow-purple-950\/50 { --tw-shadow-color: #3c036680; }
+.text-amber-100\/85 { color: #fef3c6d9; }
+.text-amber-100\/95 { color: #fef3c6f2; }
+.text-amber-200\/70 { color: #fee685b2; }
+.text-amber-200\/75 { color: #fee685bf; }
+.text-amber-200\/80 { color: #fee685cc; }
+.text-amber-200\/90 { color: #fee685e6; }
+.text-amber-300\/90 { color: #ffd230e6; }
+.text-amber-400\/90 { color: #ffb900e6; }
+.text-red-100\/90 { color: #ffe2e2e6; }
+.text-red-200\/70 { color: #ffc9c9b2; }
+.text-red-200\/80 { color: #ffc9c9cc; }
+.text-red-200\/85 { color: #ffc9c9d9; }
+.text-red-200\/90 { color: #ffc9c9e6; }
+.text-red-300\/90 { color: #ffa2a2e6; }
+.to-\[var\(--accent-orange\)\]\/5 { --tw-gradient-to: rgba(var(--accent-orange-rgb), 0.05); }
+.to-amber-700\/10 { --tw-gradient-to: #bb4d001a; }
+::placeholder { color: rgba(128, 128, 128, 0.5); }

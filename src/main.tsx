@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import './index.css';
+// Must stay AFTER index.css: overrides Tailwind v4's oklch()/color-mix()
+// output with sRGB values that WebView2 100.x (Chromium 100) can render.
+import './legacy-webview2.css';
 import { initStorage, registerCloseFlush } from './utils/storage.ts';
 import {
   getSavedTheme,
