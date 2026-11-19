@@ -5,15 +5,16 @@ import { MANDATORY_RECEIPT_FOOTER } from '../types';
 import { APP_THEMES } from '../utils/theme';
 
 describe('Kingzzy Akamelu Resources branding and version', () => {
-  test('release is 2.0.7 everywhere', () => {
-    expect(EDITION.version).toBe('2.0.7');
-    expect(DEVELOPER_INFO.appVersion).toContain('2.0.7');
+  test('release is 2.0.8 everywhere', () => {
+    expect(EDITION.version).toBe('2.0.8');
+    expect(DEVELOPER_INFO.appVersion).toContain('2.0.8');
   });
 
-  test('defaults use the Kingzzy Akamelu Resources name, not DIRMS StoreBox PRO', () => {
-    expect(INITIAL_PRINTER_CONFIG.storeName).toBe('Kingzzy Akamelu Resources');
-    expect(INITIAL_PRINTER_CONFIG.businessName).toBe('Kingzzy Akamelu Resources');
-    expect(JSON.stringify(INITIAL_PRINTER_CONFIG)).not.toMatch(/DIRMS StoreBox PRO/i);
+  test('printer config defaults are empty (user-configured only)', () => {
+    expect(INITIAL_PRINTER_CONFIG.storeName).toBe('');
+    expect(INITIAL_PRINTER_CONFIG.businessName).toBe('');
+    expect(INITIAL_PRINTER_CONFIG.address).toBe('');
+    expect(INITIAL_PRINTER_CONFIG.phone).toBe('');
   });
 
   test('STOREBOX WHITE is the 7th theme, light, and the default', () => {

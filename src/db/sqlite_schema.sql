@@ -51,12 +51,19 @@ CREATE TABLE IF NOT EXISTS products (
     barcode TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     category_name TEXT NOT NULL,
-    unit TEXT CHECK(unit IN ('kg', 'pack', 'carton', 'bottle', 'piece', 'bag')) NOT NULL DEFAULT 'piece',
+    unit TEXT NOT NULL DEFAULT 'piece',
     cost_price REAL NOT NULL DEFAULT 0.0,
     retail_price REAL NOT NULL DEFAULT 0.0,
     wholesale_price REAL NOT NULL DEFAULT 0.0,
     stock_qty INTEGER NOT NULL DEFAULT 0,
     reorder_level INTEGER NOT NULL DEFAULT 5,
+    pieces_per_carton INTEGER NOT NULL DEFAULT 0, -- v2.0.8: 0 = not a carton product
+    loose_pieces INTEGER NOT NULL DEFAULT 0,      -- v2.0.8: remainder pieces
+    -- v2.0.8 dual-ladder pricing: one whole carton vs one loose piece
+    piece_cost_price REAL NOT NULL DEFAULT 0.0,
+    piece_min_price REAL,
+    piece_retail_price REAL NOT NULL DEFAULT 0.0,
+    piece_price_tiers TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -80,11 +87,33 @@ CREATE TABLE IF NOT EXISTS customers (
     points INTEGER NOT NULL DEFAULT 0,
     advance_payment REAL NOT NULL DEFAULT 0.0,
     assigned_cashier TEXT,
+    settlement_date TEXT, -- v2.0.8 optional debt settlement date
+    is_general INTEGER NOT NULL DEFAULT 0, -- v2.0.8 GENERAL CUSTOMER
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name);
+
+-- v2.0.8 debt notebook: green - payments / red + charges
+CREATE TABLE IF NOT EXISTS debt_entries (
+    id TEXT PRIMARY KEY NOT NULL,
+    customer_id TEXT NOT NULL,
+    kind TEXT CHECK(kind IN ('charge', 'payment')) NOT NULL,
+    amount REAL NOT NULL DEFAULT 0.0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    note TEXT,
+    receipt_no TEXT,
+    entry_date TEXT NOT NULL,
+    entry_time TEXT NOT NULL,
+    entry_timestamp INTEGER NOT NULL,
+    settlement_date TEXT,
+    settled INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_debt_entries_customer ON debt_entries(customer_id);
+CREATE INDEX IF NOT EXISTS idx_debt_entries_settlement ON debt_entries(settlement_date);
 
 -- --------------------------------------------------------------------
 -- 5. SALES TRANSACTION HEADERS TABLE
@@ -106,6 +135,8 @@ CREATE TABLE IF NOT EXISTS sales (
     cashier_username TEXT NOT NULL,
     sale_date TEXT NOT NULL, -- YYYY-MM-DD
     sale_time TEXT NOT NULL, -- HH:mm:ss
+    cash_discount REAL NOT NULL DEFAULT 0.0, -- v2.0.8
+    payment_mode TEXT NOT NULL DEFAULT 'full', -- v2.0.8 full | credit
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
 );
@@ -127,6 +158,13 @@ CREATE TABLE IF NOT EXISTS sale_items (
     price_type TEXT CHECK(price_type IN ('retail', 'wholesale')) NOT NULL,
     rate REAL NOT NULL,
     amount REAL NOT NULL,
+    carton_qty INTEGER NOT NULL DEFAULT 0,
+    piece_qty INTEGER NOT NULL DEFAULT 0,
+    pieces_per_carton INTEGER NOT NULL DEFAULT 0,
+    sale_unit_label TEXT,
+    carton_rate REAL NOT NULL DEFAULT 0.0, -- v2.0.8 dual ladder
+    piece_rate REAL NOT NULL DEFAULT 0.0,  -- v2.0.8 dual ladder
+    sale_mode TEXT,                        -- carton | piece | both
     FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
 );

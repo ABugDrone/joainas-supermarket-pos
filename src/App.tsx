@@ -8,13 +8,16 @@ import {
   User,
   UserRole,
   Category,
-  isUncountedKind,
+  DebtEntry,
 } from './types';
+import { deductSoldStock } from './utils/stock';
 import {
   loadProducts,
   saveProducts,
   loadCustomers,
   saveCustomers,
+  loadDebtEntries,
+  saveDebtEntries,
   loadSales,
   saveSales,
   recordSaleWithStockUpdate,
@@ -64,6 +67,7 @@ import { ThermalReceiptModal } from './components/ThermalReceiptModal';
 import { LoginModal } from './components/LoginModal';
 import { DeveloperModal } from './components/DeveloperModal';
 import { LicenseAgreement } from './components/LicenseAgreement';
+import { LicenseGate } from './components/LicenseGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ClockTamperGateModal } from './components/ClockTamperGateModal';
 import { can, isAdmin } from './utils/permissions';
@@ -78,7 +82,7 @@ import {
   type ClockOverrideSession,
 } from './utils/clockOverride';
 import { useClockGate } from './hooks/useClockGate';
-import { EDITION } from './config/edition';
+import { EDITION, requiresLicenseActivation } from './config/edition';
 import { PremiumLock } from './components/PremiumLock';
 import {
   startClockMonitor,
@@ -95,8 +99,8 @@ import {
 // used when no session exists yet.
 const OPEN_SOURCE_USER: User = {
   id: 'amor-ims-local-user',
-  fullName: 'Kingzzy Akamelu Resources User',
-  username: 'Kingzzy Akamelu Resources',
+  fullName: 'Administrator',
+  username: 'admin',
   password: '',
   role: 'System Admin',
   capabilities: ['sell', 'inventory', 'view_sales', 'customers', 'expenses', 'view_reports', 'printer_settings', 'admin'],
@@ -116,6 +120,7 @@ function MainAppContent() {
 
   const [products, setProducts] = useState<Product[]>(() => loadProducts());
   const [customers, setCustomers] = useState<Customer[]>(() => loadCustomers());
+  const [debtEntries, setDebtEntries] = useState<DebtEntry[]>(() => loadDebtEntries());
   const [sales, setSales] = useState<SaleRecord[]>(() => loadSales());
   const [expenditures, setExpenditures] = useState<Expenditure[]>(() => loadExpenditures());
   const [printerConfig, setPrinterConfig] = useState<ThermalPrinterConfig>(() => loadPrinterConfig());
@@ -277,10 +282,7 @@ function MainAppContent() {
     // Compute updated products synchronously (services & edibles never decrement)
     const updatedProducts = products.map((prod) => {
       const soldItem = newSale.items.find((item) => item.product.id === prod.id);
-      if (soldItem) {
-        if (isUncountedKind(prod)) return prod;
-        return { ...prod, stockQty: prod.stockQty - soldItem.quantity };
-      }
+      if (soldItem) return deductSoldStock(prod, soldItem.quantity);
       return prod;
     });
 
@@ -372,6 +374,39 @@ function MainAppContent() {
     });
     setCustomers(updated);
     saveCustomers(updated);
+  };
+
+  // v2.0.8 — debt notebook: add a charge/payment line and keep the customer
+  // balance + settlement date in sync. charge (red +) increases the debt,
+  // payment (green -) decreases it (and may be a full cross-off).
+  const handleAddDebtEntry = (entry: DebtEntry) => {
+    setDebtEntries((prev) => {
+      const updated = [...prev, entry];
+      saveDebtEntries(updated);
+      return updated;
+    });
+    const isPayment = entry.kind === 'payment';
+    const updatedCustomers = customers.map((c) => {
+      if (c.id !== entry.customerId) return c;
+      return {
+        ...c,
+        balance: c.balance + (isPayment ? -entry.amount : entry.amount),
+        settlementDate: entry.settlementDate || c.settlementDate,
+      };
+    });
+    setCustomers(updatedCustomers);
+    saveCustomers(updatedCustomers);
+  };
+
+  // Mark a debt (and every charge line of that customer) settled.
+  const handleSettleCustomerDebt = (customerId: string, settled: boolean) => {
+    setDebtEntries((prev) => {
+      const updated = prev.map((e) =>
+        e.customerId === customerId && e.kind === 'charge' ? { ...e, settled } : e
+      );
+      saveDebtEntries(updated);
+      return updated;
+    });
   };
 
   // Expenditure CRUD
@@ -684,6 +719,10 @@ function MainAppContent() {
         businessName={printerConfig.businessName || printerConfig.storeName}
         todaySalesTotal={todaySalesTotal}
         products={products}
+        customers={customers}
+        debtEntries={debtEntries}
+        onSettleCustomerDebt={handleSettleCustomerDebt}
+        onNavigateCustomers={() => setActiveTab('customers')}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={handleLogout}
         onOpenDevModal={() => setIsDevModalOpen(true)}
@@ -703,6 +742,7 @@ function MainAppContent() {
           onCompleteSale={handleCompleteSale}
           onUpdateProduct={handleUpdateProduct}
           onOpenCustomerModal={() => setActiveTab('customers')}
+          onAddCustomer={handleAddCustomer}
           initialPosWorkspace={restoredWs?.pos ?? null}
           onPosWorkspaceChange={(w: PosWorkspace) => {
             posWsRef.current = w;
@@ -731,12 +771,15 @@ function MainAppContent() {
         <CustomerModule
           customers={customers}
           sales={sales}
+          debtEntries={debtEntries}
           currentUser={currentUser.username}
           currentUserRole={currentUser.role}
           currentUserCapabilities={currentUser.capabilities || []}
           onAddCustomer={handleAddCustomer}
           onUpdateCustomerBalance={handleUpdateCustomerBalance}
           onCustomersChanged={(u) => setCustomers([...u])}
+          onAddDebtEntry={handleAddDebtEntry}
+          onSettleCustomerDebt={handleSettleCustomerDebt}
         />
       )}
 
@@ -916,6 +959,13 @@ export default function App() {
   const [licenseAccepted, setLicenseAcceptedState] = useState<boolean>(() => isLicenseAccepted());
   const [licenseAction, setLicenseAction] = useState<'agree' | 'decline' | null>(null);
 
+  // License key activation gate (DIRMS Storebox PRO edition ONLY).
+  // Customized-name bundles such as Kingzzy Akamelu Resources never require
+  // a license — the gates below are all short-circuited by
+  // requiresLicenseActivation.
+  const [licenseActivated, setLicenseActivatedState] = useState<boolean>(false);
+  const [licenseCheckDone, setLicenseCheckDone] = useState(false);
+
   // Setup/login flow state lives here UNCONDITIONALLY (never below an early
   // return). v2.0.0 post-mortem: these hooks used to sit below the EULA and
   // activation gates, so flipping a gate after mount changed the hook count
@@ -949,6 +999,26 @@ export default function App() {
     window.addEventListener('storage-ready', onReady);
     return () => window.removeEventListener('storage-ready', onReady);
   }, [storageReady]);
+
+  // License key startup check: once storage is ready, check localStorage and
+  // the license.key file. If either validates, skip the LicenseGate.
+  useEffect(() => {
+    if (!requiresLicenseActivation || !storageReady || licenseCheckDone) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { checkLicenseOnStartup } = await import('./utils/license');
+        const activated = await checkLicenseOnStartup();
+        if (!cancelled) {
+          setLicenseActivatedState(activated);
+          setLicenseCheckDone(true);
+        }
+      } catch {
+        if (!cancelled) setLicenseCheckDone(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [storageReady, licenseCheckDone]);
 
   // v1.5.2 storage self-test: probe localStorage writability once at boot.
   // A non-persistent profile (temp Windows profile, cleaner software, full
@@ -1053,7 +1123,7 @@ export default function App() {
     );
   }
 
-  if (!licenseAccepted && !licenseAction) {
+  if (requiresLicenseActivation && !licenseAccepted && !licenseAction) {
     return (
       <ToastProvider>
         <LicenseAgreement onAgree={handleAgree} onDecline={handleDecline} />
@@ -1061,7 +1131,7 @@ export default function App() {
     );
   }
 
-  if (licenseAction === 'decline') {
+  if (requiresLicenseActivation && licenseAction === 'decline') {
     return (
       <ToastProvider>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
@@ -1086,6 +1156,19 @@ export default function App() {
             </button>
           </div>
         </div>
+      </ToastProvider>
+    );
+  }
+
+  // License key activation gate — shown after the EULA is accepted but
+  // before admin setup / login. Skipped if already activated (localStorage
+  // or license.key file checked during startup).
+  if (requiresLicenseActivation && licenseCheckDone && !licenseActivated) {
+    return (
+      <ToastProvider>
+        <LicenseGate
+          onActivated={() => setLicenseActivatedState(true)}
+        />
       </ToastProvider>
     );
   }

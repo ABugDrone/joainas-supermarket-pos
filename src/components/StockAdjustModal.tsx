@@ -1,6 +1,6 @@
 import React from 'react';
 import { PackagePlus, X } from 'lucide-react';
-import { Product } from '../types';
+import { Product, isPackProduct, totalPieces, formatStock } from '../types';
 import { formatMoney } from '../utils/currency';
 import { NumberInput } from './NumberInput';
 import { applyStockAddition } from '../utils/stock';
@@ -8,7 +8,7 @@ import { applyStockAddition } from '../utils/stock';
 interface StockAdjustModalProps {
   product: Product | null;
   onClose: () => void;
-  onSave: (newQty: number, added: number) => void;
+  onSave: (newQty: number, added: number, looseAdded?: number) => void;
 }
 
 /**
@@ -17,15 +17,18 @@ interface StockAdjustModalProps {
  */
 export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({ product, onClose, onSave }) => {
   const [amount, setAmount] = React.useState(1);
+  const [looseAdded, setLooseAdded] = React.useState(0);
+  const pack = isPackProduct(product || ({} as Product));
 
   React.useEffect(() => {
-    if (product) setAmount(1);
+    if (product) { setAmount(1); setLooseAdded(0); }
   }, [product?.id]);
 
   if (!product) return null;
 
   const current = Number.isFinite(product.stockQty) ? product.stockQty : 0;
   const next = applyStockAddition(current, amount);
+  const nextLoose = pack ? Math.max(0, product.loosePieces || 0) + Math.max(0, looseAdded) : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -46,15 +49,19 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({ product, onC
             <div className="text-xs text-slate-400 mt-1">
               Current stock:{' '}
               <span className={current < 0 ? 'text-red-400 font-bold' : 'text-cyan-400 font-bold'}>
-                {current}
-              </span>{' '}
-              {product.unit}
+                {pack ? formatStock(product) : `${current} ${product.unit}`}
+              </span>
+              {pack && (
+                <span className="block text-[10px] text-cyan-400 mt-0.5">
+                  {totalPieces(product)} individual pieces in stock
+                </span>
+              )}
             </div>
           </div>
 
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">
-              Quantity received
+              {pack ? `${product.unit}s received` : 'Quantity received'}
             </label>
             <NumberInput
               integer
@@ -66,11 +73,34 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({ product, onC
             />
           </div>
 
+          {pack && (
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">
+                Loose pieces received (optional)
+              </label>
+              <NumberInput
+                integer
+                min={0}
+                value={looseAdded}
+                onValueChange={setLooseAdded}
+                placeholder="e.g., 6"
+                className="w-full rounded-lg border border-[#30363d] px-3 py-2 bg-[#0d1117] text-white text-sm outline-none focus:border-cyan-500"
+              />
+            </div>
+          )}
+
           <div className="rounded-lg bg-[#0d1117] border border-[#30363d] px-3 py-2 text-xs text-slate-300">
             New stock:{' '}
             <span className="font-bold text-cyan-300">
-              {next} {product.unit}
+              {pack
+                ? `${next} ${product.unit}${nextLoose > 0 ? ` + ${nextLoose} pieces` : ''}`
+                : `${next} ${product.unit}`}
             </span>
+            {pack && (
+              <span className="block text-[10px] text-cyan-400 mt-1">
+                = {next * (product.piecesPerCarton || 0) + nextLoose} individual pieces
+              </span>
+            )}
             {current < 0 && (
               <span className="block text-[10px] text-amber-400 mt-1">
                 Negative stock resets to the quantity received.
@@ -89,7 +119,7 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({ product, onC
               Cancel
             </button>
             <button
-              onClick={() => onSave(next, amount)}
+              onClick={() => onSave(next, amount, pack ? Math.max(0, looseAdded) : 0)}
               disabled={amount <= 0}
               className="flex-1 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-bold"
             >

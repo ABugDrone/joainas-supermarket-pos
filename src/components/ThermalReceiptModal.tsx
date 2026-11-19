@@ -5,9 +5,21 @@ import { jsPDF } from 'jspdf';
 import { SaleRecord, ThermalPrinterConfig, MANDATORY_RECEIPT_FOOTER } from '../types';
 import { formatNaira, playPOSBeep, pickReceiptSavePath, writeBinaryFile, openInDefaultApp } from '../utils/storage';
 import { formatMoney, moneyAscii } from '../utils/currency';
+import { formatCartonPieceBreakdown } from '../utils/pricing';
 import { printReceipt } from '../utils/escpos';
 import { isTauriRuntime } from '../utils/db';
+import {
+  BRANDED_DOCUMENT_NAME,
+  BRANDED_NAME_LINE,
+  BRANDED_NICKNAME_LINE,
+} from '../config/edition';
 import { useToast } from './Toast';
+
+/** v2.0.8 — receipt-only branding. The "(Fine boy)" nickname and its own
+ * crown-K icon appear ONLY on the printed/exported receipt; everywhere else
+ * in the app the name is simply "Kingzzy Akamelu Resources". */
+const RECEIPT_BRAND_NAME = BRANDED_DOCUMENT_NAME;
+const RECEIPT_BRAND_ICON = '/receipt-icon.png';
 
 interface ThermalReceiptModalProps {
   sale: SaleRecord | null;
@@ -100,7 +112,10 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
     }
   };
 
-  const headerName = config.businessName || config.storeName;
+  // v2.0.8 — the receipt ALWAYS carries the full
+  // "Kingzzy Akamelu Resources(Fine boy)" identity, regardless of the
+  // configurable app business name.
+  const headerName = RECEIPT_BRAND_NAME;
   const getEscPosText = () => {
     let text = `================================\n`;
     text += `       ${headerName}\n`;
@@ -127,9 +142,16 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
       const rate = item.rate.toLocaleString().padStart(7, ' ');
       const amt = item.amount.toLocaleString().padStart(8, ' ');
       text += `${qty} ${name} ${rate} ${amt}\n`;
+      if (item.saleUnitLabel) text += `   (${item.saleUnitLabel})\n`;
+      const split = formatCartonPieceBreakdown(item, sale.currency);
+      if (split) text += `   ${split}\n`;
     });
 
     text += `--------------------------------\n`;
+    if ((sale as any).cashDiscount > 0) {
+      text += `SUBTOTAL:       ${moneyAscii(sale.totalAmount + (sale as any).cashDiscount, sale.currency)}\n`;
+      text += `DISCOUNT:      -${moneyAscii((sale as any).cashDiscount, sale.currency)}\n`;
+    }
     text += `TOTAL:          ${moneyAscii(sale.totalAmount, sale.currency)}\n`;
     text += `PAID (ADVANCE): ${moneyAscii(sale.advancePayment, sale.currency)}\n`;
     text += `BALANCE DUE:    ${moneyAscii(sale.balanceDue, sale.currency)}\n`;
@@ -236,13 +258,12 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               boxSizing: 'border-box',
             }}
           >
-            {/* Store Header — Kingzzy Akamelu Resources logo default, custom override, else bold name */}
+            {/* Store Header — v2.0.8: Kingzzy "(Fine boy)" receipt identity with its own crown-K icon */}
             <div className="text-center mb-3 pb-3 border-b-2 border-gray-700">
-              {config.showLogo ? (
-                <img src={config.logoDataUrl || '/logo.png'} alt="Logo" className="mx-auto mb-2 object-contain" style={{ maxWidth: config.paperWidth === '58mm' ? 96 : 128, maxHeight: 64 }} />
-              ) : null}
-              <div className="font-black text-2xl tracking-tight text-black uppercase leading-tight">{headerName}</div>
-              <div className="text-sm text-gray-800 font-bold mt-1">{config.tagline}</div>
+              <img src={RECEIPT_BRAND_ICON} alt="Kingzzy Fine boy" className="mx-auto mb-2 object-contain" style={{ maxWidth: config.paperWidth === '58mm' ? 80 : 104, maxHeight: 56 }} />
+              <div className="font-black text-lg tracking-tight text-black leading-tight">{BRANDED_NAME_LINE}</div>
+              <div className="font-black text-base tracking-tight text-black leading-tight mt-0.5">{BRANDED_NICKNAME_LINE}</div>
+              <div className="text-xs text-gray-800 font-bold mt-1">{config.tagline}</div>
               <div className="text-xs text-gray-700 font-medium mt-1">{config.address}</div>
               <div className="text-xs text-gray-700 font-medium">Tel: {config.phone}</div>
             </div>
@@ -295,6 +316,14 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
                     <td className="py-1.5 font-black align-top text-left">{item.quantity}</td>
                     <td className="py-1.5 pr-1 align-top break-words font-bold text-gray-900" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                       {item.product.name}
+                      {item.saleUnitLabel && (
+                        <span className="block text-[10px] font-black text-blue-800">({item.saleUnitLabel})</span>
+                      )}
+                      {formatCartonPieceBreakdown(item, sale.currency) && (
+                        <span className="block text-[9px] font-bold text-blue-700">
+                          {formatCartonPieceBreakdown(item, sale.currency)}
+                        </span>
+                      )}
                     </td>
                     <td className="py-1.5 text-right align-top text-gray-800 font-semibold" style={{ whiteSpace: 'nowrap' }}>{item.rate.toLocaleString()}</td>
                     <td className="py-1.5 text-right font-black align-top text-black" style={{ whiteSpace: 'nowrap' }}>
@@ -307,6 +336,16 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
 
             {/* Totals */}
             <div className="border-t-2 border-black pt-2 mt-2 space-y-1.5 text-[13px]">
+              <div className="flex justify-between font-bold text-gray-800">
+                <span>Subtotal:</span>
+                <span>{formatMoney(sale.totalAmount + ((sale as any).cashDiscount || 0), sale.currency)}</span>
+              </div>
+              {(sale as any).cashDiscount > 0 && (
+                <div className="flex justify-between font-black text-amber-700">
+                  <span>Discount:</span>
+                  <span>− {formatMoney((sale as any).cashDiscount, sale.currency)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-xl font-black text-black">
                 <span>TOTAL:</span>
                 <span>{formatMoney(sale.totalAmount, sale.currency)}</span>

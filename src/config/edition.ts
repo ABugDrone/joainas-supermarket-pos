@@ -1,11 +1,11 @@
-// Kingzzy Akamelu Resources v2.0.7 — full build, all features unlocked.
+// Kingzzy Akamelu Resources v2.0.8 — full build, all features unlocked.
 // Carries all v1.5.x trusted-clock hardening plus v1.6.0 currency selection,
-// plus installment ledger, service units and logo receipts.
+// plus installment ledger, service units, carton/pack + pieces sales and receipts.
 
 export const EDITION = {
-  appName: 'Kingzzy Akamelu Resources Inventory Management System',
+  appName: 'Kingzzy Akamelu Resources',
   shortName: 'Kingzzy Akamelu Resources',
-  version: '2.0.7',
+  version: '2.0.8',
   editionLabel: 'Professional',
   isOpenSource: false,
   // Default theme — STOREBOX WHITE for the Kingzzy Akamelu Resources build.
@@ -17,6 +17,25 @@ export const EDITION = {
   supportWhatsAppDisplay: '+2347035716349',
   supportFacebook: 'https://web.facebook.com/azeez.yun',
 } as const;
+
+/**
+ * v2.0.8 — the FULL identity is used ONLY on receipts and financial reports.
+ * Everywhere else (app name, dashboard, backup, database) the name is simply
+ * EDITION.appName: "Kingzzy Akamelu Resources".
+ * The two display lines concatenate to exactly BRANDED_DOCUMENT_NAME.
+ */
+export const BRANDED_DOCUMENT_NAME = 'Kingzzy Akamelu Resources(Fine boy)';
+export const BRANDED_NAME_LINE = 'Kingzzy Akamelu Resources';
+export const BRANDED_NICKNAME_LINE = '(Fine boy)';
+
+/**
+ * Only the DIRMS Storebox PRO edition uses the EULA + license-key activation.
+ * Customized-name bundles (Kingzzy, etc.) must NEVER be gated by a license.
+ */
+export const LICENSED_APP_NAMES: readonly string[] = ['DIRMS Storebox PRO'];
+export const requiresLicenseActivation: boolean = LICENSED_APP_NAMES.includes(
+  EDITION.appName
+);
 
 export const gmailComposeUrl = (subject: string, body: string) =>
   `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(

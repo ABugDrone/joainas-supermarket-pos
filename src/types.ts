@@ -128,18 +128,105 @@ export interface Product {
   priceTiers?: PriceTier[]; // quantity-dependent ceilings; empty = single range mode
   stockQty: number;
   reorderLevel: number;
+  /**
+   * v2.0.8 — Wholesale carton/pack support.
+   * piecesPerCarton > 0 means this product is stocked in cartons/packs.
+   * stockQty is then the number of whole cartons and loosePieces is the
+   * remainder. Total sellable pieces = stockQty * piecesPerCarton + loosePieces.
+   */
+  piecesPerCarton?: number;
+  loosePieces?: number;
+  /**
+   * v2.0.8 dual-ladder pricing. The fields above describe the WHOLE
+   * carton/pack; these describe ONE loose piece. When unset, POS falls back
+   * to the carton price divided by piecesPerCarton so old catalogues still
+   * sell correctly.
+   */
+  pieceCostPrice?: number;
+  pieceMinPrice?: number;
+  pieceRetailPrice?: number;
+  piecePriceTiers?: PriceTier[];
 }
+
+/** Units that represent a bundle of pieces (carton / pack). */
+export const PACK_UNITS: ProductUnit[] = ['carton', 'pack'];
+export const isPackUnit = (unit?: ProductUnit): boolean =>
+  !!unit && PACK_UNITS.includes(unit);
+
+/** True when a product uses carton/pack + pieces accounting. */
+export const isPackProduct = (p: { piecesPerCarton?: number }): boolean =>
+  Number(p.piecesPerCarton || 0) > 0;
+
+/** Total sellable pieces for a product (cartons converted + loose pieces). */
+export const totalPieces = (p: {
+  stockQty: number;
+  piecesPerCarton?: number;
+  loosePieces?: number;
+}): number => {
+  const per = Number(p.piecesPerCarton || 0);
+  if (per <= 0) return Number(p.stockQty || 0);
+  return Number(p.stockQty || 0) * per + Number(p.loosePieces || 0);
+};
+
+/**
+ * v2.0.8 — low-stock test shared by Inventory, POS and the notification bell.
+ * For pack products reorderLevel is in CARTONS; the comparison is done in
+ * pieces so 0 cartons + a few loose pieces still counts as low.
+ */
+export const isLowStock = (p: {
+  stockQty: number;
+  reorderLevel: number;
+  piecesPerCarton?: number;
+  loosePieces?: number;
+  kind?: ProductKind;
+  category?: string;
+}): boolean => {
+  if (isUncountedKind(p)) return false;
+  const per = Number(p.piecesPerCarton || 0);
+  if (per > 0) return totalPieces(p) <= Number(p.reorderLevel || 0) * per;
+  return Number(p.stockQty || 0) <= Number(p.reorderLevel || 0);
+};
+
+/** Human-readable stock breakdown, e.g. "97 cartons + 6 pieces". */
+export const formatStock = (p: {
+  stockQty: number;
+  unit: ProductUnit;
+  piecesPerCarton?: number;
+  loosePieces?: number;
+}): string => {
+  const per = Number(p.piecesPerCarton || 0);
+  if (per <= 0) return `${p.stockQty} ${p.unit}`;
+  const loose = Number(p.loosePieces || 0);
+  const cartonWord = p.unit === 'pack' ? 'pack' : 'carton';
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  if (loose <= 0) return plural(p.stockQty, cartonWord);
+  if (Number(p.stockQty || 0) <= 0) return plural(loose, 'piece');
+  return `${plural(p.stockQty, cartonWord)} + ${plural(loose, 'piece')}`;
+};
 
 export interface CartItem {
   product: Product;
-  quantity: number;
+  quantity: number; // total pieces (cartons converted + loose) for pack products
   priceType: PriceType;
-  rate: number;
-  ceilingAtSale?: number; // snapshot of max allowed price at time of sale
+  rate: number; // per-piece rate for pack products
+  ceilingAtSale?: number; // snapshot of max allowed unit price at time of sale
   floorAtSale?: number;
   /** Explicitly allow this line to drive stock below zero (depleted-stock flow). */
   allowNegativeStock?: boolean;
   amount: number;
+  /** v2.0.8 carton/pack breakdown */
+  cartonQty?: number; // whole cartons/packs sold on this line
+  pieceQty?: number; // loose pieces sold on this line
+  piecesPerCarton?: number; // snapshot of pieces per carton at sale time
+  saleUnitLabel?: string; // e.g. "2 cartons + 6 pieces" for the receipt
+  /** v2.0.8 dual-ladder: which unit(s) this line was sold in */
+  saleMode?: 'carton' | 'piece' | 'both';
+  cartonRate?: number; // price of ONE carton/pack on this line
+  pieceRate?: number; // price of ONE loose piece on this line
+  cartonCeiling?: number;
+  cartonFloor?: number;
+  pieceCeiling?: number;
+  pieceFloor?: number;
 }
 
 export type CustomerAccountType = 'individual' | 'company' | 'ngo' | 'government';
@@ -157,6 +244,10 @@ export interface Customer {
   advancePayment: number;
   assignedCashier?: string; // staff who registered/serves this customer
   createdAt: string;
+  /** v2.0.8 — optional date by which this customer's debt should be settled. */
+  settlementDate?: string;
+  /** v2.0.8 — the built-in walk-in customer cannot be deleted. */
+  isGeneral?: boolean;
 }
 
 export type ContractStatus = 'INSTALLMENT_ACTIVE' | 'COMPLETED';
@@ -222,6 +313,31 @@ export interface SaleRecord {
    * after verifying the trusted clock.
    */
   clockOverride?: boolean;
+  /** v2.0.8 — cash sale discount (fixed amount subtracted from the total). */
+  cashDiscount?: number;
+  /** v2.0.8 — whether this sale was paid in full or put on the customer's credit. */
+  paymentMode?: 'full' | 'credit';
+}
+
+/** v2.0.8 — one line in the customer debt notebook. */
+export interface DebtEntry {
+  id: string;
+  customerId: string;
+  /** 'charge' = red + (debt added), 'payment' = green - (debt paid off). */
+  kind: 'charge' | 'payment';
+  amount: number;
+  /** Where the debt/payment came from. */
+  source: 'sale' | 'cash' | 'manual';
+  note?: string;
+  receiptNo?: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm:ss
+  timestamp: number;
+  /** Optional settlement date — reminder starts the day before. */
+  settlementDate?: string;
+  /** True once the debt this entry represents has been settled. */
+  settled?: boolean;
+  createdBy?: string;
 }
 
 export interface Expenditure {

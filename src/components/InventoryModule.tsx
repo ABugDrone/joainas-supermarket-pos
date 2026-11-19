@@ -1,9 +1,9 @@
 import React from 'react';
 import { Package, Plus, Search, AlertTriangle, Edit3, Trash2, FolderPlus, PackagePlus } from 'lucide-react';
-import { Product, UserRole, Category, PriceTier, GOODS_UNITS, SERVICE_UNITS, EDIBLE_UNITS, isUncountedKind } from '../types';
+import { Product, UserRole, Category, PriceTier, GOODS_UNITS, SERVICE_UNITS, EDIBLE_UNITS, isUncountedKind, isPackUnit, isPackProduct, totalPieces, formatStock, isLowStock } from '../types';
 import { formatNaira, recordAuditLog, loadCategories, saveCategories } from '../utils/storage';
 import { formatMoney } from '../utils/currency';
-import { formatRange } from '../utils/pricing';
+import { formatRange, formatPiecePriceDetail, hasPiecePricing } from '../utils/pricing';
 import { useCurrency } from '../hooks/useCurrency';
 import { InventoryDraft } from '../utils/workspace';
 import { useToast } from './Toast';
@@ -62,7 +62,13 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
     wholesalePrice: 0,
     priceTiers: [],
     stockQty: 0,
-    reorderLevel: 5,
+    reorderLevel: 1,
+    piecesPerCarton: 0,
+    loosePieces: 0,
+    pieceCostPrice: 0,
+    pieceMinPrice: 0,
+    pieceRetailPrice: 0,
+    piecePriceTiers: [],
   });
 
   // Restore this account's unsent inventory draft once per mount.
@@ -146,7 +152,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
   }, [searchQuery, selectedCategory]);
 
   const lowStockCount = React.useMemo(() => {
-    return products.filter((p) => !isUncountedKind(p) && p.stockQty <= p.reorderLevel).length;
+    return products.filter((p) => isLowStock(p)).length;
   }, [products]);
 
   // Total stock asset value = units in stock × HIGHEST price of the range.
@@ -154,7 +160,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
   // Services & edibles are not tangible, so they are counted once at their highest
   // price (× 1) — they still contribute to the figure instead of showing 0.
   const totalInventoryValue = React.useMemo(() => {
-    return products.reduce((sum, p) => sum + (p.retailPrice > 0 ? p.retailPrice : p.minPrice || 0) * (isUncountedKind(p) ? 1 : p.stockQty), 0);
+    return products.reduce((sum, p) => sum + (p.retailPrice > 0 ? p.retailPrice : p.minPrice || 0) * (isUncountedKind(p) ? 1 : (isPackProduct(p) ? totalPieces(p) : p.stockQty)), 0);
   }, [products]);
 
   const handleOpenAddModal = () => {
@@ -170,7 +176,13 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
       wholesalePrice: 0,
       priceTiers: [],
       stockQty: 10,
-      reorderLevel: 5,
+      reorderLevel: 1, // v2.0.8 — default low alert at 1 carton/pack
+      piecesPerCarton: 12,
+      loosePieces: 0,
+      pieceCostPrice: 0,
+      pieceMinPrice: 0,
+      pieceRetailPrice: 0,
+      piecePriceTiers: [],
     });
     setIsModalOpen(true);
   };
@@ -178,7 +190,15 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
   const handleOpenEditModal = (p: Product) => {
     setEditingProduct(p);
     // Preserve an explicit min; never invent one from the max.
-    setFormData({ ...p, minPrice: p.minPrice && p.minPrice > 0 ? p.minPrice : 0, priceTiers: p.priceTiers ? [...p.priceTiers] : [] });
+    setFormData({
+      ...p,
+      minPrice: p.minPrice && p.minPrice > 0 ? p.minPrice : 0,
+      priceTiers: p.priceTiers ? [...p.priceTiers] : [],
+      pieceCostPrice: p.pieceCostPrice || 0,
+      pieceMinPrice: p.pieceMinPrice || 0,
+      pieceRetailPrice: p.pieceRetailPrice || 0,
+      piecePriceTiers: p.piecePriceTiers ? [...p.piecePriceTiers] : [],
+    });
     setIsModalOpen(true);
   };
 
@@ -203,6 +223,28 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
     const tiers = [...((formData.priceTiers as PriceTier[]) || [])];
     tiers.splice(idx,1);
     setFormData({ ...formData, priceTiers: tiers });
+  };
+
+  // v2.0.8 — independent quantity tiers for ONE loose piece.
+  const addPieceTier = () => {
+    const tiers = (formData.piecePriceTiers as PriceTier[]) || [];
+    const next: PriceTier = {
+      id: `piece-tier-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+      minQty: tiers.length > 0 ? (tiers[tiers.length-1].maxQty ? (tiers[tiers.length-1].maxQty as number)+1 : tiers[tiers.length-1].minQty + 10) : 1,
+      maxQty: null,
+      ceiling: formData.pieceRetailPrice || 0,
+    };
+    setFormData({ ...formData, piecePriceTiers: [...tiers, next] });
+  };
+  const updatePieceTier = (idx: number, patch: Partial<PriceTier>) => {
+    const tiers = [...((formData.piecePriceTiers as PriceTier[]) || [])];
+    tiers[idx] = { ...tiers[idx], ...patch };
+    setFormData({ ...formData, piecePriceTiers: tiers });
+  };
+  const removePieceTier = (idx: number) => {
+    const tiers = [...((formData.piecePriceTiers as PriceTier[]) || [])];
+    tiers.splice(idx,1);
+    setFormData({ ...formData, piecePriceTiers: tiers });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -239,6 +281,33 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
     }
     const sortedTiers = [...tiers].sort((a,b)=>a.minQty-b.minQty);
 
+    // v2.0.8 — per-piece tiers form a separate ladder from the carton tiers.
+    const pieceTiers = (formData.piecePriceTiers as PriceTier[]) || [];
+    for (let i=0;i<pieceTiers.length;i++) {
+      const t = pieceTiers[i];
+      if (!t.minQty || t.minQty < 1) { showToast(`Piece tier ${i+1}: Min Qty must be at least 1.`, 'error'); return; }
+      if (t.maxQty !== null && t.maxQty !== undefined && t.maxQty < t.minQty) { showToast(`Piece tier ${i+1}: Max Qty cannot be less than Min Qty.`, 'error'); return; }
+      if (!t.ceiling || t.ceiling <= 0) { showToast(`Piece tier ${i+1}: Max Price must be greater than 0.`, 'error'); return; }
+    }
+    for (let i=0;i<pieceTiers.length;i++) {
+      for (let j=i+1;j<pieceTiers.length;j++) {
+        const a = pieceTiers[i], b = pieceTiers[j];
+        const aMax = a.maxQty === null || a.maxQty === undefined ? Infinity : a.maxQty;
+        const bMax = b.maxQty === null || b.maxQty === undefined ? Infinity : b.maxQty;
+        if (!(aMax < b.minQty || bMax < a.minQty)) { showToast(`Piece tier ${i+1} and ${j+1} quantity ranges overlap.`, 'error'); return; }
+      }
+    }
+    const sortedPieceTiers = [...pieceTiers].sort((a,b)=>a.minQty-b.minQty);
+
+    // v2.0.8 — carton/pack accounts need a positive pieces-per-carton value.
+    const isPack = isPackUnit(formData.unit);
+    const perCarton = Math.max(0, Math.trunc(Number((formData as any).piecesPerCarton) || 0));
+    if (isPack && perCarton < 1) {
+      showToast('Pieces per carton/pack must be at least 1 for a carton/pack unit.', 'error');
+      return;
+    }
+    const loose = isPack ? Math.max(0, Math.trunc(Number((formData as any).loosePieces) || 0)) : 0;
+
     const payload: Product = {
       // If the restored editing stub no longer matches a live product,
       // fall back to add-mode instead of silently updating nothing.
@@ -264,7 +333,15 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
       minPrice: minP > 0 ? minP : undefined,
       priceTiers: sortedTiers.length ? sortedTiers : undefined,
       stockQty: formData.stockQty ?? 0,
-      reorderLevel: formData.reorderLevel ?? 5,
+      reorderLevel: formData.reorderLevel ?? 1,
+      piecesPerCarton: isPack ? perCarton : 0,
+      loosePieces: isPack ? loose : 0,
+      pieceCostPrice: isPack ? Math.max(0, Number((formData as any).pieceCostPrice) || 0) : 0,
+      pieceMinPrice: isPack && Number((formData as any).pieceMinPrice) > 0
+        ? Number((formData as any).pieceMinPrice)
+        : undefined,
+      pieceRetailPrice: isPack ? Math.max(0, Number((formData as any).pieceRetailPrice) || 0) : 0,
+      piecePriceTiers: isPack && sortedPieceTiers.length ? sortedPieceTiers : undefined,
     };
 
     const isUpdate = !!editingProduct && products.some((p) => p.id === payload.id);
@@ -320,27 +397,45 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
   };
 
   const renderPriceRange = (prod: Product) => {
-    if (prod.priceTiers && prod.priceTiers.length > 0) {
-      return <span className="inline-flex flex-col items-end gap-0.5">
-        <span className="px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/40 text-cyan-300 text-[10px] font-black">{prod.priceTiers.length} tiers</span>
-        <span className="text-[10px] text-slate-500">Max {formatMoney(prod.retailPrice || prod.minPrice || 0)}</span>
-      </span>;
-    }
-    return <span className="text-cyan-400 font-extrabold">{formatRange(prod)}</span>;
+    const cartonLadder = (prod.priceTiers && prod.priceTiers.length > 0)
+      ? <span className="inline-flex flex-col items-end gap-0.5">
+          <span className="px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/40 text-cyan-300 text-[10px] font-black">{prod.priceTiers.length} tiers</span>
+          <span className="text-[10px] text-slate-500">Max {formatMoney(prod.retailPrice || prod.minPrice || 0)}</span>
+        </span>
+      : <span className="text-cyan-400 font-extrabold">{formatRange(prod)}</span>;
+    if (!isPackProduct(prod)) return cartonLadder;
+    const pieceDetail = formatPiecePriceDetail(prod);
+    return (
+      <span className="inline-flex flex-col items-end gap-0.5">
+        {cartonLadder}
+        <span
+          className="text-[9px] leading-tight text-cyan-300/90 font-semibold text-right max-w-[190px]"
+          title={`Per loose piece${hasPiecePricing(prod) ? '' : ' (derived from carton price)'}: ${pieceDetail}`}
+        >
+          {pieceDetail || 'Per piece: not set'}
+        </span>
+      </span>
+    );
   };
 
-  const handleRestockSave = (newQty: number, added: number) => {
+  const handleRestockSave = (newQty: number, added: number, looseAdded: number = 0) => {
     if (!restockProduct) return;
     const before = restockProduct.stockQty;
-    const updated = { ...restockProduct, stockQty: newQty };
+    const updated = {
+      ...restockProduct,
+      stockQty: newQty,
+      loosePieces: isPackProduct(restockProduct)
+        ? Math.max(0, restockProduct.loosePieces || 0) + Math.max(0, looseAdded)
+        : restockProduct.loosePieces,
+    };
     onUpdateProduct(updated);
     recordAuditLog(
       currentUser,
       currentUserRole,
       'Added Inventory Stock',
-      `Added ${added} ${restockProduct.unit} to "${restockProduct.name}" — stock ${before} → ${newQty}.`
+      `Added ${added} ${restockProduct.unit}${looseAdded > 0 ? ` + ${looseAdded} loose pieces` : ''} to "${restockProduct.name}" — stock ${before} → ${newQty}.`
     );
-    showToast(`Stock for "${restockProduct.name}" updated to ${newQty}.`, 'success');
+    showToast(`Stock for "${restockProduct.name}" updated to ${formatStock(updated)}.`, 'success');
     setRestockProduct(null);
   };
 
@@ -449,8 +544,8 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
             </thead>
             <tbody className="divide-y divide-[#30363d]">
               {pagedProducts.map((prod) => {
-                const isNegative = prod.stockQty < 0;
-                const isLow = !isNegative && prod.stockQty <= prod.reorderLevel;
+                const isNegative = totalPieces(prod) < 0;
+                const isLow = !isNegative && isLowStock(prod);
                 return (
                   <tr
                     key={prod.id}
@@ -460,6 +555,11 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                     <td className="py-3 px-4 font-bold text-white">
                       {prod.name}
                       <span className="block text-[10px] text-slate-400 font-normal">Unit: {prod.unit}</span>
+                      {isPackProduct(prod) && (
+                        <span className="block text-[10px] text-cyan-400 font-normal">
+                          {prod.piecesPerCarton} pcs/{prod.unit} · {totalPieces(prod)} pcs total
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <span className="px-2 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[10px] font-bold text-slate-300">
@@ -480,7 +580,7 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                               : 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-400'
                         }`}
                       >
-                        {prod.stockQty} {prod.unit} {isNegative ? 'OWED' : isLow && '⚠️'}
+                        {isPackProduct(prod) ? formatStock(prod) : `${prod.stockQty} ${prod.unit}`} {isNegative ? 'OWED' : isLow && '⚠️'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center space-x-2">
@@ -695,7 +795,19 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                   <label className="block text-slate-300 mb-1">Unit Type:</label>
                   <select
                     value={formData.unit}
-                    onChange={(e) => setFormData({ ...formData, unit: e.target.value as any })}
+                    onChange={(e) => {
+                      const u = e.target.value as any;
+                      const becomingPack = isPackUnit(u);
+                      const wasPack = isPackUnit(formData.unit);
+                      setFormData({
+                        ...formData,
+                        unit: u,
+                        piecesPerCarton: becomingPack ? ((formData as any).piecesPerCarton || 12) : 0,
+                        loosePieces: becomingPack ? ((formData as any).loosePieces || 0) : 0,
+                        // v2.0.8 — default low alert at 1 carton/pack
+                        reorderLevel: becomingPack && !wasPack ? 1 : formData.reorderLevel,
+                      } as any);
+                    }}
                     className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500"
                   >
                     <optgroup label="Goods">
@@ -710,9 +822,125 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                   </select>
                 </div>
               </div>
+
+              {isPackUnit(formData.unit) && (
+                <div className="rounded border border-cyan-800/60 bg-cyan-950/20 p-3">
+                  <p className="text-cyan-300 text-[11px] font-bold uppercase tracking-wide mb-2">
+                    Carton / Pack breakdown
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-300 mb-1 text-xs">
+                        Pieces per {formData.unit}:
+                      </label>
+                      <NumberInput
+                        required
+                        integer
+                        placeholder="12"
+                        value={(formData as any).piecesPerCarton || 0}
+                        onValueChange={(n) => setFormData({ ...formData, piecesPerCarton: Math.max(1, Math.trunc(n)) } as any)}
+                        className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500"
+                      />
+                      <span className="block text-[10px] text-slate-400 mt-1">
+                        How many individual pieces one {formData.unit} contains (1, 2, 4, 6, 12, 24…).
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-slate-300 mb-1 text-xs">
+                        Loose pieces (not in a full {formData.unit}):
+                      </label>
+                      <NumberInput
+                        integer
+                        placeholder="0"
+                        value={(formData as any).loosePieces || 0}
+                        onValueChange={(n) => setFormData({ ...formData, loosePieces: Math.max(0, Math.trunc(n)) } as any)}
+                        className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500"
+                      />
+                      <span className="block text-[10px] text-cyan-400 mt-1 font-bold">
+                        = {formatStock({ ...(formData as Product), piecesPerCarton: (formData as any).piecesPerCarton || 0, loosePieces: (formData as any).loosePieces || 0 })}
+                        {' '}in stock ({totalPieces({ ...(formData as Product), stockQty: formData.stockQty || 0, piecesPerCarton: (formData as any).piecesPerCarton || 0, loosePieces: (formData as any).loosePieces || 0 })} pcs total)
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* v2.0.8 — second price ladder: ONE loose piece */}
+                  <div className="mt-3 pt-3 border-t border-cyan-900/60 space-y-2">
+                    <p className="text-cyan-300 text-[11px] font-bold uppercase tracking-wide">
+                      Per-piece price range <span className="text-slate-500 font-normal normal-case">(one loose piece)</span>
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-slate-300 mb-1 text-[11px]">Cost / piece ({curSym})</label>
+                        <NumberInput
+                          placeholder="0"
+                          value={(formData as any).pieceCostPrice || 0}
+                          onValueChange={(n) => setFormData({ ...formData, pieceCostPrice: Math.max(0, n) } as any)}
+                          className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 mb-1 text-[11px]">Min / piece ({curSym})</label>
+                        <NumberInput
+                          placeholder="0"
+                          value={(formData as any).pieceMinPrice || 0}
+                          onValueChange={(n) => setFormData({ ...formData, pieceMinPrice: Math.max(0, n) } as any)}
+                          className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-emerald-400 font-bold outline-none focus:border-cyan-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 mb-1 text-[11px]">Max / piece ({curSym})</label>
+                        <NumberInput
+                          placeholder="0"
+                          value={(formData as any).pieceRetailPrice || 0}
+                          onValueChange={(n) => setFormData({ ...formData, pieceRetailPrice: Math.max(0, n) } as any)}
+                          className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-cyan-400 font-extrabold outline-none focus:border-cyan-500"
+                        />
+                      </div>
+                    </div>
+                    <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-2 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-300 font-bold text-[11px]">Piece quantity tiers <span className="text-slate-500 font-normal">(optional)</span></span>
+                        <button type="button" onClick={addPieceTier} className="px-2 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-black flex items-center gap-1"><Plus className="w-3 h-3"/> Add Tier</button>
+                      </div>
+                      {((formData.piecePriceTiers as PriceTier[]) || []).length === 0 ? (
+                        <p className="text-[10px] text-slate-500 text-center py-1">No piece tiers — single piece price range.</p>
+                      ) : (
+                        ((formData.piecePriceTiers as PriceTier[]) || []).map((tier, idx) => (
+                          <div key={tier.id} className="grid grid-cols-12 gap-2 items-end bg-[#161b22] border border-[#30363d] rounded p-1.5">
+                            <div className="col-span-3">
+                              <label className="block text-[10px] text-slate-400 mb-1">Min pcs</label>
+                              <NumberInput integer min={1} value={tier.minQty} onValueChange={(n)=>updatePieceTier(idx,{minQty: Math.max(1, Math.trunc(n))})} className="w-full rounded border border-[#30363d] px-1.5 py-1 bg-[#0d1117] text-white text-[11px] outline-none"/>
+                            </div>
+                            <div className="col-span-3">
+                              <label className="block text-[10px] text-slate-400 mb-1">Max pcs</label>
+                              <input type="text" placeholder="∞" value={tier.maxQty===null||tier.maxQty===undefined?'':String(tier.maxQty)} onChange={(e)=>{
+                                const v=e.target.value.trim();
+                                if(v==='') updatePieceTier(idx,{maxQty:null});
+                                else { const num=Number(v); if(!isNaN(num)) updatePieceTier(idx,{maxQty: Math.max(tier.minQty, Math.trunc(num))}); }
+                              }} className="w-full rounded border border-[#30363d] px-1.5 py-1 bg-[#0d1117] text-white text-[11px] outline-none"/>
+                            </div>
+                            <div className="col-span-4">
+                              <label className="block text-[10px] text-slate-400 mb-1">Max / piece ({curSym})</label>
+                              <NumberInput value={tier.ceiling} onValueChange={(n)=>updatePieceTier(idx,{ceiling: Math.max(0,n)})} className="w-full rounded border border-[#30363d] px-1.5 py-1 bg-[#0d1117] text-cyan-300 text-[11px] font-bold outline-none"/>
+                            </div>
+                            <div className="col-span-2 flex justify-end">
+                              <button type="button" onClick={()=>removePieceTier(idx)} className="p-1.5 rounded bg-red-950/40 border border-red-800/40 text-red-400"><Trash2 className="w-3.5 h-3.5"/></button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-snug">
+                      Leave these blank to derive piece prices from the carton price ÷ {formData.piecesPerCarton || 1} pieces.
+                      Set them when a loose piece must be priced differently from a carton share.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 mb-1">Stock Quantity:{isUncountedKind({ kind: (formData as any).kind, category: formData.category }) ? ' (services & edibles: uncounted)' : ''}</label>
+                  <label className="block text-slate-300 mb-1">Stock Quantity:{isPackUnit(formData.unit) ? ` (${formData.unit}s)` : ''}{isUncountedKind({ kind: (formData as any).kind, category: formData.category }) ? ' (services & edibles: uncounted)' : ''}</label>
                   <NumberInput
                     required
                     integer
@@ -724,15 +952,22 @@ export const InventoryModule: React.FC<InventoryModuleProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 mb-1">Reorder Alert Level:</label>
+                  <label className="block text-slate-300 mb-1">
+                    Low-stock alert level:{isPackUnit(formData.unit) ? ` (${formData.unit}s — default 1)` : ''}
+                  </label>
                   <NumberInput
                     required
                     integer
-                    placeholder="5"
-                    value={formData.reorderLevel ?? 5}
+                    placeholder={isPackUnit(formData.unit) ? '1' : '5'}
+                    value={formData.reorderLevel ?? (isPackUnit(formData.unit) ? 1 : 5)}
                     onValueChange={(n) => setFormData({ ...formData, reorderLevel: Math.max(0, Math.trunc(n)) })}
                     className="w-full rounded border border-[#30363d] px-2 py-1.5 bg-[#0d1117] text-white outline-none focus:border-cyan-500"
                   />
+                  {isPackUnit(formData.unit) && (
+                    <span className="block text-[10px] text-slate-400 mt-1">
+                      Alert fires when stock falls to {formData.reorderLevel ?? 1} {formData.unit}(s) or less.
+                    </span>
+                  )}
                 </div>
               </div>
 

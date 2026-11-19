@@ -23,7 +23,8 @@ import {
 import { HeaderLogo } from './HeaderLogo';
 import { ClockFlashAlert } from './ClockFlashAlert';
 import { playLowStockAlert } from '../utils/storage';
-import { Capability, UserRole, Product } from '../types';
+import { formatMoney } from '../utils/currency';
+import { Capability, UserRole, Product, Customer, DebtEntry, isLowStock, isPackProduct, formatStock } from '../types';
 import type { ClockOverrideAlert } from '../utils/clockOverride';
 import { useToast } from './Toast';
 import {
@@ -51,6 +52,11 @@ interface DesktopShellProps {
   businessName?: string;
   todaySalesTotal?: number;
   products: Product[];
+  /** v2.0.8 customer debt reminders in the bell. */
+  customers?: Customer[];
+  debtEntries?: DebtEntry[];
+  onSettleCustomerDebt?: (customerId: string, settled: boolean) => void;
+  onNavigateCustomers?: () => void;
   onOpenLoginModal: () => void;
   onLogout?: () => void;
   onOpenDevModal: () => void;
@@ -101,6 +107,10 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
   currentUserCapabilities,
   businessName,
   products,
+  customers = [],
+  debtEntries = [],
+  onSettleCustomerDebt,
+  onNavigateCustomers,
   onOpenLoginModal,
   onLogout,
   onOpenDevModal,
@@ -126,9 +136,42 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
 
   // Products that are at or below their reorder level.
   const lowStockProducts = React.useMemo(
-    () => products.filter((p) => p.stockQty <= p.reorderLevel),
+    () => products.filter((p) => isLowStock(p)),
     [products]
   );
+
+  // v2.0.8 — customers whose settlement date is today or earlier and whose
+  // debt is not yet settled. The reminder stays red until marked settled.
+  const dueDebts = React.useMemo(() => {
+    const today = new Date().toLocaleDateString('en-CA');
+    const byCustomer = new Map<string, DebtEntry[]>();
+    debtEntries.forEach((e) => {
+      if (e.kind !== 'charge' || e.settled) return;
+      const list = byCustomer.get(e.customerId) || [];
+      list.push(e);
+      byCustomer.set(e.customerId, list);
+    });
+    const out: Array<{ customer: Customer; amount: number; settlementDate?: string; entryCount: number }> = [];
+    byCustomer.forEach((entries, cid) => {
+      const customer = customers.find((c) => c.id === cid);
+      if (!customer) return;
+      const dates = entries
+        .map((e) => e.settlementDate)
+        .filter((d): d is string => !!d)
+        .sort();
+      const soonest = dates[0];
+      // Reminder starts the day BEFORE the settlement date.
+      if (soonest && soonest <= today && customer.balance > 0) {
+        out.push({
+          customer,
+          amount: customer.balance,
+          settlementDate: soonest,
+          entryCount: entries.length,
+        });
+      }
+    });
+    return out.sort((a, b) => (a.settlementDate || '').localeCompare(b.settlementDate || ''));
+  }, [customers, debtEntries]);
 
   const hasInventoryCapability = currentUserCapabilities.includes('inventory');
 
@@ -360,39 +403,44 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
 
           {/* Right side of header */}
           <div className="flex items-center gap-3">
-            {/* Low stock notification bell */}
+            {/* Low stock + debt-due notification bell */}
             <div className="relative">
+              {(() => {
+                const alertCount = lowStockProducts.length + dueDebts.length;
+                const hasAlert = alertCount > 0;
+                return (
               <button
                 onClick={() => setIsStockAlertOpen((v) => !v)}
                 className={`relative p-2 rounded-lg border transition ${
-                  lowStockProducts.length > 0
+                  hasAlert
                     ? 'bg-[var(--warning-bg)] border-[var(--warning)] text-[var(--warning)]'
                     : 'bg-[var(--bg-app)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
                 title={
-                  lowStockProducts.length > 0
-                    ? `${lowStockProducts.length} product(s) low on stock`
-                    : 'No low stock alerts'
+                  hasAlert
+                    ? `${lowStockProducts.length} product(s) low on stock, ${dueDebts.length} debt reminder(s)`
+                    : 'No alerts'
                 }
               >
-                {lowStockProducts.length > 0 ? (
+                {hasAlert ? (
                   <BellRing className="w-4 h-4 animate-pulse" />
                 ) : (
                   <Bell className="w-4 h-4" />
                 )}
-                {lowStockProducts.length > 0 && (
+                {hasAlert && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--error)] text-white text-[10px] font-bold flex items-center justify-center shadow">
-                    {lowStockProducts.length}
+                    {alertCount}
                   </span>
                 )}
               </button>
+              )})()}
 
               {isStockAlertOpen && (
                 <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-xl shadow-2xl overflow-hidden z-50 animate-fadeIn">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-app)]">
                     <span className="text-xs font-black uppercase tracking-wide text-[var(--text-primary)] flex items-center gap-2">
                       <AlertTriangle className="w-4 h-4 text-[var(--warning)]" />
-                      Low Stock Alerts
+                      Alerts & Reminders
                     </span>
                     <button
                       onClick={() => setIsStockAlertOpen(false)}
@@ -403,8 +451,56 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
                   </div>
 
                   <div className="max-h-72 overflow-y-auto">
+                    {/* v2.0.8 debt collection reminders */}
+                    {dueDebts.length > 0 && (
+                      <div className="bg-[var(--error-bg)]/40 border-b border-[var(--border-color)]">
+                        <div className="px-4 py-1.5 text-[10px] font-black uppercase tracking-wide text-[var(--error)]">
+                          Debt collection reminders
+                        </div>
+                        {dueDebts.map((d) => (
+                          <div
+                            key={d.customer.id}
+                            className="px-4 py-2.5 border-t border-[var(--error)]/20 flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-[var(--text-primary)] truncate">
+                                {d.customer.fullName}
+                              </div>
+                              <div className="text-[11px] text-[var(--error)] font-bold">
+                                Owed: {formatMoney(d.amount)} · Settle by {d.settlementDate}
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-1 shrink-0">
+                              <button
+                                onClick={() => {
+                                  setIsStockAlertOpen(false);
+                                  if (onNavigateCustomers) onNavigateCustomers();
+                                  else setActiveTab('customers');
+                                }}
+                                className="text-[10px] font-black uppercase px-2 py-1 rounded bg-[var(--accent-color)] text-white"
+                              >
+                                Collect
+                              </button>
+                              {onSettleCustomerDebt && (
+                                <button
+                                  onClick={() => onSettleCustomerDebt(d.customer.id, true)}
+                                  className="text-[10px] font-bold px-2 py-1 rounded border border-[var(--error)] text-[var(--error)]"
+                                  title="Mark this debt as settled"
+                                >
+                                  Settle
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="px-4 py-1.5 text-[10px] font-black uppercase tracking-wide text-[var(--text-muted)] border-b border-[var(--border-color)]">
+                      Low stock
+                    </div>
                     {lowStockProducts.length === 0 ? (
-                      <div className="px-4 py-6 text-center text-sm text-[var(--text-muted)]">
+                      <div className="px-4 py-4 text-center text-sm text-[var(--text-muted)]">
                         All products are well stocked. 🎉
                       </div>
                     ) : (
@@ -418,8 +514,8 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
                               {p.name}
                             </div>
                             <div className="text-[11px] text-[var(--text-muted)]">
-                              Left: <strong className="text-[var(--error)]">{p.stockQty}</strong> / Reorder at{' '}
-                              {p.reorderLevel}
+                              Left: <strong className="text-[var(--error)]">{isPackProduct(p) ? formatStock(p) : p.stockQty}</strong> / Alert at{' '}
+                              {p.reorderLevel}{isPackProduct(p) ? ` ${p.unit}(s)` : ''}
                             </div>
                           </div>
                           <span className="shrink-0 text-[10px] font-black uppercase px-2 py-1 rounded bg-[var(--error-bg)] text-[var(--error)]">

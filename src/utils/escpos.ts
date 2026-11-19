@@ -1,6 +1,8 @@
 import { SaleRecord, ThermalPrinterConfig, MANDATORY_RECEIPT_FOOTER } from '../types';
 import { isTauriRuntime } from './db';
 import { moneyAscii } from './currency';
+import { BRANDED_NAME_LINE, BRANDED_NICKNAME_LINE } from '../config/edition';
+import { formatCartonPieceBreakdown } from './pricing';
 
 // ---------------------------------------------------------------------------
 // Native ESC/POS thermal printing.
@@ -110,13 +112,18 @@ export function buildEscPos(
   // because the padded width (45) rarely matched the real printable width.
   // Letting the firmware do the centering is the most reliable approach
   // and matches the on-screen preview which uses text-center.
-  const headerName = config.businessName || config.storeName;
+  // v2.0.8 — the receipt ALWAYS uses the "Kingzzy Akamelu Resources(Fine boy)"
+  // identity, regardless of the configurable app business name used everywhere else.
+  const headerName = BRANDED_NAME_LINE;
+  const headerNickname = BRANDED_NICKNAME_LINE;
   if (config.showLogo) {
     out.push(...SIZE_DOUBLE_H, ...BOLD_ON);
     out.push(...encodeLine(headerName));
     out.push(...SIZE_NORMAL, ...BOLD_OFF);
+    out.push(...BOLD_ON, ...encodeLine(headerNickname), ...BOLD_OFF);
   } else {
     out.push(...BOLD_ON, ...encodeLine(headerName), ...BOLD_OFF);
+    out.push(...BOLD_ON, ...encodeLine(headerNickname), ...BOLD_OFF);
   }
 
   if (config.tagline) {
@@ -164,11 +171,21 @@ export function buildEscPos(
         ),
       ),
     );
+    // v2.0.8 — carton/piece breakdown under the item name.
+    if ((item as any).saleUnitLabel) {
+      out.push(...encodeLine(`  ${(item as any).saleUnitLabel}`));
+    }
+    const split = formatCartonPieceBreakdown(item, sale.currency);
+    if (split) out.push(...encodeLine(`  ${split}`));
   }
 
   out.push(...encodeLine(divider('=', width)));
 
   // Totals.
+  if ((sale as any).cashDiscount > 0) {
+    out.push(...encodeLine(`Subtotal: ${stamped(sale.totalAmount + (sale as any).cashDiscount, sale.currency)}`));
+    out.push(...encodeLine(`Discount: -${stamped((sale as any).cashDiscount, sale.currency)}`));
+  }
   out.push(...SIZE_DOUBLE_H, ...BOLD_ON);
   out.push(...encodeLine(`TOTAL: ${stamped(sale.totalAmount, sale.currency)}`));
   out.push(...SIZE_NORMAL, ...BOLD_OFF);

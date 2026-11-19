@@ -4,7 +4,7 @@ import { SaleRecord, UserRole, User } from '../types';
 import { formatNaira, recordAuditLog, todayLocal } from '../utils/storage';
 import { useCurrency } from '../hooks/useCurrency';
 import { formatMoney } from '../utils/currency';
-import { formatSoldRange, formatSaleRate, isLegacySale } from '../utils/pricing';
+import { formatSoldRange, formatSaleRate, isLegacySale, formatCartonPieceBreakdown } from '../utils/pricing';
 import { can } from '../utils/permissions';
 import { useToast } from './Toast';
 import { SaleDetailModal } from './SaleDetailModal';
@@ -334,7 +334,16 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                       <div className="space-y-0.5">
                         {sale.items.map((it, idx) => (
                           <div key={idx} className="text-[11px] flex justify-between gap-2 max-w-xs">
-                            <span className="truncate text-slate-300">{it.product.name}</span>
+                            <span className="truncate text-slate-300">
+                              {it.product.name}
+                              {(it.saleUnitLabel || formatCartonPieceBreakdown(it, sale.currency)) && (
+                                <span className="block text-[9px] font-bold text-cyan-300">
+                                  {it.saleUnitLabel}
+                                  {it.saleUnitLabel && formatCartonPieceBreakdown(it, sale.currency) ? ' — ' : ''}
+                                  {formatCartonPieceBreakdown(it, sale.currency)}
+                                </span>
+                              )}
+                            </span>
                             <span className="font-mono text-slate-400">x{it.quantity}</span>
                           </div>
                         ))}

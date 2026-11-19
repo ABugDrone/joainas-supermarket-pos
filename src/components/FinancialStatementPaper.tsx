@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatNaira, loadPrinterConfig } from '../utils/storage';
+import { BRANDED_NAME_LINE, BRANDED_NICKNAME_LINE } from '../config/edition';
 
 export interface FinancialStatementData {
   fromDate: string;
@@ -32,7 +33,7 @@ const formatDisplayDate = (iso: string): string => {
 
 export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = ({ data, id, periodLabel }) => {
   // Letterhead always mirrors Hardware Config (business identity), never the app name.
-  let businessName = 'Kingzzy Akamelu Resources';
+  let businessName = '';
   let businessAddress = '';
   let businessPhone = '';
   let logoSrc = '/logo.png';
@@ -69,7 +70,13 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
             e.currentTarget.style.display = 'none';
           }}
         />
-        <h1 className="text-2xl font-black tracking-tight uppercase text-black">{businessName}</h1>
+        <h1 className="text-2xl font-black tracking-tight text-black">{BRANDED_NAME_LINE}</h1>
+        <p className="text-lg font-black tracking-tight text-black mt-0.5">{BRANDED_NICKNAME_LINE}</p>
+        {businessName && businessName.trim() !== BRANDED_NAME_LINE && (
+          <p className="text-[11px] font-bold text-gray-800 uppercase tracking-wider mt-1.5">
+            {businessName}
+          </p>
+        )}
         <p className="text-[11px] font-bold text-gray-800 uppercase tracking-wider mt-1">
           Statement of Profit and Loss (Income Statement)
         </p>

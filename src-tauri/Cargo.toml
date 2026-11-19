@@ -1,6 +1,6 @@
 [package]
 name = "senior-citizen-accessories-pos"
-version = "2.0.7"
+version = "2.0.8"
 description = "Kingzzy Akamelu Resources Inventory Management System"
 authors = ["Dronebug Technologies & Services"]
 edition = "2021"

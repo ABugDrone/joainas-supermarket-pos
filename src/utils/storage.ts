@@ -8,6 +8,7 @@ import {
   AuditLog,
   UserRole,
   Category,
+  DebtEntry,
 } from '../types';
 import { INITIAL_PRINTER_CONFIG, DEFAULT_CATEGORIES, LEGACY_DEFAULT_CATEGORIES } from '../data/initialData';
 import {
@@ -26,6 +27,9 @@ import {
   dbSaveCustomers,
   dbUpsertCustomers,
   dbDeleteCustomers,
+  dbLoadDebtEntries,
+  dbUpsertDebtEntries,
+  dbDeleteDebtEntries,
   dbLoadContracts,
   dbSaveContracts,
   dbLoadMicroPayments,
@@ -91,6 +95,7 @@ let initialized = false;
 
 let cacheProducts: Product[] = [];
 let cacheCustomers: Customer[] = [];
+let cacheDebtEntries: DebtEntry[] = [];
 let cacheContracts: any[] = [];
 let cacheMicroPayments: any[] = [];
 let cacheSales: SaleRecord[] = [];
@@ -414,6 +419,7 @@ interface AutosaveSnapshot {
   products: Product[];
   sales: SaleRecord[];
   customers: Customer[];
+  debtEntries?: DebtEntry[];
   expenditures: Expenditure[];
   users?: User[];
   categories?: Category[];
@@ -446,6 +452,7 @@ function buildAutosaveSnapshot(slim: boolean): AutosaveSnapshot {
     products: cacheProducts,
     sales,
     customers: cacheCustomers,
+    debtEntries: cacheDebtEntries,
     expenditures: cacheExpenditures,
     users: cacheUsers,
     categories: cacheCategories,
@@ -453,7 +460,7 @@ function buildAutosaveSnapshot(slim: boolean): AutosaveSnapshot {
     timestamp: Date.now(),
     version: 1,
     appName: 'Kingzzy Akamelu Resources',
-    appVersion: '2.0.7',
+    appVersion: '2.0.8',
   };
 }
 
@@ -565,15 +572,16 @@ export function isVaultDirty(): boolean {
 // localStorage quota blow-up, no lost deletions on the next launch.
 // ============================================================
 
-type PersistKind = 'products' | 'sales' | 'customers' | 'expenditures';
+type PersistKind = 'products' | 'sales' | 'customers' | 'debtEntries' | 'expenditures';
 
-const PERSIST_KINDS: PersistKind[] = ['products', 'sales', 'customers', 'expenditures'];
+const PERSIST_KINDS: PersistKind[] = ['products', 'sales', 'customers', 'debtEntries', 'expenditures'];
 const INCREMENTAL_DEBOUNCE_MS = 400;
 
 const persistedSigs: Record<PersistKind, Map<string, string>> = {
   products: new Map(),
   sales: new Map(),
   customers: new Map(),
+  debtEntries: new Map(),
   expenditures: new Map(),
 };
 
@@ -589,6 +597,8 @@ function rowsFor(kind: PersistKind): any[] {
       return cacheSales;
     case 'customers':
       return cacheCustomers;
+    case 'debtEntries':
+      return cacheDebtEntries;
     case 'expenditures':
       return cacheExpenditures;
   }
@@ -688,6 +698,9 @@ async function persistKind(kind: PersistKind): Promise<void> {
   } else if (kind === 'customers') {
     if (changed.length > 0) await dbUpsertCustomers(changed);
     if (removed.length > 0) await dbDeleteCustomers(removed);
+  } else if (kind === 'debtEntries') {
+    if (changed.length > 0) await dbUpsertDebtEntries(changed);
+    if (removed.length > 0) await dbDeleteDebtEntries(removed);
   } else {
     if (changed.length > 0) await dbUpsertExpenditures(changed);
     if (removed.length > 0) await dbDeleteExpenditures(removed);
@@ -874,6 +887,14 @@ export function adoptBackupPayload(parsed: any): { sales: number; users: number;
     const haveC = new Set(cacheCustomers.map((c) => c.id));
     const newCustomers = bCustomers.filter((c) => c && c.id && !haveC.has(c.id));
     if (newCustomers.length > 0) cacheCustomers = [...cacheCustomers, ...newCustomers];
+
+    // v2.0.8 debt notes travel with their customers.
+    const bDebtEntries: DebtEntry[] = Array.isArray((payload as any).debtEntries)
+      ? (payload as any).debtEntries
+      : [];
+    const haveD = new Set(cacheDebtEntries.map((e) => e.id));
+    const newDebt = bDebtEntries.filter((e) => e && e.id && !haveD.has(e.id));
+    if (newDebt.length > 0) cacheDebtEntries = [...cacheDebtEntries, ...newDebt];
 
     if (bExpenditures.length > 0 && cacheExpenditures.length === 0) {
       cacheExpenditures = bExpenditures;
@@ -1287,6 +1308,7 @@ export async function initStorage(): Promise<void> {
     const [
       products,
       customers,
+      debtEntries,
       contracts,
       microPayments,
       sales,
@@ -1299,6 +1321,7 @@ export async function initStorage(): Promise<void> {
     ] = await Promise.all([
       guarded('products', [] as Product[], () => dbLoadProducts()),
       guarded('customers', [] as Customer[], () => dbLoadCustomers()),
+      guarded('debt-entries', [] as DebtEntry[], () => dbLoadDebtEntries()),
       guarded('contracts', [] as any[], () => dbLoadContracts()),
       guarded('micro-payments', [] as any[], () => dbLoadMicroPayments()),
       guarded('sales', [] as SaleRecord[], () => dbLoadSales()),
@@ -1312,6 +1335,7 @@ export async function initStorage(): Promise<void> {
 
     cacheProducts = products;
     cacheCustomers = customers;
+    cacheDebtEntries = debtEntries;
     cacheContracts = contracts;
     cacheMicroPayments = microPayments;
     cacheSales = sales;
@@ -1564,6 +1588,7 @@ export async function initStorage(): Promise<void> {
       cacheProducts = snap0.products;
       cacheSales = snap0.sales;
       if (Array.isArray(snap0.customers)) cacheCustomers = snap0.customers;
+      if (Array.isArray(snap0.debtEntries)) cacheDebtEntries = snap0.debtEntries;
       if (Array.isArray(snap0.expenditures)) cacheExpenditures = snap0.expenditures;
       if (Array.isArray(snap0.users)) cacheUsers = snap0.users;
       if (Array.isArray(snap0.categories)) cacheCategories = snap0.categories;
@@ -1617,6 +1642,39 @@ export async function initStorage(): Promise<void> {
     registerAutosaveHooks();
     saveAutosaveSnapshot(true);
   }
+
+  // v2.0.8 — guarantee the built-in GENERAL CUSTOMER exists (first in the
+  // ledger, never deletable). Safe to run on every launch; no-op once present.
+  ensureGeneralCustomer();
+}
+
+/**
+ * Seed the walk-in GENERAL CUSTOMER if any DB predates v2.0.8. It is inserted
+ * at the FRONT so it is always the first/default entry in the ledger and POS.
+ */
+export function ensureGeneralCustomer(): void {
+  const existing = cacheCustomers.find((c) => c.id === 'cust-general');
+  if (!existing) {
+    const general: Customer = {
+      id: 'cust-general',
+      fullName: 'GENERAL CUSTOMER',
+      accountType: 'individual',
+      phone: '',
+      address: '',
+      balance: 0,
+      points: 0,
+      advancePayment: 0,
+      isGeneral: true,
+      createdAt: '2020-01-01',
+    };
+    cacheCustomers = [general, ...cacheCustomers];
+    scheduleIncremental('customers');
+  } else if (!existing.isGeneral) {
+    cacheCustomers = cacheCustomers.map((c) =>
+      c.id === 'cust-general' ? { ...c, isGeneral: true, fullName: 'GENERAL CUSTOMER' } : c
+    );
+    scheduleIncremental('customers');
+  }
 }
 
 export const isStorageInitialized = (): boolean => initialized;
@@ -1659,6 +1717,23 @@ export const saveCustomers = (customers: Customer[]) => {
   cacheCustomers = customers;
   scheduleIncremental('customers');
   saveAutosaveSnapshot();
+};
+
+// ============================================================
+// DEBT NOTES (v2.0.8 customer credit notebook)
+// ============================================================
+
+export const loadDebtEntries = (): DebtEntry[] => cacheDebtEntries;
+
+export const saveDebtEntries = (entries: DebtEntry[]) => {
+  cacheDebtEntries = entries;
+  scheduleIncremental('debtEntries');
+  saveAutosaveSnapshot();
+};
+
+/** Add one debt/payment line to the notebook. */
+export const addDebtEntry = (entry: DebtEntry): void => {
+  saveDebtEntries([...cacheDebtEntries, entry]);
 };
 
 // ---- StoreBox PRO installment ledger (contracts + micro-payments) ----
@@ -1832,6 +1907,27 @@ export const recordSaleWithStockUpdate = async (sale: SaleRecord, updatedProduct
       c.id === sale.customerId ? { ...c, balance: c.balance + sale.balanceDue } : c
     );
     scheduleIncremental('customers');
+    // v2.0.8: a credit sale writes a red "+" debt-note line for the customer.
+    if ((sale as any).paymentMode === 'credit' && sale.balanceDue > 0) {
+      cacheDebtEntries = [
+        ...cacheDebtEntries,
+        {
+          id: `debt-sale-${sale.id}`,
+          customerId: sale.customerId,
+          kind: 'charge',
+          amount: sale.balanceDue,
+          source: 'sale',
+          note: `Credit sale ${sale.receiptNo}`,
+          receiptNo: sale.receiptNo,
+          date: sale.date,
+          time: sale.time,
+          timestamp: sale.timestamp || Date.now(),
+          settled: false,
+          createdBy: sale.cashier,
+        } as DebtEntry,
+      ];
+      scheduleIncremental('debtEntries');
+    }
   }
   // Live store: the receipt and ONLY the products it touched are written.
   scheduleIncremental('sales');

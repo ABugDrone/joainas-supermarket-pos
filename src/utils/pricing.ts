@@ -1,4 +1,4 @@
-import { Product } from '../types';
+import { Product, CartItem } from '../types';
 import { formatMoney } from './currency';
 
 /**
@@ -110,4 +110,76 @@ export function formatSaleRate(soldRate: number, _currentMax: number, _saleDate?
 export function formatSoldRange(soldRate: number, _currentMax: number, code?: string | null): string {
   if (!Number.isFinite(soldRate) || soldRate <= 0) return '—';
   return formatMoney(soldRate, code);
+}
+
+// ---------------------------------------------------------------------------
+// v2.0.8 — dual-ladder pricing for carton/pack products.
+// The existing fields above describe the WHOLE carton/pack. These helpers
+// describe ONE loose piece. Old catalogues without piece prices fall back to
+// the carton price divided by piecesPerCarton, so nothing changes for them.
+// ---------------------------------------------------------------------------
+
+export function hasPiecePricing(product: Product): boolean {
+  return !!product && (
+    Number(product.pieceRetailPrice || 0) > 0 ||
+    Number(product.pieceMinPrice || 0) > 0 ||
+    (product.piecePriceTiers?.length || 0) > 0
+  );
+}
+
+/** A product-shaped view whose price fields are the per-piece ladder. */
+export function asPieceProduct(product: Product): Product {
+  return {
+    ...product,
+    costPrice: Number(product.pieceCostPrice || 0),
+    minPrice: product.pieceMinPrice,
+    retailPrice: Number(product.pieceRetailPrice || 0),
+    priceTiers: product.piecePriceTiers,
+  };
+}
+
+function perCarton(product: Product): number {
+  const per = Number(product.piecesPerCarton || 0);
+  return per > 0 ? per : 1;
+}
+
+export function getPieceCeilingFor(product: Product, qty: number = 1): number {
+  if (hasPiecePricing(product)) return getCeilingFor(asPieceProduct(product), qty);
+  return Number(product.retailPrice || 0) / perCarton(product);
+}
+
+export function getPieceFloorFor(product: Product, qty: number = 1): number {
+  if (hasPiecePricing(product)) return getFloorFor(asPieceProduct(product), qty);
+  return Number(product.minPrice || 0) / perCarton(product);
+}
+
+export function getPieceDefaultRate(product: Product, qty: number = 1): number {
+  if (hasPiecePricing(product)) return getDefaultRate(asPieceProduct(product), qty);
+  if (Number(product.retailPrice || 0) > 0) return Number(product.retailPrice) / perCarton(product);
+  return Number(product.minPrice || 0) / perCarton(product);
+}
+
+/** Human-readable dual-ladder breakdown for a carton/piece sale line. */
+export function formatCartonPieceBreakdown(item: CartItem, code?: string | null): string {
+  const parts: string[] = [];
+  const unit = item.product.unit === 'pack' ? 'pack' : 'carton';
+  if (Number(item.cartonQty || 0) > 0) {
+    parts.push(`${item.cartonQty} ${unit}${item.cartonQty === 1 ? '' : 's'} × ${formatMoney(item.cartonRate || 0, code)}`);
+  }
+  if (Number(item.pieceQty || 0) > 0) {
+    parts.push(`${item.pieceQty} pc${item.pieceQty === 1 ? '' : 's'} × ${formatMoney(item.pieceRate || 0, code)}`);
+  }
+  return parts.join(' + ');
+}
+
+/** Tiny sub-label used in inventory and POS: "Cost 4,000 · Min 4,500 · Max 5,000" */
+export function formatPiecePriceDetail(product: Product, code?: string | null): string {
+  const parts: string[] = [];
+  const cost = Number(hasPiecePricing(product) ? product.pieceCostPrice || 0 : Number(product.costPrice || 0) / perCarton(product));
+  const min = getPieceFloorFor(product, 1);
+  const max = getPieceCeilingFor(product, 1);
+  if (cost > 0) parts.push(`Cost ${formatMoney(cost, code)}`);
+  if (min > 0 && min < NO_CEILING) parts.push(`Min ${formatMoney(min, code)}`);
+  if (max > 0 && max < NO_CEILING) parts.push(`Max ${formatMoney(max, code)}`);
+  return parts.join(' · ');
 }

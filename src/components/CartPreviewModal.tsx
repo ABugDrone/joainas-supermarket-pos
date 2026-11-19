@@ -3,6 +3,7 @@ import { HeaderLogo } from './HeaderLogo';
 import { CartItem, Customer, PriceType, ThermalPrinterConfig } from '../types';
 import { formatNaira } from '../utils/storage';
 import { ShoppingCart, ArrowLeft, CheckCircle2, X } from 'lucide-react';
+import { formatCartonPieceBreakdown } from '../utils/pricing';
 
 interface CartPreviewModalProps {
   isOpen: boolean;
@@ -64,7 +65,7 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
             <HeaderLogo size="md" />
 
             <div className="text-center sm:text-right text-sm text-[var(--text-secondary)] space-y-0.5">
-              <div className="font-bold text-[var(--text-primary)]">{printerConfig.businessName || printerConfig.storeName || 'Kingzzy Akamelu Resources'}</div>
+              <div className="font-bold text-[var(--text-primary)]">{printerConfig.businessName || printerConfig.storeName || ''}</div>
               <div className="text-[var(--accent-color)] font-semibold">{printerConfig.tagline}</div>
               <div className="text-[var(--text-muted)]">{printerConfig.address}</div>
             </div>
@@ -109,6 +110,13 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
                     <td className="py-3.5 px-4">
                       <div className="font-semibold text-[var(--text-primary)]">{item.product.name}</div>
                       <div className="text-xs text-[var(--accent-color)] uppercase">{item.product.category}</div>
+                      {(item.saleUnitLabel || formatCartonPieceBreakdown(item)) && (
+                        <div className="text-[10px] font-bold text-cyan-500">
+                          {item.saleUnitLabel}
+                          {item.saleUnitLabel && formatCartonPieceBreakdown(item) ? ' — ' : ''}
+                          {formatCartonPieceBreakdown(item)}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-center text-[var(--text-secondary)] font-medium uppercase text-xs">{item.product.unit}</td>
                     <td className="py-3.5 px-4 text-right text-[var(--text-secondary)] font-mono text-sm">{formatNaira(item.rate)}</td>

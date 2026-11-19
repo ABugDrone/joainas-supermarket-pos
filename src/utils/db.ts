@@ -9,6 +9,7 @@ import {
   User,
   AuditLog,
   Category,
+  DebtEntry,
 } from '../types';
 
 // Tauri runtime detection — the SQL plugin only exists inside the desktop shell.
@@ -117,6 +118,12 @@ const SCHEMA_CREATES: string[] = [
     wholesale_price REAL NOT NULL DEFAULT 0.0,
     stock_qty INTEGER NOT NULL DEFAULT 0,
     reorder_level INTEGER NOT NULL DEFAULT 5,
+    pieces_per_carton INTEGER NOT NULL DEFAULT 0,
+    loose_pieces INTEGER NOT NULL DEFAULT 0,
+    piece_cost_price REAL NOT NULL DEFAULT 0.0,
+    piece_min_price REAL,
+    piece_retail_price REAL NOT NULL DEFAULT 0.0,
+    piece_price_tiers TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`,
@@ -130,6 +137,8 @@ const SCHEMA_CREATES: string[] = [
     points INTEGER NOT NULL DEFAULT 0,
     advance_payment REAL NOT NULL DEFAULT 0.0,
     assigned_cashier TEXT,
+    settlement_date TEXT,
+    is_general INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS sales (
@@ -151,6 +160,8 @@ const SCHEMA_CREATES: string[] = [
     cashier_username TEXT NOT NULL,
     sale_date TEXT NOT NULL,
     sale_time TEXT NOT NULL,
+    cash_discount REAL NOT NULL DEFAULT 0.0,
+    payment_mode TEXT NOT NULL DEFAULT 'full',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS sale_items (
@@ -161,7 +172,30 @@ const SCHEMA_CREATES: string[] = [
     quantity INTEGER NOT NULL DEFAULT 1,
     price_type TEXT CHECK(price_type IN ('retail', 'wholesale')) NOT NULL,
     rate REAL NOT NULL,
-    amount REAL NOT NULL
+    amount REAL NOT NULL,
+    carton_qty INTEGER NOT NULL DEFAULT 0,
+    piece_qty INTEGER NOT NULL DEFAULT 0,
+    pieces_per_carton INTEGER NOT NULL DEFAULT 0,
+    sale_unit_label TEXT,
+    carton_rate REAL NOT NULL DEFAULT 0.0,
+    piece_rate REAL NOT NULL DEFAULT 0.0,
+    sale_mode TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS debt_entries (
+    id TEXT PRIMARY KEY NOT NULL,
+    customer_id TEXT NOT NULL,
+    kind TEXT CHECK(kind IN ('charge', 'payment')) NOT NULL,
+    amount REAL NOT NULL DEFAULT 0.0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    note TEXT,
+    receipt_no TEXT,
+    entry_date TEXT NOT NULL,
+    entry_time TEXT NOT NULL,
+    entry_timestamp INTEGER NOT NULL,
+    settlement_date TEXT,
+    settled INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS expenditures (
     id TEXT PRIMARY KEY NOT NULL,
@@ -264,6 +298,8 @@ const SCHEMA_INDEXES: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_contracts_status ON contracts(status)',
   'CREATE INDEX IF NOT EXISTS idx_payments_contract ON micro_payments(contract_id)',
   'CREATE INDEX IF NOT EXISTS idx_payments_customer ON micro_payments(customer_id)',
+  'CREATE INDEX IF NOT EXISTS idx_debt_entries_customer ON debt_entries(customer_id)',
+  'CREATE INDEX IF NOT EXISTS idx_debt_entries_settlement ON debt_entries(settlement_date)',
   'CREATE INDEX IF NOT EXISTS idx_expenditures_date ON expenditures(expense_date)',
   'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(log_timestamp DESC)',
   'CREATE INDEX IF NOT EXISTS idx_audit_logs_username ON audit_logs(username)',
@@ -325,6 +361,8 @@ export async function bootstrapSchema(d: Database): Promise<void> {
           points INTEGER NOT NULL DEFAULT 0,
           advance_payment REAL NOT NULL DEFAULT 0.0,
           assigned_cashier TEXT,
+          settlement_date TEXT,
+          is_general INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
         []
@@ -373,6 +411,12 @@ export async function bootstrapSchema(d: Database): Promise<void> {
           reorder_level INTEGER NOT NULL DEFAULT 5,
           min_price REAL,
           price_tiers TEXT,
+          pieces_per_carton INTEGER NOT NULL DEFAULT 0,
+          loose_pieces INTEGER NOT NULL DEFAULT 0,
+          piece_cost_price REAL NOT NULL DEFAULT 0.0,
+          piece_min_price REAL,
+          piece_retail_price REAL NOT NULL DEFAULT 0.0,
+          piece_price_tiers TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
@@ -427,6 +471,26 @@ export async function bootstrapSchema(d: Database): Promise<void> {
   await ensureColumn(d, 'products', 'min_price', 'ALTER TABLE products ADD COLUMN min_price REAL');
   await ensureColumn(d, 'products', 'price_tiers', 'ALTER TABLE products ADD COLUMN price_tiers TEXT');
 
+  // 3b. v2.0.8 — carton/pack + debt-notebook columns (all additive & safe).
+  await ensureColumn(d, 'products', 'pieces_per_carton', 'ALTER TABLE products ADD COLUMN pieces_per_carton INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(d, 'products', 'loose_pieces', 'ALTER TABLE products ADD COLUMN loose_pieces INTEGER NOT NULL DEFAULT 0');
+  // v2.0.8 dual-ladder pricing — per-piece prices alongside the carton ladder.
+  await ensureColumn(d, 'products', 'piece_cost_price', 'ALTER TABLE products ADD COLUMN piece_cost_price REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'products', 'piece_min_price', 'ALTER TABLE products ADD COLUMN piece_min_price REAL');
+  await ensureColumn(d, 'products', 'piece_retail_price', 'ALTER TABLE products ADD COLUMN piece_retail_price REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'products', 'piece_price_tiers', 'ALTER TABLE products ADD COLUMN piece_price_tiers TEXT');
+  await ensureColumn(d, 'customers', 'settlement_date', 'ALTER TABLE customers ADD COLUMN settlement_date TEXT');
+  await ensureColumn(d, 'customers', 'is_general', 'ALTER TABLE customers ADD COLUMN is_general INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(d, 'sales', 'cash_discount', 'ALTER TABLE sales ADD COLUMN cash_discount REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sales', 'payment_mode', 'ALTER TABLE sales ADD COLUMN payment_mode TEXT NOT NULL DEFAULT \'full\'');
+  await ensureColumn(d, 'sale_items', 'carton_qty', 'ALTER TABLE sale_items ADD COLUMN carton_qty INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(d, 'sale_items', 'piece_qty', 'ALTER TABLE sale_items ADD COLUMN piece_qty INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(d, 'sale_items', 'pieces_per_carton', 'ALTER TABLE sale_items ADD COLUMN pieces_per_carton INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(d, 'sale_items', 'sale_unit_label', 'ALTER TABLE sale_items ADD COLUMN sale_unit_label TEXT');
+  await ensureColumn(d, 'sale_items', 'carton_rate', 'ALTER TABLE sale_items ADD COLUMN carton_rate REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sale_items', 'piece_rate', 'ALTER TABLE sale_items ADD COLUMN piece_rate REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sale_items', 'sale_mode', 'ALTER TABLE sale_items ADD COLUMN sale_mode TEXT');
+
   // 4. Indexes (idempotent).
   for (const sql of SCHEMA_INDEXES) {
     try {
@@ -444,7 +508,7 @@ export async function bootstrapSchema(d: Database): Promise<void> {
         receipt_header_note, receipt_footer_note, show_logo,
         paper_width, auto_print_on_sale, point_rate, print_density, printer_name
       ) VALUES (
-        1, 'Kingzzy Akamelu Resources', '', 'New Motor Park Road, Opposite NNPC filing station, Jimeta Car wash, Jimeta Yola.', '07043344706 / 07039809970', 'WELCOME TO Kingzzy Akamelu Resources', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
+        1, '', '', '', '', '', '', 1, '80mm', 1, 2, 'Normal', 'XP-80C'
       )
       ON CONFLICT(id) DO NOTHING`,
       []
@@ -546,6 +610,13 @@ export function mapProduct(row: any): Product {
       if (Array.isArray(p)) parsedTiers = p;
     }
   } catch {}
+  let parsedPieceTiers: any[] | undefined;
+  try {
+    if (row.piece_price_tiers) {
+      const p = typeof row.piece_price_tiers === 'string' ? JSON.parse(row.piece_price_tiers) : row.piece_price_tiers;
+      if (Array.isArray(p)) parsedPieceTiers = p;
+    }
+  } catch {}
   return {
     id: row.id,
     barcode: row.barcode,
@@ -560,6 +631,12 @@ export function mapProduct(row: any): Product {
     priceTiers: parsedTiers as any,
     stockQty: row.stock_qty,
     reorderLevel: row.reorder_level,
+    piecesPerCarton: row.pieces_per_carton || 0,
+    loosePieces: row.loose_pieces || 0,
+    pieceCostPrice: row.piece_cost_price || 0,
+    pieceMinPrice: row.piece_min_price ?? undefined,
+    pieceRetailPrice: row.piece_retail_price || 0,
+    piecePriceTiers: parsedPieceTiers as any,
   };
 }
 
@@ -576,6 +653,8 @@ export function mapCustomer(row: any): Customer {
     points: row.points,
     advancePayment: row.advance_payment,
     assignedCashier: row.assigned_cashier || undefined,
+    settlementDate: row.settlement_date || undefined,
+    isGeneral: !!row.is_general,
     createdAt: row.created_at,
   };
 }
@@ -683,6 +762,13 @@ export function mapSale(row: any, productLookup: Map<string, Product>): SaleReco
       ceilingAtSale: it.rate,
       floorAtSale: it.rate,
       amount: it.amount,
+      cartonQty: it.carton_qty || 0,
+      pieceQty: it.piece_qty || 0,
+      piecesPerCarton: it.pieces_per_carton || 0,
+      saleUnitLabel: it.sale_unit_label || undefined,
+      cartonRate: it.carton_rate || 0,
+      pieceRate: it.piece_rate || 0,
+      saleMode: it.sale_mode || undefined,
     };
   });
 
@@ -708,6 +794,8 @@ export function mapSale(row: any, productLookup: Map<string, Product>): SaleReco
     time: row.sale_time,
     timestamp: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
     currency: row.currency || undefined,
+    cashDiscount: row.cash_discount || 0,
+    paymentMode: row.payment_mode === 'credit' ? 'credit' : 'full',
   };
 }
 
@@ -870,6 +958,12 @@ const PRODUCT_COLUMNS: ColumnSpec[] = [
   { col: 'price_tiers', value: (p) => JSON.stringify((p as any).priceTiers || []) },
   { col: 'stock_qty', value: (p) => p.stockQty },
   { col: 'reorder_level', value: (p) => p.reorderLevel },
+  { col: 'pieces_per_carton', value: (p) => (p as any).piecesPerCarton || 0 },
+  { col: 'loose_pieces', value: (p) => (p as any).loosePieces || 0 },
+  { col: 'piece_cost_price', value: (p) => (p as any).pieceCostPrice || 0 },
+  { col: 'piece_min_price', value: (p) => (p as any).pieceMinPrice ?? null },
+  { col: 'piece_retail_price', value: (p) => (p as any).pieceRetailPrice || 0 },
+  { col: 'piece_price_tiers', value: (p) => JSON.stringify((p as any).piecePriceTiers || []) },
 ];
 
 export async function dbSaveProducts(products: Product[]): Promise<void> {
@@ -941,6 +1035,8 @@ const CUSTOMER_COLUMNS: ColumnSpec[] = [
   { col: 'points', value: (c) => c.points ?? 0 },
   { col: 'advance_payment', value: (c) => c.advancePayment ?? 0 },
   { col: 'assigned_cashier', value: (c) => c.assignedCashier || null },
+  { col: 'settlement_date', value: (c) => (c as any).settlementDate || null },
+  { col: 'is_general', value: (c) => ((c as any).isGeneral ? 1 : 0) },
   { col: 'created_at', value: (c) => c.createdAt },
 ];
 
@@ -963,6 +1059,68 @@ export async function dbDeleteCustomers(ids: string[]): Promise<void> {
   const d = await getDb();
   if (!d) return;
   await d.execute(`DELETE FROM customers WHERE id IN (SELECT value FROM json_each(?))`, [JSON.stringify(ids)]);
+}
+
+// ============================================================
+// DEBT ENTRIES (v2.0.8 customer credit notebook)
+// ============================================================
+
+function mapDebtEntry(row: any): DebtEntry {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    kind: row.kind === 'payment' ? 'payment' : 'charge',
+    amount: row.amount,
+    source: row.source || 'manual',
+    note: row.note || undefined,
+    receiptNo: row.receipt_no || undefined,
+    date: row.entry_date,
+    time: row.entry_time,
+    timestamp: row.entry_timestamp,
+    settlementDate: row.settlement_date || undefined,
+    settled: !!row.settled,
+    createdBy: row.created_by || undefined,
+  };
+}
+
+const DEBT_ENTRY_COLUMNS: ColumnSpec[] = [
+  { col: 'customer_id', value: (e) => e.customerId },
+  { col: 'kind', value: (e) => (e.kind === 'payment' ? 'payment' : 'charge') },
+  { col: 'amount', value: (e) => e.amount },
+  { col: 'source', value: (e) => e.source || 'manual' },
+  { col: 'note', value: (e) => e.note || null },
+  { col: 'receipt_no', value: (e) => e.receiptNo || null },
+  { col: 'entry_date', value: (e) => e.date },
+  { col: 'entry_time', value: (e) => e.time },
+  { col: 'entry_timestamp', value: (e) => e.timestamp },
+  { col: 'settlement_date', value: (e) => e.settlementDate || null },
+  { col: 'settled', value: (e) => (e.settled ? 1 : 0) },
+  { col: 'created_by', value: (e) => e.createdBy || null },
+];
+
+export async function dbLoadDebtEntries(): Promise<DebtEntry[]> {
+  const d = await getDb();
+  if (!d) return [];
+  try {
+    const rows = await d.select<any[]>('SELECT * FROM debt_entries ORDER BY entry_timestamp ASC');
+    return rows.map(mapDebtEntry);
+  } catch {
+    return [];
+  }
+}
+
+export async function dbUpsertDebtEntries(entries: DebtEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await upsertRows(d, 'debt_entries', 'id', DEBT_ENTRY_COLUMNS, entries);
+}
+
+export async function dbDeleteDebtEntries(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const d = await getDb();
+  if (!d) return;
+  await d.execute(`DELETE FROM debt_entries WHERE id IN (SELECT value FROM json_each(?))`, [JSON.stringify(ids)]);
 }
 
 // ============================================================
@@ -1011,6 +1169,8 @@ const SALE_COLUMNS: ColumnSpec[] = [
   { col: 'sale_date', value: (s) => s.date },
   { col: 'sale_time', value: (s) => s.time },
   { col: 'currency', value: (s) => s.currency || null },
+  { col: 'cash_discount', value: (s) => (s as any).cashDiscount || 0 },
+  { col: 'payment_mode', value: (s) => ((s as any).paymentMode === 'credit' ? 'credit' : 'full') },
 ];
 
 const SALE_ITEM_COLUMNS: ColumnSpec[] = [
@@ -1021,6 +1181,13 @@ const SALE_ITEM_COLUMNS: ColumnSpec[] = [
   { col: 'price_type', value: (it) => it.priceType },
   { col: 'rate', value: (it) => it.rate },
   { col: 'amount', value: (it) => it.amount },
+  { col: 'carton_qty', value: (it) => (it as any).cartonQty || 0 },
+  { col: 'piece_qty', value: (it) => (it as any).pieceQty || 0 },
+  { col: 'pieces_per_carton', value: (it) => (it as any).piecesPerCarton || 0 },
+  { col: 'sale_unit_label', value: (it) => (it as any).saleUnitLabel || null },
+  { col: 'carton_rate', value: (it) => (it as any).cartonRate || 0 },
+  { col: 'piece_rate', value: (it) => (it as any).pieceRate || 0 },
+  { col: 'sale_mode', value: (it) => (it as any).saleMode || null },
 ];
 
 // Build sale-item rows from the in-memory receipt.
@@ -1064,6 +1231,10 @@ export function saleItemRows(sales: SaleRecord[]): Array<Record<string, unknown>
         priceType: item.priceType === 'wholesale' ? 'wholesale' : 'retail',
         rate,
         amount,
+        cartonQty: item.cartonQty || 0,
+        pieceQty: item.pieceQty || 0,
+        piecesPerCarton: item.piecesPerCarton || 0,
+        saleUnitLabel: item.saleUnitLabel || null,
       });
     }
   }

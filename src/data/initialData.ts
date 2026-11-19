@@ -224,7 +224,23 @@ export const INITIAL_PRODUCTS: Product[] = [
   }
 ];
 
+export const GENERAL_CUSTOMER_ID = 'cust-general';
+export const GENERAL_CUSTOMER_NAME = 'GENERAL CUSTOMER';
+
 export const INITIAL_CUSTOMERS: Customer[] = [
+  {
+    // v2.0.8 — first/default customer for walk-ins who leave no details.
+    id: GENERAL_CUSTOMER_ID,
+    fullName: GENERAL_CUSTOMER_NAME,
+    accountType: 'individual',
+    phone: '',
+    address: '',
+    balance: 0,
+    points: 0,
+    advancePayment: 0,
+    isGeneral: true,
+    createdAt: '2020-01-01',
+  },
   {
     id: 'cust-1',
     fullName: 'Demo Walk-in Customer',
@@ -272,17 +288,17 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 ];
 
 export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
-  storeName: 'Kingzzy Akamelu Resources',
+  storeName: '',
   tagline: 'Inventory Management System',
-  // Shop address and phone numbers supplied by the owner. Editable in
-  // Hardware Config -> Receipt Printer.
-  address: 'New Motor Park Road, Opposite NNPC filing station, Jimeta Car wash, Jimeta Yola.',
-  phone: '07043344706 / 07039809970',
-  receiptHeaderNote: 'WELCOME TO Kingzzy Akamelu Resources',
+  // User-configured only: the business owner sets their own name, address and
+  // phone in Hardware Config -> Receipt Printer. No hardcoded business identity.
+  address: '',
+  phone: '',
+  receiptHeaderNote: '',
   receiptFooterNote: 'Thank you for your patronage! Please come again.',
   showLogo: true,
   logoDataUrl: undefined,
-  businessName: 'Kingzzy Akamelu Resources',
+  businessName: '',
   paperWidth: '80mm',
   autoPrintOnSale: true,
   pointRate: 0,
@@ -294,7 +310,7 @@ export const DEVELOPER_INFO: StoreDeveloperInfo = {
   company: 'Dronebug Technologies & Services',
   email: 'dronebugtechnologies@gmail.com',
   phone: '+2347035716349',
-  appVersion: 'v2.0.7 Kingzzy Akamelu Resources (React + Vite + Tauri Engine)',
+  appVersion: 'v2.0.8 Kingzzy Akamelu Resources (React + Vite + Tauri Engine)',
 };
 
 export const INITIAL_SALES: SaleRecord[] = [

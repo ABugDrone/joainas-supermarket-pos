@@ -3506,7 +3506,7 @@ dependencies = [
 
 [[package]]
 name = "senior-citizen-accessories-pos"
-version = "2.0.7"
+version = "2.0.8"
 dependencies = [
  "chrono",
  "serde",

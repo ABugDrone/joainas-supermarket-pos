@@ -1,8 +1,7 @@
 import React from 'react';
-import { Users, Plus, Search, Phone, Pencil, Trash2, X, ReceiptText, Wallet } from 'lucide-react';
-import { Customer, SaleRecord, UserRole, User, CustomerAccountType, InstallmentContract, MicroPayment } from '../types';
-import {
-  formatNaira, recordAuditLog, loadContracts, loadMicroPayments, saveContracts,
+import { Users, Plus, Search, Phone, Pencil, Trash2, X, ReceiptText, Wallet, AlertTriangle } from 'lucide-react';
+import { Customer, SaleRecord, UserRole, User, CustomerAccountType, InstallmentContract, MicroPayment, DebtEntry } from '../types';
+import { formatNaira, recordAuditLog, loadContracts, loadMicroPayments, saveContracts,
   recordMicroPayment, deleteMicroPayment, setMicroRemitted, setContractDownRemitted,
   clearDemoLedgerData, saveCustomers, loadCustomers,
 } from '../utils/storage';
@@ -20,6 +19,10 @@ interface CustomerModuleProps {
   onAddCustomer: (customer: Customer) => void;
   onUpdateCustomerBalance: (customerId: string, amountPaid: number) => void;
   onCustomersChanged?: (customers: Customer[]) => void;
+  /** v2.0.8 debt notebook */
+  debtEntries?: DebtEntry[];
+  onAddDebtEntry?: (entry: DebtEntry) => void;
+  onSettleCustomerDebt?: (customerId: string, settled: boolean) => void;
 }
 
 type FilterChip = 'all' | 'active' | 'completed';
@@ -33,6 +36,9 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
   onAddCustomer,
   onUpdateCustomerBalance,
   onCustomersChanged,
+  debtEntries = [],
+  onAddDebtEntry,
+  onSettleCustomerDebt,
 }) => {
   const { showToast } = useToast();
   const { symbol: curSym } = useCurrency();
@@ -80,6 +86,16 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
   const [collectAmount, setCollectAmount] = React.useState(0);
   const [collectNote, setCollectNote] = React.useState('');
   const [collectRemitted, setCollectRemitted] = React.useState(false);
+
+  // v2.0.8 debt notebook form
+  const [showDebtModal, setShowDebtModal] = React.useState(false);
+  const [debtCustomerId, setDebtCustomerId] = React.useState('');
+  const [debtKind, setDebtKind] = React.useState<'charge' | 'payment'>('charge');
+  const [debtSource, setDebtSource] = React.useState<'sale' | 'cash' | 'manual'>('manual');
+  const [debtAmount, setDebtAmount] = React.useState(0);
+  const [debtNote, setDebtNote] = React.useState('');
+  const [debtSettlementDate, setDebtSettlementDate] = React.useState('');
+  const [previewCustomerId, setPreviewCustomerId] = React.useState<string | null>(null);
 
   const isViewerAdmin = can({ capabilities: currentUserCapabilities }, 'admin');
   const canAccessCustomer = (c: Customer): boolean => {
@@ -135,11 +151,80 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
     return { totalContract, totalPaid, pending, count: list.length };
   };
 
+  const debtEntriesByCustomer = React.useMemo(() => {
+    const m = new Map<string, DebtEntry[]>();
+    debtEntries.forEach((e) => {
+      const l = m.get(e.customerId) || [];
+      l.push(e);
+      m.set(e.customerId, l);
+    });
+    m.forEach((l) => l.sort((a, b) => a.timestamp - b.timestamp));
+    return m;
+  }, [debtEntries]);
+
+  const customersWithDebt = React.useMemo(
+    () => visibleCustomers.filter((c) => c.balance > 0.005),
+    [visibleCustomers]
+  );
+
+  const openDebtModal = (kind: 'charge' | 'payment', customerId?: string) => {
+    setDebtKind(kind);
+    setDebtCustomerId(customerId || previewCustomerId || visibleCustomers[0]?.id || '');
+    setDebtSource(kind === 'payment' ? 'cash' : 'manual');
+    setDebtAmount(0);
+    setDebtNote('');
+    setDebtSettlementDate('');
+    setShowDebtModal(true);
+  };
+
+  const handleSaveDebtEntry = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onAddDebtEntry) { showToast('Debt notebook is unavailable.', 'error'); return; }
+    if (!debtCustomerId) { showToast('Select a customer.', 'error'); return; }
+    if (debtAmount <= 0) { showToast('Enter an amount greater than zero.', 'error'); return; }
+    const now = new Date();
+    const entry: DebtEntry = {
+      id: `debt-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      customerId: debtCustomerId,
+      kind: debtKind,
+      amount: debtAmount,
+      source: debtSource,
+      note: debtNote.trim() || undefined,
+      date: now.toLocaleDateString('en-CA'),
+      time: now.toLocaleTimeString('en-GB'),
+      timestamp: now.getTime(),
+      settlementDate: debtSettlementDate || undefined,
+      settled: false,
+      createdBy: currentUser,
+    };
+    onAddDebtEntry(entry);
+    recordAuditLog(
+      currentUser,
+      currentUserRole,
+      debtKind === 'charge' ? 'Added Customer Debt' : 'Recorded Debt Payment',
+      `${debtKind === 'charge' ? 'Charged' : 'Collected'} ${formatNaira(debtAmount)} (${debtSource}) for ${visibleCustomers.find((c) => c.id === debtCustomerId)?.fullName}.`
+    );
+    showToast(debtKind === 'charge' ? 'Debt added (red +).' : 'Payment recorded (green −).', 'success');
+    setShowDebtModal(false);
+  };
+
+  const handleSettle = (c: Customer) => {
+    if (!onSettleCustomerDebt) return;
+    if (!window.confirm(`Mark ALL outstanding debt for "${c.fullName}" as settled? This clears their debt reminder.`)) return;
+    onSettleCustomerDebt(c.id, true);
+    recordAuditLog(currentUser, currentUserRole, 'Settled Customer Debt', `${c.fullName} — balance ${formatNaira(c.balance)} settled (crossed off).`);
+    showToast(`Debt for ${c.fullName} crossed off.`, 'success');
+  };
+
   const openNew = () => {
     setEditing(null); setFullName(''); setAccountType('individual'); setPhoneNo(''); setAddress(''); setNin(''); setBvn('');
     setIsNewCustomerModalOpen(true);
   };
   const openEdit = (c: Customer) => {
+    if (c.isGeneral || c.id === 'cust-general') {
+      showToast('GENERAL CUSTOMER is the built-in walk-in account and cannot be renamed.', 'error');
+      return;
+    }
     setEditing(c); setFullName(c.fullName); setAccountType(c.accountType); setPhoneNo(c.phone || ''); setAddress(c.address); setNin(c.nin || ''); setBvn(c.bvn || '');
     setIsNewCustomerModalOpen(true);
   };
@@ -163,6 +248,10 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
   };
 
   const handleDeleteCustomer = (c: Customer) => {
+    if (c.isGeneral || c.id === 'cust-general') {
+      showToast('GENERAL CUSTOMER is the built-in walk-in account and cannot be deleted.', 'error');
+      return;
+    }
     if (!window.confirm(`Delete customer "${c.fullName}" and their contracts? This cannot be undone.`)) return;
     const updated = customers.filter((x) => x.id !== c.id);
     saveCustomers(updated);
@@ -266,6 +355,128 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
         <Search className="w-4 h-4 text-slate-400" />
         <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Quick-search name or phone..." className="flex-1 bg-transparent outline-none text-sm text-white placeholder:text-slate-500" />
       </div>
+
+      {/* v2.0.8 — DEBT NOTE (notebook-style credit ledger) */}
+      <section className="bg-[#161b22] border border-[#30363d] rounded-2xl overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-[#30363d]">
+          <div>
+            <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+              <Wallet className="w-5 h-5 text-amber-400" /> Debt Note
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Each line is a customer. <span className="text-emerald-400 font-bold">Green −</span> = paying off debt (cross off when full).{' '}
+              <span className="text-red-400 font-bold">Red +</span> = debt added (sale or cash).
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => openDebtModal('payment')} className="px-3 py-2 rounded-lg bg-emerald-950/50 border border-emerald-700/60 text-emerald-300 text-xs font-bold hover:bg-emerald-900/50">− Record Payment</button>
+            <button onClick={() => openDebtModal('charge')} className="px-3 py-2 rounded-lg bg-red-950/50 border border-red-700/60 text-red-300 text-xs font-bold hover:bg-red-900/50">+ Add Debt</button>
+          </div>
+        </div>
+
+        {/* Ledger banner — overdue / due-today settlements stay red until settled */}
+        {(() => {
+          const today = new Date().toLocaleDateString('en-CA');
+          const due = customersWithDebt.filter((c) => c.settlementDate && c.settlementDate <= today);
+          if (due.length === 0) return null;
+          return (
+            <div className="mx-4 mt-3 rounded-lg border border-red-700/60 bg-red-950/30 px-4 py-2.5 flex items-center gap-2 text-red-300 text-xs font-bold">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>
+                {due.length} customer{due.length > 1 ? 's' : ''} due for collection:{' '}
+                {due.map((c) => c.fullName).join(', ')}. Settlement date reached — collect or cross off.
+              </span>
+            </div>
+          );
+        })()}
+
+        <div className="divide-y divide-[#21262d]">
+          {customersWithDebt.length === 0 && (
+            <div className="px-5 py-8 text-center text-slate-500 text-sm">
+              No outstanding debts. Everyone is clear. 🎉
+            </div>
+          )}
+          {customersWithDebt.map((c) => {
+            const entries = debtEntriesByCustomer.get(c.id) || [];
+            const today = new Date().toLocaleDateString('en-CA');
+            const isDue = !!c.settlementDate && c.settlementDate <= today;
+            const isPreview = previewCustomerId === c.id;
+            return (
+              <div key={c.id}>
+                <div className="px-4 py-3 flex items-center gap-3 hover:bg-[#1c2128] transition">
+                  <button
+                    onClick={() => setPreviewCustomerId(isPreview ? null : c.id)}
+                    className="min-w-0 flex-1 text-left"
+                    title="Preview this customer's debt payments & receipts"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white truncate">{c.fullName}</span>
+                      {c.isGeneral && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">WALK-IN</span>}
+                      {isDue && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-900 text-red-200 animate-pulse">DUE</span>}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Outstanding balance: <span className="text-red-400 font-black">{formatNaira(c.balance)}</span>
+                      {c.settlementDate ? ` · Settle by ${c.settlementDate}` : ''} · {entries.length} note line(s) {isPreview ? '▴' : '▾'}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => openDebtModal('payment', c.id)}
+                    className="shrink-0 w-8 h-8 rounded-full bg-emerald-950/60 border border-emerald-600/60 text-emerald-400 font-black text-lg hover:bg-emerald-900/60"
+                    title="Green − : this customer is paying off their debt"
+                  >−</button>
+                  <button
+                    onClick={() => openDebtModal('charge', c.id)}
+                    className="shrink-0 w-8 h-8 rounded-full bg-red-950/60 border border-red-600/60 text-red-400 font-black text-lg hover:bg-red-900/60"
+                    title="Red + : add a new debt (sale or cash)"
+                  >+</button>
+                  <button
+                    onClick={() => handleSettle(c)}
+                    className="shrink-0 px-2 py-1 rounded border border-slate-600 text-slate-300 text-[10px] font-bold hover:border-emerald-500 hover:text-emerald-400"
+                    title="Cross off — full payment, debt settled"
+                  >Cross off</button>
+                </div>
+                {isPreview && (
+                  <div className="px-4 pb-3">
+                    <div className="rounded-lg bg-[#0d1117] border border-[#30363d] p-3">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-slate-400 mb-2">
+                        Debt payments & receipts — {c.fullName}
+                      </div>
+                      {entries.length === 0 ? (
+                        <div className="text-[11px] text-slate-500 text-center py-3">No debt lines recorded yet.</div>
+                      ) : (
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                          {entries.map((e) => (
+                            <div key={e.id} className="flex items-center justify-between gap-2 text-[11px] border-b border-[#21262d] last:border-0 pb-1.5">
+                              <div className="min-w-0">
+                                <span className={e.kind === 'payment' ? 'text-emerald-400 font-black' : 'text-red-400 font-black'}>
+                                  {e.kind === 'payment' ? '−' : '+'} {formatNaira(e.amount)}
+                                </span>
+                                <span className="text-slate-400 ml-2">
+                                  {e.date} {e.time} · {e.source}
+                                  {e.receiptNo ? ` · ${e.receiptNo}` : ''}
+                                  {e.note ? ` · ${e.note}` : ''}
+                                </span>
+                                {e.settlementDate && (
+                                  <span className="block text-[10px] text-amber-400">Settlement date: {e.settlementDate}</span>
+                                )}
+                              </div>
+                              {e.kind === 'charge' && (
+                                <span className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded ${e.settled ? 'bg-emerald-950 text-emerald-300' : 'bg-red-950 text-red-300'}`}>
+                                  {e.settled ? 'SETTLED' : 'OPEN'}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {filtered.map((c) => {
@@ -413,6 +624,51 @@ export const CustomerModule: React.FC<CustomerModuleProps> = ({
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setCollectContractId(null)} className="py-2 px-4 bg-[#21262d] border border-[#30363d] text-slate-300 font-bold rounded text-xs">Cancel</button>
                 <button type="submit" className="py-2 px-4 bg-emerald-600 text-white font-bold rounded text-xs border border-emerald-500">Record Payment</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* v2.0.8 — Debt note entry modal (charge / payment) */}
+      {showDebtModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="w-full max-w-sm bg-[#161b22] border border-[#30363d] rounded-xl p-5 max-h-[92vh] overflow-y-auto">
+            <h3 className={`font-extrabold text-sm uppercase text-center ${debtKind === 'charge' ? 'text-red-400' : 'text-emerald-400'}`}>
+              {debtKind === 'charge' ? '+ Add Debt (Red)' : '− Record Payment (Green)'}
+            </h3>
+            <form onSubmit={handleSaveDebtEntry} className="space-y-3 mt-4 text-xs font-bold">
+              <div>
+                <label className="block text-slate-300 mb-1">Customer:</label>
+                <select value={debtCustomerId} onChange={(e) => setDebtCustomerId(e.target.value)} className="w-full rounded border border-[#30363d] px-2.5 py-1.5 bg-[#0d1117] text-white outline-none">
+                  {visibleCustomers.map((c) => (
+                    <option key={c.id} value={c.id} className="bg-[#161b22]">{c.fullName}{c.balance > 0 ? ` — owes ${formatNaira(c.balance)}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-300 mb-1">Type:</label>
+                  <select value={debtKind} onChange={(e) => setDebtKind(e.target.value as 'charge' | 'payment')} className="w-full rounded border border-[#30363d] px-2.5 py-1.5 bg-[#0d1117] text-white outline-none">
+                    <option value="charge" className="bg-[#161b22]">Debt added (red +)</option>
+                    <option value="payment" className="bg-[#161b22]">Payment off debt (green −)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 mb-1">Via:</label>
+                  <select value={debtSource} onChange={(e) => setDebtSource(e.target.value as 'sale' | 'cash' | 'manual')} className="w-full rounded border border-[#30363d] px-2.5 py-1.5 bg-[#0d1117] text-white outline-none">
+                    <option value="manual" className="bg-[#161b22]">Manual / other</option>
+                    <option value="cash" className="bg-[#161b22]">Cash</option>
+                    <option value="sale" className="bg-[#161b22]">Sale (credit)</option>
+                  </select>
+                </div>
+              </div>
+              <div><label className="block text-slate-300 mb-1">Amount ({curSym}):</label><NumberInput required min={1} value={debtAmount} onValueChange={setDebtAmount} className="w-full rounded border border-[#30363d] px-2.5 py-1.5 bg-[#0d1117] text-white outline-none" /></div>
+              <div><label className="block text-slate-300 mb-1">Settlement date (optional — reminder starts the day before):</label><input type="date" value={debtSettlementDate} onChange={(e) => setDebtSettlementDate(e.target.value)} className="w-full rounded border border-[#30363d] px-2.5 py-1.5 bg-[#0d1117] text-white outline-none" /></div>
+              <div><label className="block text-slate-300 mb-1">Note / receipt no. (optional):</label><input value={debtNote} onChange={(e) => setDebtNote(e.target.value)} placeholder="e.g. Transport advance, Receipt #RCT-…" className="w-full rounded border border-[#30363d] px-2.5 py-1.5 bg-[#0d1117] text-white outline-none" /></div>
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button type="button" onClick={() => setShowDebtModal(false)} className="py-2 bg-[#21262d] border border-[#30363d] text-slate-300 font-extrabold rounded text-xs uppercase">Close</button>
+                <button type="submit" className={`py-2 font-extrabold rounded text-xs uppercase border ${debtKind === 'charge' ? 'bg-red-600 border-red-500' : 'bg-emerald-600 border-emerald-500'} text-white`}>Save Line</button>
               </div>
             </form>
           </div>
