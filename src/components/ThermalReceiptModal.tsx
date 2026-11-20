@@ -5,7 +5,7 @@ import { jsPDF } from 'jspdf';
 import { SaleRecord, ThermalPrinterConfig, MANDATORY_RECEIPT_FOOTER } from '../types';
 import { formatNaira, playPOSBeep, pickReceiptSavePath, writeBinaryFile, openInDefaultApp } from '../utils/storage';
 import { formatMoney, moneyAscii } from '../utils/currency';
-import { formatCartonPieceBreakdown } from '../utils/pricing';
+import { buildSaleDisplay } from '../utils/saleLines';
 import { printReceipt } from '../utils/escpos';
 import { isTauriRuntime } from '../utils/db';
 import {
@@ -39,6 +39,10 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   const [printing, setPrinting] = React.useState(false);
 
   if (!isOpen || !sale) return null;
+
+  // v2.0.9 — box-first rows, loose pieces afterwards, balanced wholesale
+  // footnote under every box row. One shared model for preview, PDF and print.
+  const receiptLines = buildSaleDisplay(sale.items, { code: sale.currency });
 
   const handlePrint = async () => {
     playPOSBeep();
@@ -136,15 +140,22 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
     text += `QTY  ITEM              PRICE     AMT\n`;
     text += `--------------------------------\n`;
 
-    sale.items.forEach((item) => {
-      const name = item.product.name.substring(0, 16).padEnd(16, ' ');
-      const qty = item.quantity.toString().padStart(3, ' ');
-      const rate = item.rate.toLocaleString().padStart(7, ' ');
-      const amt = item.amount.toLocaleString().padStart(8, ' ');
+    // v2.0.9 — box rows first, loose pieces afterwards under their own
+    // heading, with the wholesale-per-piece footnote under every box row.
+    const copyLines = buildSaleDisplay(sale.items, { code: sale.currency, ascii: true });
+    let headingDone = false;
+    copyLines.lines.forEach((line) => {
+      if (copyLines.hasGroups && line.kind === 'piece' && !headingDone) {
+        text += `---------- LOOSE PIECES ----------\n`;
+        headingDone = true;
+      }
+      const name = line.name.substring(0, 16).padEnd(16, ' ');
+      const qty = line.qty.toString().padStart(3, ' ');
+      const rate = line.rateLabel.padStart(7, ' ');
+      const amt = line.amountLabel.padStart(8, ' ');
       text += `${qty} ${name} ${rate} ${amt}\n`;
-      if (item.saleUnitLabel) text += `   (${item.saleUnitLabel})\n`;
-      const split = formatCartonPieceBreakdown(item, sale.currency);
-      if (split) text += `   ${split}\n`;
+      if (line.kind !== 'plain') text += `   ${line.detail}\n`;
+      line.noteLines.forEach((note) => { text += `   ${note}\n`; });
     });
 
     text += `--------------------------------\n`;
@@ -311,25 +322,37 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-400">
-                {sale.items.map((item, idx) => (
-                  <tr key={idx} className="text-[12px]">
-                    <td className="py-1.5 font-black align-top text-left">{item.quantity}</td>
-                    <td className="py-1.5 pr-1 align-top break-words font-bold text-gray-900" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                      {item.product.name}
-                      {item.saleUnitLabel && (
-                        <span className="block text-[10px] font-black text-blue-800">({item.saleUnitLabel})</span>
-                      )}
-                      {formatCartonPieceBreakdown(item, sale.currency) && (
-                        <span className="block text-[9px] font-bold text-blue-700">
-                          {formatCartonPieceBreakdown(item, sale.currency)}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-1.5 text-right align-top text-gray-800 font-semibold" style={{ whiteSpace: 'nowrap' }}>{item.rate.toLocaleString()}</td>
-                    <td className="py-1.5 text-right font-black align-top text-black" style={{ whiteSpace: 'nowrap' }}>
-                      {item.amount.toLocaleString()}
-                    </td>
-                  </tr>
+                {receiptLines.lines.map((line, idx) => (
+                  <React.Fragment key={line.key}>
+                    {receiptLines.hasGroups && idx === receiptLines.pieceStartIndex && (
+                      <tr className="bg-gray-100 text-[9px] font-black uppercase tracking-widest text-gray-700">
+                        <td colSpan={4} className="py-1 text-center">— Loose pieces —</td>
+                      </tr>
+                    )}
+                    <tr className="text-[12px]">
+                      <td className="py-1.5 font-black align-top text-left">
+                        {line.qty}
+                        <span className="block text-[8px] font-bold uppercase text-gray-600">{line.unit}{line.qty === 1 ? '' : 's'}</span>
+                      </td>
+                      <td className="py-1.5 pr-1 align-top break-words font-bold text-gray-900" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                        {line.name}
+                        {line.kind !== 'plain' && (
+                          <span className="block text-[10px] font-black text-blue-800">({line.detail})</span>
+                        )}
+                        {line.noteLines.length > 0 && (
+                          <span className="mt-1 block border-t border-dashed border-gray-400 pt-1 text-[8px] font-semibold leading-tight text-gray-600">
+                            {line.noteLines.map((note, ni) => (
+                              <span key={ni} className="block">{note}</span>
+                            ))}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1.5 text-right align-top text-gray-800 font-semibold" style={{ whiteSpace: 'nowrap' }}>{line.rateLabel}</td>
+                      <td className="py-1.5 text-right font-black align-top text-black" style={{ whiteSpace: 'nowrap' }}>
+                        {line.amountLabel}
+                      </td>
+                    </tr>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

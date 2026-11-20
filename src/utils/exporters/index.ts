@@ -9,6 +9,7 @@ import {
   SaleRecord,
   isUncountedKind,
 } from '../../types';
+import { buildSaleDisplay } from '../saleLines';
 
 // ============================================================
 // DATASET TABLES
@@ -106,6 +107,7 @@ export function buildDataTable(id: DatasetId, data: ExportPayload): DataTable {
           'Cashier',
           'Customer',
           'Product',
+          'Sale Unit',
           'Qty',
           'Rate',
           'Amount',
@@ -116,26 +118,31 @@ export function buildDataTable(id: DatasetId, data: ExportPayload): DataTable {
           'Payment Method',
         ],
         rows: data.sales.flatMap((s, i) => {
-          const items = s.items.length > 0 ? s.items : [];
-          if (items.length === 0) {
+          // v2.0.9 — exported sales use the same box-first split rows as the
+          // receipt: Qty is in the unit shown in "Sale Unit", and box rows
+          // carry the balanced wholesale-per-piece note.
+          const display = buildSaleDisplay(s.items, { code: s.currency });
+          const lines = display.lines;
+          if (lines.length === 0) {
             return [[
               i + 1, s.receiptNo, s.date, s.time, s.cashier,
-              s.customerName || 'General Customer', '', '', '', '',
+              s.customerName || 'General Customer', '', '', '', '', '',
               money(s.subtotal), money(s.totalAmount), money(s.advancePayment),
               money(s.balanceDue), s.paymentMethod,
             ]];
           }
-          return items.map((it, idx) => [
+          return lines.map((line, idx) => [
             idx === 0 ? i + 1 : '',
             idx === 0 ? s.receiptNo : '',
             idx === 0 ? s.date : '',
             idx === 0 ? s.time : '',
             idx === 0 ? s.cashier : '',
             idx === 0 ? s.customerName || 'General Customer' : '',
-            it.product.name,
-            it.quantity,
-            money(it.rate),
-            money(it.amount),
+            line.name,
+            [line.detail, ...line.noteLines].join(' | '),
+            line.qty,
+            money(line.rate),
+            money(line.amount),
             idx === 0 ? money(s.subtotal) : '',
             idx === 0 ? money(s.totalAmount) : '',
             idx === 0 ? money(s.advancePayment) : '',

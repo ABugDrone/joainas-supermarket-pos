@@ -5,9 +5,9 @@ import { MANDATORY_RECEIPT_FOOTER } from '../types';
 import { APP_THEMES } from '../utils/theme';
 
 describe('Kingzzy Akamelu Resources branding and version', () => {
-  test('release is 2.0.8 everywhere', () => {
-    expect(EDITION.version).toBe('2.0.8');
-    expect(DEVELOPER_INFO.appVersion).toContain('2.0.8');
+  test('release is 2.0.9 everywhere', () => {
+    expect(EDITION.version).toBe('2.0.9');
+    expect(DEVELOPER_INFO.appVersion).toContain('2.0.9');
   });
 
   test('printer config defaults are empty (user-configured only)', () => {

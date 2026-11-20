@@ -3,7 +3,8 @@ import { X, Printer, User, Clock, CreditCard, Package, Eye } from 'lucide-react'
 import { SaleRecord } from '../types';
 import { formatNaira } from '../utils/storage';
 import { formatMoney } from '../utils/currency';
-import { formatSoldRange, formatSaleRate, isLegacySale } from '../utils/pricing';
+import { formatSaleRate, isLegacySale } from '../utils/pricing';
+import { buildSaleDisplay } from '../utils/saleLines';
 
 interface SaleDetailModalProps {
   sale: SaleRecord | null;
@@ -15,7 +16,8 @@ interface SaleDetailModalProps {
 export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({ sale, isOpen, onClose, onReprint }) => {
   if (!isOpen || !sale) return null;
 
-  const totalQty = sale.items.reduce((s, i) => s + i.quantity, 0);
+  // v2.0.9 — box-first split rows with the wholesale-per-piece footnote.
+  const display = buildSaleDisplay(sale.items, { code: sale.currency });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
@@ -68,7 +70,7 @@ export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({ sale, isOpen, 
           {/* Items breakdown — thematic table */}
           <div>
             <h4 className="font-black text-xs uppercase tracking-wider text-[var(--text-secondary)] flex items-center gap-2 mb-2">
-              <Package className="w-4 h-4 text-[var(--accent-color)]" /> Product Breakdown — {sale.items.length} items • {totalQty} total qty
+              <Package className="w-4 h-4 text-[var(--accent-color)]" /> Product Breakdown — {display.lines.length} lines • {display.unitSummary}
             </h4>
             <div className="rounded-xl border border-[var(--border-color)] overflow-hidden">
               <div className="overflow-x-auto">
@@ -83,28 +85,46 @@ export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({ sale, isOpen, 
                     </tr>
                   </thead>
                   <tbody>
-                    {sale.items.map((it, idx) => (
-                      <tr key={idx} className={`border-b border-[var(--border-color)] last:border-0 ${idx%2===0?'bg-[var(--bg-surface)]':'bg-[var(--bg-app)]'} hover:bg-[var(--bg-hover)] transition`}>
-                        <td className="py-3 px-3 font-bold text-[var(--text-muted)]">{idx+1}</td>
-                        <td className="py-3 px-3">
-                          <div className="font-bold text-[var(--text-primary)]">{it.product.name}</div>
-                          <div className="text-[10px] text-[var(--text-muted)] uppercase">{it.product.category} • {it.product.unit}</div>
-                        </td>
-                        <td className="py-3 px-3 text-center font-black text-[var(--text-primary)]">{it.quantity}</td>
-                        <td className="py-3 px-3 text-right font-mono text-[var(--text-secondary)]">
-                          <div title={isLegacySale(sale.date) ? `Sold ${formatMoney(it.rate, sale.currency)}` : `Sold ${formatMoney(it.rate, sale.currency)} (min) — range stays ${formatSoldRange(it.rate, it.ceilingAtSale ?? it.product.retailPrice ?? it.rate, sale.currency)}`}>
-                            {formatSaleRate(it.rate, it.ceilingAtSale ?? it.product.retailPrice ?? it.rate, sale.date, sale.currency)}
-                          </div>
-                          {!isLegacySale(sale.date) && <div className="text-[10px] opacity-70">sold min</div>}
-                        </td>
-                        <td className="py-3 px-3 text-right font-black text-[var(--accent-color)]">{formatMoney(it.amount, sale.currency)}</td>
-                      </tr>
+                    {display.lines.map((line, idx) => (
+                      <React.Fragment key={line.key}>
+                        {display.hasGroups && idx === display.pieceStartIndex && (
+                          <tr className="bg-[var(--bg-app)] text-[10px] font-black uppercase tracking-wider text-amber-500">
+                            <td colSpan={5} className="py-1.5 px-3">— Loose pieces —</td>
+                          </tr>
+                        )}
+                        <tr className={`border-b border-[var(--border-color)] last:border-0 ${idx%2===0?'bg-[var(--bg-surface)]':'bg-[var(--bg-app)]'} hover:bg-[var(--bg-hover)] transition`}>
+                          <td className="py-3 px-3 font-bold text-[var(--text-muted)]">{idx+1}</td>
+                          <td className="py-3 px-3">
+                            <div className="font-bold text-[var(--text-primary)]">{line.name}</div>
+                            <div className="text-[10px] text-[var(--text-muted)] uppercase">{line.category} • {line.unit}</div>
+                            {line.kind !== 'plain' && (
+                              <div className="mt-0.5 text-[10px] font-bold text-cyan-500">{line.detail}</div>
+                            )}
+                            {line.noteLines.map((note, ni) => (
+                              <div key={ni} className="text-[9px] leading-tight text-[var(--text-muted)]">{note}</div>
+                            ))}
+                          </td>
+                          <td className="py-3 px-3 text-center font-black text-[var(--text-primary)]">
+                            {line.qty}
+                            <span className="block text-[9px] font-bold uppercase text-[var(--text-muted)]">{line.unit}{line.qty === 1 ? '' : 's'}</span>
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-[var(--text-secondary)]">
+                            <div title={`${line.qtyLabel} at ${formatMoney(line.rate, sale.currency)} per ${line.unit}`}>
+                              {isLegacySale(sale.date) && line.kind === 'plain'
+                                ? formatSaleRate(line.rate, line.rate, sale.date, sale.currency)
+                                : formatMoney(line.rate, sale.currency)}
+                            </div>
+                            {line.kind !== 'plain' && <div className="text-[10px] opacity-70">per {line.unit}</div>}
+                          </td>
+                          <td className="py-3 px-3 text-right font-black text-[var(--accent-color)]">{formatMoney(line.amount, sale.currency)}</td>
+                        </tr>
+                      </React.Fragment>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="bg-[var(--bg-app)] border-t-2 border-[var(--accent-color)] font-black">
                       <td colSpan={2} className="py-3 px-3 text-right text-[var(--text-secondary)]">TOTAL</td>
-                      <td className="py-3 px-3 text-center text-[var(--text-primary)]">{totalQty}</td>
+                      <td className="py-3 px-3 text-center text-[var(--text-primary)] text-[11px]">{display.unitSummary}</td>
                       <td className="py-3 px-3 text-right text-[var(--text-muted)]">—</td>
                       <td className="py-3 px-3 text-right text-[var(--accent-color)] text-sm">{formatMoney(sale.totalAmount, sale.currency)}</td>
                     </tr>

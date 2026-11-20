@@ -323,21 +323,6 @@ export const ThermalPrinterSettings: React.FC<ThermalPrinterSettingsProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1">
-                Print Density
-              </label>
-              <select
-                value={formData.printDensity}
-                onChange={(e) => setFormData({ ...formData, printDensity: e.target.value as 'Normal' | 'High' | 'Draft' })}
-                className="w-full rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2 text-sm text-white focus:border-cyan-500 outline-none"
-              >
-                <option value="Normal" className="bg-[#161b22]">Normal</option>
-                <option value="High" className="bg-[#161b22]">High Contrast (Bold)</option>
-                <option value="Draft" className="bg-[#161b22]">Draft Eco Mode</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">
                 Printer Name
               </label>
               <input

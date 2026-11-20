@@ -3,7 +3,7 @@ import { HeaderLogo } from './HeaderLogo';
 import { CartItem, Customer, PriceType, ThermalPrinterConfig } from '../types';
 import { formatNaira } from '../utils/storage';
 import { ShoppingCart, ArrowLeft, CheckCircle2, X } from 'lucide-react';
-import { formatCartonPieceBreakdown } from '../utils/pricing';
+import { buildSaleDisplay } from '../utils/saleLines';
 
 interface CartPreviewModalProps {
   isOpen: boolean;
@@ -33,8 +33,9 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
   if (!isOpen) return null;
 
   let grandTotal = cart.reduce((sum, item) => sum + item.amount, 0);
-  let totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
   let balanceDue = Math.max(0, grandTotal - advancePayment);
+  // v2.0.9 — preview uses the same box-first split rows as the receipt.
+  const display = buildSaleDisplay(cart);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto font-sans">
@@ -102,27 +103,33 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {cart.map((item, idx) => (
-                  <tr key={idx} className={`border-b border-[var(--border-color)] last:border-0 transition ${
-                    idx % 2 === 0 ? 'bg-[var(--bg-surface)]' : 'bg-[var(--bg-app)]'
-                  }`}>
-                    <td className="py-3.5 px-4 text-[var(--text-muted)]">{idx + 1}</td>
-                    <td className="py-3.5 px-4">
-                      <div className="font-semibold text-[var(--text-primary)]">{item.product.name}</div>
-                      <div className="text-xs text-[var(--accent-color)] uppercase">{item.product.category}</div>
-                      {(item.saleUnitLabel || formatCartonPieceBreakdown(item)) && (
-                        <div className="text-[10px] font-bold text-cyan-500">
-                          {item.saleUnitLabel}
-                          {item.saleUnitLabel && formatCartonPieceBreakdown(item) ? ' — ' : ''}
-                          {formatCartonPieceBreakdown(item)}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-center text-[var(--text-secondary)] font-medium uppercase text-xs">{item.product.unit}</td>
-                    <td className="py-3.5 px-4 text-right text-[var(--text-secondary)] font-mono text-sm">{formatNaira(item.rate)}</td>
-                    <td className="py-3.5 px-4 text-center font-bold text-[var(--text-primary)]">{item.quantity}</td>
-                    <td className="py-3.5 px-4 text-right font-bold text-[var(--accent-color)]">{formatNaira(item.amount)}</td>
-                  </tr>
+                {display.lines.map((line, idx) => (
+                  <React.Fragment key={line.key}>
+                    {display.hasGroups && idx === display.pieceStartIndex && (
+                      <tr className="bg-[var(--bg-app)] text-[10px] font-black uppercase tracking-wider text-amber-500">
+                        <td colSpan={6} className="py-1.5 px-4">— Loose pieces —</td>
+                      </tr>
+                    )}
+                    <tr className={`border-b border-[var(--border-color)] last:border-0 transition ${
+                      idx % 2 === 0 ? 'bg-[var(--bg-surface)]' : 'bg-[var(--bg-app)]'
+                    }`}>
+                      <td className="py-3.5 px-4 text-[var(--text-muted)]">{idx + 1}</td>
+                      <td className="py-3.5 px-4">
+                        <div className="font-semibold text-[var(--text-primary)]">{line.name}</div>
+                        <div className="text-xs text-[var(--accent-color)] uppercase">{line.category}</div>
+                        {line.kind !== 'plain' && (
+                          <div className="text-[10px] font-bold text-cyan-500">{line.detail}</div>
+                        )}
+                        {line.noteLines.map((note, ni) => (
+                          <div key={ni} className="text-[9px] leading-tight text-[var(--text-muted)]">{note}</div>
+                        ))}
+                      </td>
+                      <td className="py-3.5 px-4 text-center text-[var(--text-secondary)] font-medium uppercase text-xs">{line.unit}</td>
+                      <td className="py-3.5 px-4 text-right text-[var(--text-secondary)] font-mono text-sm">{formatNaira(line.rate)}</td>
+                      <td className="py-3.5 px-4 text-center font-bold text-[var(--text-primary)]">{line.qty}</td>
+                      <td className="py-3.5 px-4 text-right font-bold text-[var(--accent-color)]">{formatNaira(line.amount)}</td>
+                    </tr>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -132,9 +139,9 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-[var(--bg-app)] p-5 rounded-xl border border-[var(--border-color)] gap-4">
             <div className="text-sm space-y-1">
               <div className="text-[var(--text-muted)]">
-                <span>{cart.length} items</span>
+                <span>{display.lines.length} lines</span>
                 <span className="mx-2">•</span>
-                <span>{totalQuantity} total qty</span>
+                <span>{display.unitSummary}</span>
               </div>
               <div className="text-[var(--text-muted)]">Paid: <strong className="text-[var(--success)]">{formatNaira(advancePayment)}</strong></div>
               {balanceDue > 0 && (

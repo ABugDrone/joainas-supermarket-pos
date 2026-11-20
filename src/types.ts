@@ -367,7 +367,6 @@ export interface ThermalPrinterConfig {
   paperWidth: '80mm' | '58mm';
   autoPrintOnSale: boolean;
   pointRate: number; // e.g. 2 points per 1000 Naira
-  printDensity: 'Normal' | 'High' | 'Draft';
   printerName: string;
 }
 

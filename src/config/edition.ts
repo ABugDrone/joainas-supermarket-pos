@@ -1,11 +1,13 @@
-// Kingzzy Akamelu Resources v2.0.8 — full build, all features unlocked.
+// Kingzzy Akamelu Resources v2.0.9 — full build, all features unlocked.
 // Carries all v1.5.x trusted-clock hardening plus v1.6.0 currency selection,
 // plus installment ledger, service units, carton/pack + pieces sales and receipts.
+// v2.0.9: box-first split sale lines with a balanced wholesale-per-piece note,
+// and native receipts no longer spool the unsupported print-density command.
 
 export const EDITION = {
   appName: 'Kingzzy Akamelu Resources',
   shortName: 'Kingzzy Akamelu Resources',
-  version: '2.0.8',
+  version: '2.0.9',
   editionLabel: 'Professional',
   isOpenSource: false,
   // Default theme — STOREBOX WHITE for the Kingzzy Akamelu Resources build.

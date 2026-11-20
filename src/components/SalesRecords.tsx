@@ -4,7 +4,8 @@ import { SaleRecord, UserRole, User } from '../types';
 import { formatNaira, recordAuditLog, todayLocal } from '../utils/storage';
 import { useCurrency } from '../hooks/useCurrency';
 import { formatMoney } from '../utils/currency';
-import { formatSoldRange, formatSaleRate, isLegacySale, formatCartonPieceBreakdown } from '../utils/pricing';
+import { formatSaleRate, isLegacySale } from '../utils/pricing';
+import { buildSaleDisplay } from '../utils/saleLines';
 import { can } from '../utils/permissions';
 import { useToast } from './Toast';
 import { SaleDetailModal } from './SaleDetailModal';
@@ -310,7 +311,9 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                   </td>
                 </tr>
               ) : (
-                pagedSales.map((sale) => (
+                pagedSales.map((sale) => {
+                  const display = buildSaleDisplay(sale.items, { code: sale.currency });
+                  return (
                   <tr
                     key={sale.id}
                     onClick={() => handlePreviewSale(sale)}
@@ -332,34 +335,33 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                     </td>
                     <td className="py-3 px-4">
                       <div className="space-y-0.5">
-                        {sale.items.map((it, idx) => (
-                          <div key={idx} className="text-[11px] flex justify-between gap-2 max-w-xs">
-                            <span className="truncate text-slate-300">
-                              {it.product.name}
-                              {(it.saleUnitLabel || formatCartonPieceBreakdown(it, sale.currency)) && (
-                                <span className="block text-[9px] font-bold text-cyan-300">
-                                  {it.saleUnitLabel}
-                                  {it.saleUnitLabel && formatCartonPieceBreakdown(it, sale.currency) ? ' — ' : ''}
-                                  {formatCartonPieceBreakdown(it, sale.currency)}
-                                </span>
-                              )}
+                        {display.lines.map((line, idx) => (
+                          <div key={line.key} className="text-[11px] max-w-xs">
+                            {display.hasGroups && idx === display.pieceStartIndex && (
+                              <div className="mt-1 mb-0.5 border-t border-dashed border-slate-600 pt-1 text-[9px] font-black uppercase tracking-wider text-amber-300">Loose pieces</div>
+                            )}
+                            <span className="block truncate text-slate-300">{line.name}</span>
+                            <span className={`block text-[9px] font-bold ${line.kind === 'box' ? 'text-cyan-300' : line.kind === 'piece' ? 'text-amber-300' : 'text-slate-400'}`}>
+                              {line.detail}
                             </span>
-                            <span className="font-mono text-slate-400">x{it.quantity}</span>
+                            {line.noteLines.map((note, ni) => (
+                              <span key={ni} className="block text-[8px] font-medium leading-tight text-slate-500">{note}</span>
+                            ))}
                           </div>
                         ))}
                       </div>
                     </td>
                     <td className="py-3 px-4 text-center font-bold text-white">
-                      {sale.items.reduce((s, i) => s + i.quantity, 0)}
+                      <span className="block text-[11px]">{display.unitSummary}</span>
                     </td>
                     <td className="py-3 px-4 text-right text-slate-300">
                       <div className="flex flex-col items-end gap-0.5">
-                        {sale.items.map((it, idx) => {
-                          const max = it.ceilingAtSale ?? it.product.retailPrice ?? it.rate;
-                          const legacy = isLegacySale(sale.date);
+                        {display.lines.map((line) => {
+                          const legacy = isLegacySale(sale.date) && line.kind === 'plain';
                           return (
-                            <span key={idx} className="text-[11px] whitespace-nowrap" title={legacy ? `Sold ${formatMoney(it.rate, sale.currency)}` : `Sold ${formatMoney(it.rate, sale.currency)} (min) — range ${formatSoldRange(it.rate, max, sale.currency)}`}>
-                              {formatSaleRate(it.rate, max, sale.date, sale.currency)}
+                            <span key={line.key} className="text-[11px] whitespace-nowrap" title={legacy ? `Sold ${formatMoney(line.rate, sale.currency)}` : `${line.qtyLabel} at ${formatMoney(line.rate, sale.currency)} per ${line.unit}`}>
+                              {legacy ? formatSaleRate(line.rate, line.rate, sale.date, sale.currency) : formatMoney(line.rate, sale.currency)}
+                              {line.kind !== 'plain' && <span className="block text-[9px] text-slate-500">per {line.unit}</span>}
                             </span>
                           );
                         })}
@@ -397,7 +399,8 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

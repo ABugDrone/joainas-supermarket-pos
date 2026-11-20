@@ -302,7 +302,6 @@ export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
   paperWidth: '80mm',
   autoPrintOnSale: true,
   pointRate: 0,
-  printDensity: 'High',
   printerName: 'XP-80C',
 };
 
@@ -310,7 +309,7 @@ export const DEVELOPER_INFO: StoreDeveloperInfo = {
   company: 'Dronebug Technologies & Services',
   email: 'dronebugtechnologies@gmail.com',
   phone: '+2347035716349',
-  appVersion: 'v2.0.8 Kingzzy Akamelu Resources (React + Vite + Tauri Engine)',
+  appVersion: 'v2.0.9 Kingzzy Akamelu Resources (React + Vite + Tauri Engine)',
 };
 
 export const INITIAL_SALES: SaleRecord[] = [

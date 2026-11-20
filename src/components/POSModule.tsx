@@ -19,6 +19,12 @@ import { cartToLines, reconcileCart, PosWorkspace } from '../utils/workspace';
 import { hasActiveClockOverride } from '../utils/clockOverride';
 import { DepletedStockPopup } from './DepletedStockPopup';
 import { StockAdjustModal } from './StockAdjustModal';
+import { buildSaleDisplay } from '../utils/saleLines';
+
+/** Small box-only footer: pieces in the box × the discounted wholesale rate. */
+function wholesaleFooter(item: CartItem): string[] {
+  return buildSaleDisplay([item]).lines.find((l) => l.kind === 'box')?.noteLines ?? [];
+}
 
 interface POSModuleProps {
   products: Product[];
@@ -1495,6 +1501,11 @@ export const POSModule: React.FC<POSModuleProps> = ({
                           </span>
                           <span className="text-xs font-black text-cyan-400">{formatNaira(item.amount)}</span>
                         </div>
+                        {wholesaleFooter(item).length > 0 && (
+                          <div className="rounded-lg border border-dashed border-[#30363d] px-2 py-1.5 text-[9px] leading-tight text-slate-400">
+                            {wholesaleFooter(item).map((note, ni) => <div key={ni}>{note}</div>)}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="grid grid-cols-12 gap-2 items-end">
@@ -1892,6 +1903,12 @@ export const POSModule: React.FC<POSModuleProps> = ({
                         <td className="py-3 px-4">
                           <div className="font-bold text-[var(--text-primary)]">{item.product.name}</div>
                           <div className="text-[11px] text-[var(--text-muted)] uppercase">{item.product.category} • {item.product.unit}</div>
+                          {item.saleUnitLabel && (
+                            <div className="text-[10px] font-black text-cyan-500">{item.saleUnitLabel}</div>
+                          )}
+                          {wholesaleFooter(item).map((note, ni) => (
+                            <div key={ni} className="text-[9px] leading-tight text-[var(--text-muted)]">{note}</div>
+                          ))}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5">

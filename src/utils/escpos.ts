@@ -2,7 +2,7 @@ import { SaleRecord, ThermalPrinterConfig, MANDATORY_RECEIPT_FOOTER } from '../t
 import { isTauriRuntime } from './db';
 import { moneyAscii } from './currency';
 import { BRANDED_NAME_LINE, BRANDED_NICKNAME_LINE } from '../config/edition';
-import { formatCartonPieceBreakdown } from './pricing';
+import { buildSaleDisplay } from './saleLines';
 
 // ---------------------------------------------------------------------------
 // Native ESC/POS thermal printing.
@@ -23,10 +23,6 @@ function bytes(...args: number[]): number[] {
   return args;
 }
 
-function cmd(prefix: number[], ...rest: number[]): number[] {
-  return [...prefix, ...rest];
-}
-
 const INIT = bytes(ESC, 0x40); // ESC @ — reset printer
 const BOLD_ON = bytes(ESC, 0x45, 1); // ESC E 1 — emphasized text on
 const BOLD_OFF = bytes(ESC, 0x45, 0); // ESC E 0 — emphasized text off
@@ -39,19 +35,11 @@ const FEED_2 = bytes(ESC, 0x64, 0x02); // ESC d 2 — feed 2 lines
 const FEED_3 = bytes(ESC, 0x64, 0x03); // ESC d 3 — feed 3 lines
 const CUT = bytes(GS, 0x56, 0x42, 0x00); // GS V 66 — partial cut
 
-function densityCommand(density: ThermalPrinterConfig['printDensity']): number[] {
-  // GS ( K pL pH fn m  (fn = 49, select print density)
-  // m: 0 = standard, 1-127 = stronger, 128-255 = paler
-  switch (density) {
-    case 'High':
-      return cmd(bytes(GS, 0x28, 0x4b), 0x02, 0x00, 0x31, 0x50); // m=80 → darker
-    case 'Draft':
-      return cmd(bytes(GS, 0x28, 0x4b), 0x02, 0x00, 0x31, 0xc8); // m=200 → paler
-    default:
-      return cmd(bytes(GS, 0x28, 0x4b), 0x02, 0x00, 0x31, 0x00); // m=0 → standard
-  }
-}
-
+// v2.0.9 — the GS ( K "select print density" command is deliberately NOT
+// sent. Its payload ends in the printable bytes 0x31 ('1') and 0x50 ('P');
+// printers without GS ( K support printed a literal "1P" at the top-left of
+// every receipt, joined onto the business name. Print darkness is a hardware
+// setting on the printer itself. Do not reintroduce this command.
 function encodeLine(text: string): number[] {
   const out: number[] = [];
   for (const ch of text) {
@@ -74,6 +62,26 @@ function centerLine(text: string, width: number): string {
 
 function divider(char: string, width: number): string {
   return char.repeat(width);
+}
+
+/** Word-wrap the small unit/wholesale footnotes to the paper width. */
+function wrapPlain(text: string, width: number): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const rows: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (!current) {
+      current = word;
+    } else if (`${current} ${word}`.length <= width) {
+      current = `${current} ${word}`;
+    } else {
+      rows.push(current);
+      current = word;
+    }
+  }
+  if (current) rows.push(current);
+  return rows;
 }
 
 function itemLine(qty: string, name: string, rate: string, amt: string, width: number): string {
@@ -102,7 +110,10 @@ export function buildEscPos(
   const width = config.paperWidth === '58mm' ? 30 : 45;
   const out: number[] = [];
 
-  out.push(...INIT, ...densityCommand(config.printDensity));
+  // Only the universally supported INIT (ESC @) is sent before the header.
+  // Sending any unsupported command here makes its trailing bytes print as
+  // stray text above the store name — this is what produced the old "1P".
+  out.push(...INIT);
   out.push(...ALIGN_CENTER);
 
   // Store header — centered via the printer's native ALIGN_CENTER command
@@ -159,24 +170,33 @@ export function buildEscPos(
   out.push(...BOLD_OFF);
   out.push(...encodeLine(divider('-', width)));
 
-  for (const item of sale.items) {
+  // v2.0.9 — every box (carton/pack) transaction comes first, loose pieces
+  // follow under their own heading, and ordinary items come last. Box rows
+  // also carry the balanced wholesale-per-piece footnote.
+  const display = buildSaleDisplay(sale.items, { code: sale.currency, ascii: true });
+  let piecesHeadingDone = false;
+  for (const line of display.lines) {
+    if (display.hasGroups && line.kind === 'piece' && !piecesHeadingDone) {
+      out.push(...encodeLine(divider('-', width)));
+      out.push(...encodeLine(centerLine('LOOSE PIECES', width)));
+      out.push(...encodeLine(divider('-', width)));
+      piecesHeadingDone = true;
+    }
     out.push(
       ...encodeLine(
-        itemLine(
-          String(item.quantity),
-          item.product.name,
-          item.rate.toLocaleString(),
-          item.amount.toLocaleString(),
-          width,
-        ),
+        itemLine(String(line.qty), line.name, line.rateLabel, line.amountLabel, width),
       ),
     );
-    // v2.0.8 — carton/piece breakdown under the item name.
-    if ((item as any).saleUnitLabel) {
-      out.push(...encodeLine(`  ${(item as any).saleUnitLabel}`));
+    if (line.kind !== 'plain') {
+      for (const chunk of wrapPlain(line.detail, width - 2)) {
+        out.push(...encodeLine(`  ${chunk}`));
+      }
     }
-    const split = formatCartonPieceBreakdown(item, sale.currency);
-    if (split) out.push(...encodeLine(`  ${split}`));
+    for (const note of line.noteLines) {
+      for (const chunk of wrapPlain(note, width - 2)) {
+        out.push(...encodeLine(`  ${chunk}`));
+      }
+    }
   }
 
   out.push(...encodeLine(divider('=', width)));

@@ -460,7 +460,7 @@ function buildAutosaveSnapshot(slim: boolean): AutosaveSnapshot {
     timestamp: Date.now(),
     version: 1,
     appName: 'Kingzzy Akamelu Resources',
-    appVersion: '2.0.8',
+    appVersion: '2.0.9',
   };
 }
 
