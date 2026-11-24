@@ -5,6 +5,7 @@ import { formatNaira } from '../utils/storage';
 import { formatMoney } from '../utils/currency';
 import { formatSaleRate, isLegacySale } from '../utils/pricing';
 import { buildSaleDisplay } from '../utils/saleLines';
+import { discountSummaryRows, saleFinancials } from '../utils/discounts';
 
 interface SaleDetailModalProps {
   sale: SaleRecord | null;
@@ -18,6 +19,7 @@ export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({ sale, isOpen, 
 
   // v2.0.9 — box-first split rows with the wholesale-per-piece footnote.
   const display = buildSaleDisplay(sale.items, { code: sale.currency });
+  const fin = saleFinancials(sale);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
@@ -103,6 +105,9 @@ export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({ sale, isOpen, 
                             {line.noteLines.map((note, ni) => (
                               <div key={ni} className="text-[9px] leading-tight text-[var(--text-muted)]">{note}</div>
                             ))}
+                            {line.discountNoteLines.map((note, ni) => (
+                              <div key={ni} className="text-[10px] font-bold leading-tight text-amber-500">{note}</div>
+                            ))}
                           </td>
                           <td className="py-3 px-3 text-center font-black text-[var(--text-primary)]">
                             {line.qty}
@@ -134,11 +139,32 @@ export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({ sale, isOpen, 
             </div>
           </div>
 
+          {/* v2.1.0 — percentage coupons / cash discount reconciliation */}
+          {fin.hasAnyDiscount && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 space-y-1">
+              {discountSummaryRows(fin).map((row, i) => (
+                <div
+                  key={`${row.kind}-${i}`}
+                  className={`flex justify-between text-xs ${
+                    row.kind === 'net'
+                      ? 'border-t border-amber-500/30 pt-1.5 font-black text-[var(--text-primary)]'
+                      : row.negative
+                        ? 'font-bold text-amber-500'
+                        : 'text-[var(--text-muted)]'
+                  }`}
+                >
+                  <span>{row.label}</span>
+                  <span>{row.negative ? '− ' : ''}{formatMoney(row.amount, sale.currency)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Summary cards */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-[var(--bg-app)] border border-[var(--border-color)] rounded-xl p-3 text-center">
-              <div className="text-[10px] font-black uppercase text-[var(--text-muted)]">Subtotal</div>
-              <div className="font-black text-[var(--text-primary)]">{formatMoney(sale.subtotal, sale.currency)}</div>
+              <div className="text-[10px] font-black uppercase text-[var(--text-muted)]">Gross subtotal</div>
+              <div className="font-black text-[var(--text-primary)]">{formatMoney(fin.grossSubtotal, sale.currency)}</div>
             </div>
             <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 text-center">
               <div className="text-[10px] font-black uppercase text-emerald-600">Paid</div>

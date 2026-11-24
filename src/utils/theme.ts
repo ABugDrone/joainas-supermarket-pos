@@ -1,3 +1,5 @@
+import { EDITION, isThemeAvailable } from '../config/edition';
+
 export type ThemeId =
   | 'SENIOR_CITIZEN-light'
   | 'SENIOR_CITIZEN-dark'
@@ -290,7 +292,7 @@ export const getSavedTheme = (): ThemeId => {
       return DEFAULT_THEME;
     }
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (saved && APP_THEMES.some((t) => t.id === saved)) {
+    if (saved && APP_THEMES.some((t) => t.id === saved) && isThemeAvailable(saved)) {
       return saved as ThemeId;
     }
   } catch (e) {
@@ -300,13 +302,17 @@ export const getSavedTheme = (): ThemeId => {
 };
 
 export const applyThemeToDocument = (themeId: ThemeId) => {
+  // v2.1.0 open-source gate: only the light and dark defaults can be applied.
+  const effectiveId: ThemeId = isThemeAvailable(themeId)
+    ? themeId
+    : (EDITION.defaultThemeId as ThemeId);
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, themeId);
+    localStorage.setItem(THEME_STORAGE_KEY, effectiveId);
   } catch (e) {
     console.error('Failed to save theme to localStorage', e);
   }
 
-  const themeObj = APP_THEMES.find((t) => t.id === themeId) || APP_THEMES[0];
+  const themeObj = APP_THEMES.find((t) => t.id === effectiveId) || APP_THEMES[0];
   const root = document.documentElement;
 
   // Apply CSS custom properties

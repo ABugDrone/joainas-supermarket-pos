@@ -253,3 +253,79 @@ describe('v2.0.9 native receipt never emits the "1P" artifact', () => {
     expect(text).toContain('6 pieces');
   });
 });
+
+describe('v2.1.0 mixed-sale wholesale double entry', () => {
+  const mixedSaleLine = () =>
+    packLine({
+      cartonQty: 1,
+      pieceQty: 7,
+      piecesPerCarton: 12,
+      cartonRate: 10000,
+      pieceRate: 10000 / 12,
+      quantity: 19,
+      rate: (10000 + 7 * (10000 / 12)) / 19,
+      amount: 10000 + 7 * (10000 / 12),
+      saleMode: 'both',
+      saleUnitLabel: '1 carton + 7 pieces',
+    });
+
+  test('all 19 pieces are priced at the box-derived wholesale rate', () => {
+    const display = buildSaleDisplay([mixedSaleLine()], { code: 'NGN' });
+    const note = display.lines[0].note!;
+    expect(note.wholesaleOnAllPieces).toBe(true);
+    expect(note.extraPieces).toBe(7);
+    expect(note.totalPieces).toBe(19);
+    expect(note.combinedTotal).toBeCloseTo(15833.333333, 5);
+    expect(note.wholesalePieceRate).toBe(833.3333);
+    expect(note.wholesaleDecimals).toBe(4);
+    expect(note.wholesalePieceRate * note.totalPieces).toBeCloseTo(note.combinedTotal, 2);
+  });
+
+  test('the footer shows 19 pcs and the box + 7 pcs check with the same total', () => {
+    const notes = buildSaleDisplay([mixedSaleLine()], { code: 'NGN' }).lines[0].noteLines;
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toContain('19 pcs');
+    expect(notes[0]).toContain('833.3333');
+    expect(notes[0]).toContain('15,833.33');
+    expect(notes[1]).toContain('1 carton');
+    expect(notes[1]).toContain('10,000.00');
+    expect(notes[1]).toContain('7 pcs');
+    expect(notes[1]).toContain('15,833.33');
+  });
+
+  test('the loose-piece row prints the precise wholesale rate, not 833.33', () => {
+    const lines = buildSaleDisplay([mixedSaleLine()], { code: 'NGN' }).lines;
+    expect(lines.map((l) => l.kind)).toEqual(['box', 'piece']);
+    const piece = lines[1];
+    expect(piece.qty).toBe(7);
+    expect(piece.detail).toContain('833.3333');
+    expect(piece.rateLabel).toBe('833.3333');
+    expect(piece.amount).toBeCloseTo(7 * (10000 / 12), 6);
+  });
+
+  test('a legacy mixed sale keeps its higher piece-ladder price', () => {
+    const legacy = packLine({
+      cartonQty: 2,
+      pieceQty: 6,
+      cartonRate: 50000,
+      pieceRate: 5000,
+      quantity: 30,
+      amount: 130000,
+      saleMode: 'both',
+    });
+    const display = buildSaleDisplay([legacy], { code: 'NGN' });
+    expect(display.lines[0].note!.wholesaleOnAllPieces).toBe(false);
+    expect(display.lines[0].noteLines[0]).toContain('24 pcs');
+    expect(display.lines[1].rate).toBe(5000);
+    expect(display.lines[1].detail).toContain('5,000.00');
+    expect(display.linesTotal).toBeCloseTo(130000, 6);
+  });
+
+  test('printer-safe mixed footer has no Naira glyph and still balances', () => {
+    const notes = buildSaleDisplay([mixedSaleLine()], { code: 'NGN', ascii: true }).lines[0].noteLines;
+    expect(notes.join(' ')).not.toContain('₦');
+    expect(notes.join(' ')).toContain('NGN 833.3333');
+    expect(notes.join(' ')).toContain('19pcs');
+    expect(notes.join(' ')).toContain('15,833.33');
+  });
+});

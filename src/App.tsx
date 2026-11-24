@@ -98,7 +98,7 @@ import {
 // and all 1.4.9-line modules are unlocked). Single local fallback user only
 // used when no session exists yet.
 const OPEN_SOURCE_USER: User = {
-  id: 'amor-ims-local-user',
+  id: 'dirms-storebox-local-user',
   fullName: 'Administrator',
   username: 'admin',
   password: '',
@@ -800,8 +800,8 @@ function MainAppContent() {
         EDITION.isOpenSource ? (
           <PremiumLock
             feature="Reports"
-            title="Reports — Premium"
-            whatItDoes="Reports adds up your sales, profit and expenses into a clean summary for any month or period. No manual calculation."
+            title="Financial Records — Locked"
+            whatItDoes="Financial Records adds up your sales, profit and expenses into a clean summary for any month or period. No manual calculation."
             example='It answers: "How much did I really make in August after removing expenses?" — sales minus costs, on one page.'
           />
         ) : (
@@ -844,7 +844,7 @@ function MainAppContent() {
         EDITION.isOpenSource ? (
           <PremiumLock
             feature="Analytics"
-            title="Analytics — Premium"
+            title="Analytics — Locked"
             whatItDoes="Analytics turns your sales into simple charts and tables that show your best sellers and slow days at a glance."
             example='It answers: "Which product sells fastest on weekends?" — the chart points straight at it.'
           />
@@ -960,8 +960,8 @@ export default function App() {
   const [licenseAction, setLicenseAction] = useState<'agree' | 'decline' | null>(null);
 
   // License key activation gate (DIRMS Storebox PRO edition ONLY).
-  // Customized-name bundles such as Kingzzy Akamelu Resources never require
-  // a license — the gates below are all short-circuited by
+  // The free/open-source v2.1.0 build and customized-name bundles never
+  // require a license — the gates below short-circuit via
   // requiresLicenseActivation.
   const [licenseActivated, setLicenseActivatedState] = useState<boolean>(false);
   const [licenseCheckDone, setLicenseCheckDone] = useState(false);
@@ -1074,8 +1074,8 @@ export default function App() {
     return (
       <ToastProvider>
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[var(--bg-app)] text-[var(--text-primary)]">
-          <img src="/logo.png" alt="Kingzzy Akamelu Resources" className="w-20 h-20 object-contain" />
-          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">Kingzzy Akamelu Resources</div>
+          <img src="/logo.png" alt="DIRMS Storebox" className="w-20 h-20 object-contain" />
+          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">DIRMS Storebox</div>
           <div className="text-xs text-[var(--text-muted)]">Inventory Management System · Loading…</div>
           <div className="w-8 h-8 border-[3px] border-[var(--border-color)] border-t-[var(--accent-color)] rounded-full animate-spin"></div>
         </div>
@@ -1138,7 +1138,7 @@ export default function App() {
           <div className="w-full max-w-md bg-[#161b22] border border-[#30363d] rounded-2xl p-8 text-center text-slate-200">
             <h3 className="text-lg font-bold text-white mb-2">Agreement Declined</h3>
             <p className="text-sm text-slate-400 mb-6">
-              You must accept the license agreement to use Kingzzy Akamelu Resources. The app will now close.
+              You must accept the license agreement to use DIRMS Storebox. The app will now close.
             </p>
             <button
               onClick={() => {
@@ -1224,8 +1224,8 @@ export default function App() {
     return (
       <ToastProvider>
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[var(--bg-app)] text-[var(--text-primary)]">
-          <img src="/logo.png" alt="Kingzzy Akamelu Resources" className="w-20 h-20 object-contain" />
-          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">Kingzzy Akamelu Resources</div>
+          <img src="/logo.png" alt="DIRMS Storebox" className="w-20 h-20 object-contain" />
+          <div className="font-extrabold text-lg text-[var(--text-primary)] tracking-wide">DIRMS Storebox</div>
           <div className="text-xs text-[var(--text-muted)]">Inventory Management System · Checking installation…</div>
           <div className="w-8 h-8 border-[3px] border-[var(--border-color)] border-t-[var(--accent-color)] rounded-full animate-spin"></div>
         </div>

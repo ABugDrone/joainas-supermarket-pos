@@ -1,4 +1,25 @@
-# Joainas Mart POS System - Changelog
+# DIRMS Storebox POS System - Changelog
+
+## Version 2.1.0 — DIRMS Storebox Open Source (2026-11-24)
+
+### 🏪 Rebrand — DIRMS Storebox
+- Every Kingzzy Akamelu Resources / "(Fine boy)" identity is replaced with **DIRMS Storebox** (DroneBug Inventory & Records Management System) across the app, window title, backups, receipts, financial statements, installer and docs. Icons and logos regenerate from `assets/DIRMS.png`.
+- **Receipt details are customizable**: business name, tagline, address, phone, header note and logo are editable in Hardware Config, defaulting to DIRMS Storebox. The hard-coded nickname line is gone.
+- Free / open-source edition: no license key, no activation, no login or setup gate.
+
+### 🔒 Locked features with upgrade messaging
+- Financial Records (Reports), Analytics, Staff Users, Categories, Audit Trail, Security & Recovery, and all colour themes except **STOREBOX WHITE** (light) and **AMOLED Black** (dark) render an unusable upgrade screen.
+- Locked screens point to **DIRMS Storebox PRO or a customized version**, priced **€170 / ₦250,000 + taxes (one-time)**, with Gmail / WhatsApp / phone / Facebook contact icons.
+
+### 📦 Box-derived wholesale piece pricing
+- When at least one carton/pack is on a line, loose pieces are no longer priced from the piece ladder: they are priced at **actual box price ÷ pieces per box** (e.g. ₦10,000 ÷ 12 = ₦833.3333). That rate is derived, non-editable and re-derives whenever the box price changes.
+- Receipts and sales records show the combined double-entry footer: `19 pcs × ₦833.3333 = ₦15,833.33` and `Box check: 1 carton × ₦10,000.00 + 7 pcs × ₦833.3333 = ₦15,833.33`. Piece-only sales keep their own price ladder; existing records are untouched.
+
+### 💸 Percentage discounts and seasonal coupons
+- Every product can carry its own **discount percentage** plus an optional **coupon/season code**, set before adding the item or edited later on the bill line. Typing it immediately shows the money coming off that line and the new line total.
+- The whole bill has its own **percentage discount / coupon** next to the existing **cash discount**; a sale may use no discount, cash only, product %, bill coupon, or any/all together.
+- Stacking is sequential: product % off each gross line, bill % off the discounted lines, then the fixed cash discount. Gross, each deduction, coupon labels, total saved and payable total reconcile on the POS bill, preview, on-screen receipt, ESC/POS printout, sales record, sale detail and CSV/XLSX/PDF exports.
+- All new data lives in additive optional fields/columns, so sales saved before v2.1.0 display exactly as before and no older sale is rewritten.
 
 ## Version 2.0.7 — Sale-item durability (2026-11-04)
 

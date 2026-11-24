@@ -227,6 +227,15 @@ export interface CartItem {
   cartonFloor?: number;
   pieceCeiling?: number;
   pieceFloor?: number;
+  /**
+   * v2.1.0 — per-product percentage discount / seasonal coupon.
+   * `amount` stays the GROSS line total; these fields are additive so every
+   * sale saved before v2.1.0 still reads with zero discount.
+   */
+  discountPercent?: number; // 0–100, e.g. 10 for a festive 10% off
+  couponCode?: string; // optional name/code, e.g. "XMAS10"
+  lineDiscountAmount?: number; // money taken off THIS line
+  netAmount?: number; // gross minus this line's discount
 }
 
 export type CustomerAccountType = 'individual' | 'company' | 'ngo' | 'government';
@@ -317,6 +326,16 @@ export interface SaleRecord {
   cashDiscount?: number;
   /** v2.0.8 — whether this sale was paid in full or put on the customer's credit. */
   paymentMode?: 'full' | 'credit';
+  /**
+   * v2.1.0 — percentage discount / seasonal coupon totals.
+   * All optional and additive: legacy rows simply have no percentage fields.
+   */
+  grossSubtotal?: number; // sum of item.amount before ANY discount
+  itemDiscountTotal?: number; // sum of the per-product % deductions
+  billDiscountPercent?: number; // whole-bill % (0–100)
+  billDiscountAmount?: number; // money taken off by the whole-bill %
+  billCouponCode?: string; // optional coupon name/code for the whole bill
+  totalDiscount?: number; // grossSubtotal - totalAmount
 }
 
 /** v2.0.8 — one line in the customer debt notebook. */

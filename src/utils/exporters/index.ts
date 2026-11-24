@@ -10,6 +10,7 @@ import {
   isUncountedKind,
 } from '../../types';
 import { buildSaleDisplay } from '../saleLines';
+import { saleFinancials } from '../discounts';
 
 // ============================================================
 // DATASET TABLES
@@ -111,6 +112,12 @@ export function buildDataTable(id: DatasetId, data: ExportPayload): DataTable {
           'Qty',
           'Rate',
           'Amount',
+          'Item Discount',
+          'Bill Discount %',
+          'Bill Coupon',
+          'Bill Discount',
+          'Cash Discount',
+          'Total Discount',
           'Subtotal',
           'Total',
           'Paid',
@@ -123,10 +130,20 @@ export function buildDataTable(id: DatasetId, data: ExportPayload): DataTable {
           // carry the balanced wholesale-per-piece note.
           const display = buildSaleDisplay(s.items, { code: s.currency });
           const lines = display.lines;
+          const fin = saleFinancials(s);
+          const disc = [
+            money(fin.itemDiscountTotal),
+            fin.billPercent > 0 ? String(fin.billPercent) : '',
+            fin.billCouponCode || '',
+            money(fin.billDiscountAmount),
+            money(fin.cashDiscount),
+            money(fin.totalDiscount),
+          ];
           if (lines.length === 0) {
             return [[
               i + 1, s.receiptNo, s.date, s.time, s.cashier,
               s.customerName || 'General Customer', '', '', '', '', '',
+              ...disc,
               money(s.subtotal), money(s.totalAmount), money(s.advancePayment),
               money(s.balanceDue), s.paymentMethod,
             ]];
@@ -139,10 +156,16 @@ export function buildDataTable(id: DatasetId, data: ExportPayload): DataTable {
             idx === 0 ? s.cashier : '',
             idx === 0 ? s.customerName || 'General Customer' : '',
             line.name,
-            [line.detail, ...line.noteLines].join(' | '),
+            [line.detail, ...line.noteLines, ...line.discountNoteLines].join(' | '),
             line.qty,
             money(line.rate),
             money(line.amount),
+            idx === 0 ? disc[0] : '',
+            idx === 0 ? disc[1] : '',
+            idx === 0 ? disc[2] : '',
+            idx === 0 ? disc[3] : '',
+            idx === 0 ? disc[4] : '',
+            idx === 0 ? disc[5] : '',
             idx === 0 ? money(s.subtotal) : '',
             idx === 0 ? money(s.totalAmount) : '',
             idx === 0 ? money(s.advancePayment) : '',
@@ -302,7 +325,7 @@ export function toPdfBytes(table: DataTable, subtitle?: string): Uint8Array {
   const pageWidth = doc.internal.pageSize.getWidth();
 
   doc.setFontSize(14);
-  doc.text(`Kingzzy Akamelu Resources — ${table.title}`, 40, 40);
+  doc.text(`DIRMS Storebox — ${table.title}`, 40, 40);
   doc.setFontSize(9);
   doc.setTextColor(90);
   doc.text(
@@ -338,7 +361,7 @@ export function toPdfBytes(table: DataTable, subtitle?: string): Uint8Array {
 export function exportFileName(id: DatasetId, format: ExportFormat): string {
   const date = new Date().toISOString().split('T')[0];
   const slug = id === 'products' ? 'inventory' : id === 'sales' ? 'sales_records' : id;
-  return `kingzzy_${slug}_${date}.${format}`;
+  return `dirms_storebox_${slug}_${date}.${format}`;
 }
 
 export function buildExportBytes(

@@ -1,8 +1,10 @@
-# 🛒 Kingzzy Akamelu Resources - POS & Inventory Management
+# 🛒 DIRMS Storebox - POS & Inventory Management
+
+**DIRMS = DroneBug Inventory & Records Management System.** v2.1.0 is the free / open-source edition: POS, Inventory, Sales, Customers, Expenses, Hardware Config, backups and fully customizable receipts are usable; Financial Records, Analytics, most Admin features and extra themes are locked behind an upgrade message for **DIRMS Storebox PRO or a customized version (€170 / ₦250,000 + taxes)**.
 
 A modern, full-featured **Point of Sale (POS) and Inventory Management System** built specifically for supermarkets and coldstores. This desktop application combines the power of **React**, **TypeScript**, and **Tauri** to deliver a fast, secure, and user-friendly business management solution.
 
-![Version](https://img.shields.io/badge/version-2.0.6-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 
@@ -11,6 +13,7 @@ A modern, full-featured **Point of Sale (POS) and Inventory Management System** 
 ### 🛍️ Point of Sale (POS)
 - **Fast Barcode Scanning**: Quick product lookup and cart management
 - **Multiple Price Types**: Retail and wholesale pricing support
+- **Discounts & Seasonal Coupons**: per-product percentage, whole-bill percentage/coupon and fixed cash discount can be used alone or together; each deduction is shown live before checkout and on every receipt/export
 - **Payment Methods**: Cash, POS/Transfer, Store Credit, Split Payment
 - **Customer Management**: Account balances, loyalty points, advance payments
 - **Real-time Inventory**: Automatic stock deduction on sales
@@ -185,7 +188,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🏢 About
 
 **Developed by**: Dronebug Technologies & Services  
-**For**: Kingzzy Akamelu Resources  
+**For**: DIRMS Storebox  
 **Purpose**: Modern retail management solution
 
 ## 📞 Support

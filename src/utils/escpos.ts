@@ -1,8 +1,9 @@
 import { SaleRecord, ThermalPrinterConfig, MANDATORY_RECEIPT_FOOTER } from '../types';
 import { isTauriRuntime } from './db';
 import { moneyAscii } from './currency';
-import { BRANDED_NAME_LINE, BRANDED_NICKNAME_LINE } from '../config/edition';
+import { BRANDED_NAME_LINE, BRAND_EXPANSION } from '../config/edition';
 import { buildSaleDisplay } from './saleLines';
+import { discountSummaryRows, saleFinancials } from './discounts';
 
 // ---------------------------------------------------------------------------
 // Native ESC/POS thermal printing.
@@ -123,22 +124,26 @@ export function buildEscPos(
   // because the padded width (45) rarely matched the real printable width.
   // Letting the firmware do the centering is the most reliable approach
   // and matches the on-screen preview which uses text-center.
-  // v2.0.8 — the receipt ALWAYS uses the "Kingzzy Akamelu Resources(Fine boy)"
-  // identity, regardless of the configurable app business name used everywhere else.
-  const headerName = BRANDED_NAME_LINE;
-  const headerNickname = BRANDED_NICKNAME_LINE;
+  // v2.1.0 — receipt details are fully customizable in Hardware Config.
+  // Business Name (then Store Name) wins; DIRMS Storebox is the default.
+  const headerName =
+    (config.businessName || '').trim() ||
+    (config.storeName || '').trim() ||
+    BRANDED_NAME_LINE;
   if (config.showLogo) {
     out.push(...SIZE_DOUBLE_H, ...BOLD_ON);
     out.push(...encodeLine(headerName));
     out.push(...SIZE_NORMAL, ...BOLD_OFF);
-    out.push(...BOLD_ON, ...encodeLine(headerNickname), ...BOLD_OFF);
   } else {
     out.push(...BOLD_ON, ...encodeLine(headerName), ...BOLD_OFF);
-    out.push(...BOLD_ON, ...encodeLine(headerNickname), ...BOLD_OFF);
   }
 
-  if (config.tagline) {
-    out.push(...encodeLine(config.tagline));
+  const tagline = (config.tagline || '').trim() || BRAND_EXPANSION;
+  if (tagline) {
+    out.push(...encodeLine(tagline));
+  }
+  if (config.receiptHeaderNote) {
+    out.push(...encodeLine(config.receiptHeaderNote));
   }
   if (config.address) {
     out.push(...encodeLine(config.address));
@@ -174,6 +179,7 @@ export function buildEscPos(
   // follow under their own heading, and ordinary items come last. Box rows
   // also carry the balanced wholesale-per-piece footnote.
   const display = buildSaleDisplay(sale.items, { code: sale.currency, ascii: true });
+  const fin = saleFinancials(sale);
   let piecesHeadingDone = false;
   for (const line of display.lines) {
     if (display.hasGroups && line.kind === 'piece' && !piecesHeadingDone) {
@@ -192,7 +198,7 @@ export function buildEscPos(
         out.push(...encodeLine(`  ${chunk}`));
       }
     }
-    for (const note of line.noteLines) {
+    for (const note of [...line.noteLines, ...line.discountNoteLines]) {
       for (const chunk of wrapPlain(note, width - 2)) {
         out.push(...encodeLine(`  ${chunk}`));
       }
@@ -201,14 +207,14 @@ export function buildEscPos(
 
   out.push(...encodeLine(divider('=', width)));
 
-  // Totals.
-  if ((sale as any).cashDiscount > 0) {
-    out.push(...encodeLine(`Subtotal: ${stamped(sale.totalAmount + (sale as any).cashDiscount, sale.currency)}`));
-    out.push(...encodeLine(`Discount: -${stamped((sale as any).cashDiscount, sale.currency)}`));
+  // Totals — v2.1.0. All discount rows come from one reconciled breakdown so
+  // the printed subtotal minus deductions always equals the saved TOTAL.
+  for (const row of discountSummaryRows(fin)) {
+    if (row.kind === 'net') out.push(...SIZE_DOUBLE_H, ...BOLD_ON);
+    const amount = `${row.negative ? '-' : ''}${stamped(row.amount, sale.currency)}`;
+    out.push(...encodeLine(`${row.label.padEnd(16)}${amount.padStart(12)}`));
+    if (row.kind === 'net') out.push(...SIZE_NORMAL, ...BOLD_OFF);
   }
-  out.push(...SIZE_DOUBLE_H, ...BOLD_ON);
-  out.push(...encodeLine(`TOTAL: ${stamped(sale.totalAmount, sale.currency)}`));
-  out.push(...SIZE_NORMAL, ...BOLD_OFF);
 
   out.push(...BOLD_ON);
   out.push(...encodeLine(`Paid: ${stamped(sale.advancePayment, sale.currency)}`));

@@ -4,6 +4,7 @@ import { CartItem, Customer, PriceType, ThermalPrinterConfig } from '../types';
 import { formatNaira } from '../utils/storage';
 import { ShoppingCart, ArrowLeft, CheckCircle2, X } from 'lucide-react';
 import { buildSaleDisplay } from '../utils/saleLines';
+import { discountSummaryRows, SaleFinancials } from '../utils/discounts';
 
 interface CartPreviewModalProps {
   isOpen: boolean;
@@ -13,6 +14,8 @@ interface CartPreviewModalProps {
   selectedCustomer: Customer | null;
   paymentMethod: string;
   advancePayment: number;
+  /** v2.1.0 — the POS reconciled totals; the preview never recalculates them. */
+  financials: SaleFinancials;
   cashierName: string;
   printerConfig: ThermalPrinterConfig;
   onConfirmCheckout: (opts?: { saveOnly?: boolean }) => void;
@@ -26,14 +29,15 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
   selectedCustomer,
   paymentMethod,
   advancePayment,
+  financials,
   cashierName,
   printerConfig,
   onConfirmCheckout,
 }) => {
   if (!isOpen) return null;
 
-  let grandTotal = cart.reduce((sum, item) => sum + item.amount, 0);
-  let balanceDue = Math.max(0, grandTotal - advancePayment);
+  const grandTotal = financials.totalAmount;
+  const balanceDue = Math.max(0, grandTotal - advancePayment);
   // v2.0.9 — preview uses the same box-first split rows as the receipt.
   const display = buildSaleDisplay(cart);
 
@@ -123,6 +127,9 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
                         {line.noteLines.map((note, ni) => (
                           <div key={ni} className="text-[9px] leading-tight text-[var(--text-muted)]">{note}</div>
                         ))}
+                        {line.discountNoteLines.map((note, ni) => (
+                          <div key={ni} className="text-[10px] font-bold leading-tight text-amber-500">{note}</div>
+                        ))}
                       </td>
                       <td className="py-3.5 px-4 text-center text-[var(--text-secondary)] font-medium uppercase text-xs">{line.unit}</td>
                       <td className="py-3.5 px-4 text-right text-[var(--text-secondary)] font-mono text-sm">{formatNaira(line.rate)}</td>
@@ -134,6 +141,27 @@ export const CartPreviewModal: React.FC<CartPreviewModalProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* v2.1.0 — every discount on this sale, reconciled */}
+          {financials.hasAnyDiscount && (
+            <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 space-y-1">
+              {discountSummaryRows(financials).map((row, i) => (
+                <div
+                  key={`${row.kind}-${i}`}
+                  className={`flex justify-between text-xs ${
+                    row.kind === 'net'
+                      ? 'border-t border-amber-500/30 pt-1.5 font-black text-[var(--text-primary)]'
+                      : row.negative
+                        ? 'font-bold text-amber-500'
+                        : 'text-[var(--text-muted)]'
+                  }`}
+                >
+                  <span>{row.label}</span>
+                  <span>{row.negative ? '− ' : ''}{formatNaira(row.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Summary */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-[var(--bg-app)] p-5 rounded-xl border border-[var(--border-color)] gap-4">

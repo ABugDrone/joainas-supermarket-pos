@@ -4,7 +4,7 @@ import { Product, Customer, CartItem, SaleRecord, ThermalPrinterConfig, UserRole
 import { formatNaira, playPOSBeep, recordAuditLog, getClockGate, nextReceiptNo } from '../utils/storage';
 import { useCurrency } from '../hooks/useCurrency';
 import { refreshGate, signalClockLogout } from '../utils/trustedTime';
-import { getCurrencyCode } from '../utils/currency';
+import { getCurrencyCode, getCurrencySymbol } from '../utils/currency';
 import { useClockGate } from '../hooks/useClockGate';
 import { useToast } from './Toast';
 import { CartPreviewModal } from './CartPreviewModal';
@@ -20,11 +20,75 @@ import { hasActiveClockOverride } from '../utils/clockOverride';
 import { DepletedStockPopup } from './DepletedStockPopup';
 import { StockAdjustModal } from './StockAdjustModal';
 import { buildSaleDisplay } from '../utils/saleLines';
+import { resolvePackRates } from '../utils/packPricing';
+import {
+  clampPercent, computeCartFinancials, discountLabel, discountSummaryRows,
+  lineDiscount, roundMoney, withLineDiscount,
+} from '../utils/discounts';
 
-/** Small box-only footer: pieces in the box × the discounted wholesale rate. */
+/** Wholesale rates need 4 decimals to show ₦833.3333 faithfully. */
+const formatPreciseRate = (n: number): string => {
+  const symbol = getCurrencySymbol(getCurrencyCode());
+  return `${symbol}${new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(n || 0)}`;
+};
+
+/** Box-first footer, including loose pieces when they use the box rate. */
 function wholesaleFooter(item: CartItem): string[] {
   return buildSaleDisplay([item]).lines.find((l) => l.kind === 'box')?.noteLines ?? [];
 }
+
+interface LineDiscountEditorProps {
+  item: CartItem;
+  onChange: (percent: number, couponCode?: string) => void;
+}
+
+/**
+ * v2.1.0 — one percentage + optional seasonal coupon per PRODUCT on the bill.
+ * Typing the percentage immediately shows the money coming off that line and
+ * the new line total, so the cashier can see the effect before checkout.
+ */
+const LineDiscountEditor: React.FC<LineDiscountEditorProps> = ({ item, onChange }) => {
+  const d = lineDiscount(item);
+  return (
+    <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 p-2 space-y-1.5">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-[9px] font-bold text-amber-300 uppercase mb-1">
+            Discount / Coupon % (this product)
+          </label>
+          <NumberInput
+            min={0}
+            max={100}
+            placeholder="0"
+            value={item.discountPercent || 0}
+            onValueChange={(n) => onChange(clampPercent(n), item.couponCode)}
+            className="w-full px-1.5 py-1.5 rounded-lg border border-[#30363d] bg-[#161b22] text-amber-300 text-xs font-bold outline-none focus:border-amber-500"
+          />
+        </div>
+        <div>
+          <label className="block text-[9px] font-bold text-amber-300 uppercase mb-1">
+            Coupon / season (optional)
+          </label>
+          <input
+            type="text"
+            value={item.couponCode || ''}
+            onChange={(e) => onChange(item.discountPercent || 0, e.target.value)}
+            placeholder="e.g. XMAS10"
+            className="w-full px-1.5 py-1.5 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-xs font-bold outline-none focus:border-amber-500"
+          />
+        </div>
+      </div>
+      <div className={`text-[10px] font-bold ${d.percent > 0 ? 'text-amber-300' : 'text-slate-500'}`}>
+        {d.percent > 0
+          ? `${discountLabel(d.percent, d.couponCode)}: − ${formatNaira(d.amount)} deducted → line total ${formatNaira(d.net)}`
+          : 'No discount on this product. Type a % to see the deduction.'}
+      </div>
+    </div>
+  );
+};
 
 interface POSModuleProps {
   products: Product[];
@@ -80,6 +144,12 @@ export const POSModule: React.FC<POSModuleProps> = ({
   // v2.0.8 — cash sale discount (fixed token off the total) + pay/credit mode
   const [cashDiscount, setCashDiscount] = React.useState<number>(0);
   const [paymentMode, setPaymentMode] = React.useState<'full' | 'credit'>('full');
+  // v2.1.0 — percentage discounts / seasonal coupons. One per product line
+  // (stored on the cart item) and one for the whole bill (below).
+  const [billDiscountPercent, setBillDiscountPercent] = React.useState<number>(0);
+  const [billCouponCode, setBillCouponCode] = React.useState<string>('');
+  const [nextItemDiscountPercent, setNextItemDiscountPercent] = React.useState<number>(0);
+  const [nextItemCouponCode, setNextItemCouponCode] = React.useState<string>('');
   // v2.0.8 — carton/piece sale inputs for the selected product
   const [packCartons, setPackCartons] = React.useState<number>(0);
   const [packPieces, setPackPieces] = React.useState<number>(0);
@@ -128,6 +198,9 @@ export const POSModule: React.FC<POSModuleProps> = ({
     if (typeof w.cashAmount === 'number') setCashAmount(w.cashAmount);
     if (typeof w.transferAmount === 'number') setTransferAmount(w.transferAmount);
     if (typeof w.paymentNote === 'string') setPaymentNote(w.paymentNote);
+    if (typeof w.cashDiscount === 'number') setCashDiscount(w.cashDiscount);
+    if (typeof w.billDiscountPercent === 'number') setBillDiscountPercent(clampPercent(w.billDiscountPercent));
+    if (typeof w.billCouponCode === 'string') setBillCouponCode(w.billCouponCode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products]);
 
@@ -141,9 +214,12 @@ export const POSModule: React.FC<POSModuleProps> = ({
       cashAmount,
       transferAmount,
       paymentNote,
+      cashDiscount,
+      billDiscountPercent,
+      billCouponCode,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, selectedCustomerId, paymentMethod, cashAmount, transferAmount, paymentNote]);
+  }, [cart, selectedCustomerId, paymentMethod, cashAmount, transferAmount, paymentNote, cashDiscount, billDiscountPercent, billCouponCode]);
 
   // Full-screen bill dataset preview: hidden by default — user opens manually via View Bill Table.
   // Products inside overlay also hidden by default (like grid view) so bill is fully visible without scroll.
@@ -301,23 +377,45 @@ export const POSModule: React.FC<POSModuleProps> = ({
     return selectedProduct.retailPrice;
   }, [selectedProduct]);
 
-  // v2.0.8 dual-ladder preview for the selected carton/pack product.
+  // v2.1.0 — when a box is selected, loose pieces are priced FROM the box.
   const packPer = selectedProduct && isPackProduct(selectedProduct) ? (selectedProduct.piecesPerCarton || 0) : 0;
   const effCartons = packSaleMode === 'piece' ? 0 : Math.max(0, Math.trunc(packCartons));
   const effPieces = packSaleMode === 'carton' ? 0 : Math.max(0, Math.trunc(packPieces));
   const packCartonRate = selectedProduct && effCartons > 0 ? getDefaultRate(selectedProduct, effCartons) : 0;
-  const packPieceRate = selectedProduct && effPieces > 0 ? getPieceDefaultRate(selectedProduct, effPieces) : 0;
-  const packPreviewTotal = effCartons * packCartonRate + effPieces * packPieceRate;
+  const packRates = selectedProduct
+    ? resolvePackRates({
+        cartonQty: effCartons,
+        pieceQty: effPieces,
+        piecesPerCarton: packPer,
+        cartonRate: packCartonRate,
+        pieceLadderRate: getPieceDefaultRate(selectedProduct, Math.max(1, effPieces)),
+      })
+    : null;
+  const packPieceRate = packRates?.pieceRate || 0;
+  const packPreviewTotal = packRates?.amount || 0;
 
-  // Calculate Subtotal & Total Amount (All prices already contain tax and discount)
-  const cartSubtotal = React.useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.amount, 0);
-  }, [cart]);
-  const cashDiscountAmt = React.useMemo(
-    () => Math.max(0, Math.min(Number(cashDiscount) || 0, cartSubtotal)),
-    [cashDiscount, cartSubtotal]
+  // v2.1.0 — ONE calculation feeds the bill, preview, checkout and records:
+  // product % -> whole-bill % / coupon -> fixed cash discount. `cartSubtotal`
+  // deliberately stays the GROSS sum of item lines (same meaning as before).
+  const financials = React.useMemo(
+    () => computeCartFinancials({
+      items: cart,
+      billPercent: billDiscountPercent,
+      billCouponCode,
+      cashDiscount,
+    }),
+    [cart, billDiscountPercent, billCouponCode, cashDiscount]
   );
-  const payableTotal = Math.max(0, cartSubtotal - cashDiscountAmt);
+  const cartSubtotal = financials.grossSubtotal;
+  const cashDiscountAmt = financials.cashDiscount;
+  const billDiscountAmt = financials.billDiscountAmount;
+  const itemDiscountAmt = financials.itemDiscountTotal;
+  const payableTotal = financials.totalAmount;
+  const discountParts = [
+    itemDiscountAmt > 0 ? `products ${formatNaira(itemDiscountAmt)}` : '',
+    billDiscountAmt > 0 ? `bill ${formatNaira(billDiscountAmt)}` : '',
+    cashDiscountAmt > 0 ? `cash ${formatNaira(cashDiscountAmt)}` : '',
+  ].filter(Boolean);
 
   // Sync default advance payment when cart changes
   React.useEffect(() => {
@@ -339,11 +437,11 @@ export const POSModule: React.FC<POSModuleProps> = ({
 
   // When switching to Cash + Transfer, prefill cash with total
   React.useEffect(() => {
-    if (paymentMethod === 'Cash + Transfer' && cartSubtotal > 0) {
+    if (paymentMethod === 'Cash + Transfer' && payableTotal > 0) {
       if (cashAmount === 0 && transferAmount === 0) {
-        setCashAmount(cartSubtotal);
+        setCashAmount(payableTotal);
         setTransferAmount(0);
-        setAdvancePayment(cartSubtotal);
+        setAdvancePayment(payableTotal);
       }
     }
   }, [paymentMethod]);
@@ -500,7 +598,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
       } else {
         return [
           ...prev,
-          {
+          withLineDiscount({
             product: prod,
             quantity: qty,
             priceType: 'retail',
@@ -509,7 +607,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
             floorAtSale: floor,
             allowNegativeStock,
             amount: qty * rate,
-          },
+          }, nextItemDiscountPercent, nextItemCouponCode),
         ];
       }
     });
@@ -565,19 +663,28 @@ export const POSModule: React.FC<POSModuleProps> = ({
       const pieceFloor = newP > 0 ? getPieceFloorFor(prod, newP) : 0;
 
       let cartonRate = newC > 0 ? (base?.cartonRate ?? getDefaultRate(prod, newC)) : 0;
-      let pieceRate = newP > 0 ? (base?.pieceRate ?? getPieceDefaultRate(prod, newP)) : 0;
+      let pieceLadderRate = newP > 0 ? (base?.pieceRate ?? getPieceDefaultRate(prod, newP)) : 0;
       if (newC > 0) {
         if (cartonCeiling > 0 && cartonRate > cartonCeiling) cartonRate = cartonCeiling;
         if (cartonFloor > 0 && cartonRate < cartonFloor) cartonRate = cartonFloor;
       }
-      if (newP > 0) {
-        if (pieceCeiling > 0 && pieceCeiling < NO_CEILING && pieceRate > pieceCeiling) pieceRate = pieceCeiling;
-        if (pieceFloor > 0 && pieceRate < pieceFloor) pieceRate = pieceFloor;
+      // The piece ladder is only checked when there is NO box on the line.
+      if (newC === 0 && newP > 0) {
+        if (pieceCeiling > 0 && pieceCeiling < NO_CEILING && pieceLadderRate > pieceCeiling) pieceLadderRate = pieceCeiling;
+        if (pieceFloor > 0 && pieceLadderRate < pieceFloor) pieceLadderRate = pieceFloor;
       }
-      const amount = newC * cartonRate + newP * pieceRate;
+      const rates = resolvePackRates({
+        cartonQty: newC,
+        pieceQty: newP,
+        piecesPerCarton: per,
+        cartonRate,
+        pieceLadderRate,
+      });
+      const pieceRate = rates.pieceRate;
+      const amount = rates.amount;
       const blended = newQty > 0 ? amount / newQty : 0;
-      const ceilings = [newC > 0 ? cartonCeiling : 0, newP > 0 ? pieceCeiling : 0].filter((v) => v > 0 && v < NO_CEILING);
-      const floors = [newC > 0 ? cartonFloor : 0, newP > 0 ? pieceFloor : 0].filter((v) => v > 0);
+      const ceilings = [newC > 0 ? cartonCeiling : 0, newC === 0 && newP > 0 ? pieceCeiling : 0].filter((v) => v > 0 && v < NO_CEILING);
+      const floors = [newC > 0 ? cartonFloor : 0, newC === 0 && newP > 0 ? pieceFloor : 0].filter((v) => v > 0);
       const line: CartItem = {
         product: prod,
         quantity: newQty,
@@ -601,17 +708,15 @@ export const POSModule: React.FC<POSModuleProps> = ({
       };
       if (idx > -1) {
         const updated = [...prev];
+        // An existing product line keeps the discount the cashier already set.
         updated[idx] = line;
         return updated;
       }
-      return [...prev, line];
+      // A new line inherits the discount/coupon typed in the add panel.
+      return [...prev, withLineDiscount(line, nextItemDiscountPercent, nextItemCouponCode)];
     });
     playPOSBeep();
-    const bits = [
-      c > 0 ? `${c} ${unit}${c === 1 ? '' : 's'} @ ${formatNaira(getDefaultRate(prod, c))}` : '',
-      p > 0 ? `${p} piece${p === 1 ? '' : 's'} @ ${formatNaira(getPieceDefaultRate(prod, p))}` : '',
-    ].filter(Boolean).join(' · ');
-    showToast(`Added ${describe(c, p)} of ${prod.name} — ${bits}. Price can be adjusted in the bill.`, 'success');
+    showToast(`Added ${describe(c, p)} of ${prod.name}. ${c > 0 && p > 0 ? 'Loose pieces use the box wholesale rate.' : 'Price can be adjusted in the bill.'}`, 'success');
     setPackCartons(0);
     setPackPieces(0);
   };
@@ -642,6 +747,11 @@ export const POSModule: React.FC<POSModuleProps> = ({
     showToast(`Stock for "${updated.name}" updated to ${newQty}.`, 'success');
     addItemToCart(updated, restockForSale.qty, false);
     setRestockForSale(null);
+  };
+
+  /** v2.1.0 — set or clear the percentage/coupon on ONE bill line. */
+  const setLineDiscount = (index: number, percent: number, couponCode?: string) => {
+    setCart((prev) => prev.map((it, i) => (i === index ? withLineDiscount(it, percent, couponCode) : it)));
   };
 
   const removeItemFromCart = (index: number) => {
@@ -750,18 +860,35 @@ export const POSModule: React.FC<POSModuleProps> = ({
     const pCeil = p > 0 ? getPieceCeilingFor(item.product, p) : 0;
     const pFloor = p > 0 ? getPieceFloorFor(item.product, p) : 0;
     let cRate = item.cartonRate ?? getDefaultRate(item.product, Math.max(1, c));
-    let pRate = item.pieceRate ?? getPieceDefaultRate(item.product, Math.max(1, p));
+    const hadBoxes = (item.cartonQty || 0) > 0;
+    // A piece rate saved while boxes were present is wholesale; if the boxes
+    // are removed, fall back to the product's own piece ladder.
+    let ladderRate =
+      p > 0
+        ? c > 0 || hadBoxes
+          ? getPieceDefaultRate(item.product, Math.max(1, p))
+          : item.pieceRate ?? getPieceDefaultRate(item.product, Math.max(1, p))
+        : 0;
     if (rateKind === 'carton' && rateValue !== undefined) cRate = rateValue;
-    if (rateKind === 'piece' && rateValue !== undefined) pRate = rateValue;
+    // Piece price is not editable while a box is on the line.
+    if (rateKind === 'piece' && rateValue !== undefined && c === 0) ladderRate = rateValue;
     if (c > 0) {
       const err = validateUnitPrice(cRate, cCeil, cFloor);
       if (err) { showToast(`Carton price: ${err}`, 'error'); return; }
     }
-    if (p > 0) {
-      const err = validateUnitPrice(pRate, pCeil, pFloor);
+    if (c === 0 && p > 0) {
+      const err = validateUnitPrice(ladderRate, pCeil, pFloor);
       if (err) { showToast(`Piece price: ${err}`, 'error'); return; }
     }
-    const amount = c * cRate + p * pRate;
+    const rates = resolvePackRates({
+      cartonQty: c,
+      pieceQty: p,
+      piecesPerCarton: per,
+      cartonRate: cRate,
+      pieceLadderRate: ladderRate,
+    });
+    const pRate = rates.pieceRate;
+    const amount = rates.amount;
     const unit = item.product.unit === 'pack' ? 'pack' : 'carton';
     setCart((prev) => {
       const updated = [...prev];
@@ -799,7 +926,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
       currentUser,
       currentUserRole,
       'Previewed Sales Cart Invoice',
-      `Previewed cart invoice with ${cart.length} items totaling ${formatNaira(cartSubtotal)} for customer ${selectedCustomer?.fullName || 'Walk-in'}.`
+      `Previewed cart invoice with ${cart.length} items totaling ${formatNaira(payableTotal)} for customer ${selectedCustomer?.fullName || 'Walk-in'}.`
     );
 
     setIsCartPreviewOpen(true);
@@ -848,9 +975,9 @@ export const POSModule: React.FC<POSModuleProps> = ({
       }
     } catch {}
 
-    // v2.0.8 — cash sale discount (fixed token off the total, e.g. transport).
-    const discount = Math.max(0, Math.min(Number(cashDiscount) || 0, cartSubtotal));
-    let totalAmount = cartSubtotal - discount;
+    // v2.1.0 — product % -> bill % / coupon -> fixed cash discount. The same
+    // reconciled figure was shown on screen before the cashier pressed Save.
+    const totalAmount = financials.totalAmount;
     // For Cash + Transfer, amounts are entered manually; otherwise advance is total (or 0 for debt)
     let effectiveAdvance = advancePayment;
     let cashAmt: number | undefined;
@@ -881,10 +1008,16 @@ export const POSModule: React.FC<POSModuleProps> = ({
     let newSale: SaleRecord = {
       id: `sale-${Date.now()}`,
       receiptNo: nextReceiptNo(),
-      items: cart,
-      subtotal: totalAmount,
+      items: cart.map((it) => withLineDiscount(it, it.discountPercent || 0, it.couponCode)),
+      subtotal: financials.grossSubtotal,
       totalAmount,
-      cashDiscount: discount,
+      cashDiscount: financials.cashDiscount,
+      grossSubtotal: financials.grossSubtotal,
+      itemDiscountTotal: financials.itemDiscountTotal,
+      billDiscountPercent: financials.billPercent,
+      billDiscountAmount: financials.billDiscountAmount,
+      billCouponCode: financials.billCouponCode,
+      totalDiscount: financials.totalDiscount,
       paymentMode,
       advancePayment: effectiveAdvance,
       balanceDue,
@@ -930,6 +1063,10 @@ export const POSModule: React.FC<POSModuleProps> = ({
     setTransferAmount(0);
     setPaymentNote('');
     setCashDiscount(0);
+    setBillDiscountPercent(0);
+    setBillCouponCode('');
+    setNextItemDiscountPercent(0);
+    setNextItemCouponCode('');
     setPaymentMode('full');
     setIsCartPreviewOpen(false);
     playPOSBeep();
@@ -998,6 +1135,57 @@ export const POSModule: React.FC<POSModuleProps> = ({
             </button>
           </div>
 
+          {/* v2.1.0 — discount / seasonal coupon applied to items added next.
+              The same fields can always be edited later on each bill line. */}
+          <div className="rounded-xl border border-amber-700/40 bg-amber-950/15 p-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-black uppercase tracking-wide text-amber-300">
+                Product discount / coupon for the next item
+              </span>
+              {(nextItemDiscountPercent > 0 || nextItemCouponCode) && (
+                <button
+                  type="button"
+                  onClick={() => { setNextItemDiscountPercent(0); setNextItemCouponCode(''); }}
+                  className="text-[9px] font-black uppercase text-slate-400 hover:text-amber-300"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Discount %</label>
+                <NumberInput
+                  min={0} max={100} placeholder="0"
+                  value={nextItemDiscountPercent}
+                  onValueChange={(n) => setNextItemDiscountPercent(clampPercent(n))}
+                  className="w-full px-2 py-1.5 rounded-lg border border-[#30363d] bg-[#0d1117] text-amber-300 text-xs font-bold outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Coupon / season (optional)</label>
+                <input
+                  type="text"
+                  value={nextItemCouponCode}
+                  onChange={(e) => setNextItemCouponCode(e.target.value)}
+                  placeholder="e.g. XMAS10"
+                  className="w-full px-2 py-1.5 rounded-lg border border-[#30363d] bg-[#0d1117] text-white text-xs font-bold outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+            {nextItemDiscountPercent > 0 && (
+              <div className="text-[10px] font-bold text-amber-300">
+                {discountLabel(nextItemDiscountPercent, nextItemCouponCode)}: − {formatNaira(
+                  roundMoney(
+                    Math.max(0, selectedProduct && isPackProduct(selectedProduct)
+                      ? packPreviewTotal : currentRate * Math.max(1, quantity)) *
+                      nextItemDiscountPercent / 100
+                  )
+                )} will be deducted from this item.
+              </div>
+            )}
+          </div>
+
           {/* v2.0.8 — Carton / Pack + Pieces sale entry (two price ladders) */}
           {selectedProduct && isPackProduct(selectedProduct) && (
             <div className="rounded-xl border border-cyan-700/60 bg-cyan-950/25 p-3 space-y-2">
@@ -1041,7 +1229,11 @@ export const POSModule: React.FC<POSModuleProps> = ({
                 </div>
                 <div className={packSaleMode === 'carton' ? 'opacity-40' : ''}>
                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">
-                    Loose pieces <span className="text-cyan-300">@ {formatNaira(getPieceDefaultRate(selectedProduct, Math.max(1, effPieces)))} each</span>
+                    Loose pieces{' '}
+                    <span className="text-cyan-300">
+                      @ {effCartons > 0 ? formatPreciseRate(packPieceRate) : formatNaira(getPieceDefaultRate(selectedProduct, Math.max(1, effPieces)))} each
+                      {effCartons > 0 ? ' (box rate)' : ''}
+                    </span>
                   </label>
                   <NumberInput
                     integer min={0} value={packPieces}
@@ -1051,17 +1243,26 @@ export const POSModule: React.FC<POSModuleProps> = ({
                 </div>
               </div>
 
-              {/* Per-piece price sub-text, same tiny detail as inventory */}
-              <div className="text-[9px] leading-tight text-cyan-300/90 font-semibold" title="Per loose piece price ladder">
-                Per piece: {formatPiecePriceDetail(selectedProduct) || 'not set'}
-                {!hasPiecePricing(selectedProduct) && ' (derived from carton price)'}
+              {/* Per-piece price sub-text — the box overrides the piece ladder */}
+              <div className="text-[9px] leading-tight text-cyan-300/90 font-semibold">
+                {effCartons > 0 && effPieces > 0 ? (
+                  <>
+                    Box wholesale rate: {formatPreciseRate(packPieceRate)} / pc = box price ÷ {packPer} pcs.
+                    <span className="block text-slate-400">The loose-piece price range is ignored while a box is on the bill.</span>
+                  </>
+                ) : (
+                  <>
+                    Per piece: {formatPiecePriceDetail(selectedProduct) || 'not set'}
+                    {!hasPiecePricing(selectedProduct) && ' (derived from carton price)'}
+                  </>
+                )}
               </div>
 
               <div className="flex items-center justify-between bg-[#0d1117] border border-[#30363d] rounded-lg px-2.5 py-1.5">
                 <span className="text-[10px] font-bold text-slate-400">
                   {effCartons > 0 ? `${effCartons} ${selectedProduct.unit}${effCartons === 1 ? '' : 's'} × ${formatNaira(packCartonRate)}` : ''}
                   {effCartons > 0 && effPieces > 0 ? ' + ' : ''}
-                  {effPieces > 0 ? `${effPieces} pcs × ${formatNaira(packPieceRate)}` : ''}
+                  {effPieces > 0 ? `${effPieces} pcs × ${effCartons > 0 ? formatPreciseRate(packPieceRate) : formatNaira(packPieceRate)}` : ''}
                   {effCartons === 0 && effPieces === 0 ? 'Enter a quantity' : ''}
                 </span>
                 <span className="text-sm font-black text-cyan-300">{formatNaira(packPreviewTotal)}</span>
@@ -1489,15 +1690,30 @@ export const POSModule: React.FC<POSModuleProps> = ({
                             <NumberInput integer min={0} value={item.pieceQty || 0} onValueChange={(n)=>updatePackCartLine(idx, item.cartonQty || 0, n)} className="w-full px-1.5 py-1.5 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-xs font-bold outline-none focus:border-cyan-500" />
                           </div>
                           <div>
-                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Price / pc</label>
-                            <NumberInput value={item.pieceRate || 0} min={0} onValueChange={(n)=>updatePackCartLine(idx, item.cartonQty || 0, item.pieceQty || 0, 'piece', n)} className="w-full px-1.5 py-1.5 rounded-lg border border-[#30363d] bg-[#161b22] text-cyan-300 text-xs font-bold outline-none focus:border-cyan-500" />
+                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">
+                              Price / pc {(item.cartonQty || 0) > 0 && <span className="text-amber-400">(box)</span>}
+                            </label>
+                            <NumberInput
+                              value={item.pieceRate || 0}
+                              min={0}
+                              disabled={(item.cartonQty || 0) > 0}
+                              title={(item.cartonQty || 0) > 0 ? 'Fixed: box price ÷ pieces per box while a box is on the bill' : undefined}
+                              onValueChange={(n)=>updatePackCartLine(idx, item.cartonQty || 0, item.pieceQty || 0, 'piece', n)}
+                              className="w-full px-1.5 py-1.5 rounded-lg border border-[#30363d] bg-[#161b22] text-cyan-300 text-xs font-bold outline-none focus:border-cyan-500 disabled:opacity-60"
+                            />
                           </div>
                         </div>
+                        {(item.cartonQty || 0) > 0 && (
+                          <div className="text-[9px] font-bold text-amber-300">
+                            Loose pieces are fixed at the box rate: {formatPreciseRate(item.pieceRate || 0)} / pc
+                            {' '}= box price ÷ {item.piecesPerCarton || item.product.piecesPerCarton || 0} pcs. Change the carton price to re-derive it.
+                          </div>
+                        )}
                         <div className="flex items-center justify-between gap-2 bg-[#0d1117]/70 border border-[#30363d]/70 rounded-lg px-2 py-1.5">
                           <span className="text-[10px] font-bold text-slate-400">
                             {(item.cartonQty || 0) > 0 ? `${item.cartonQty} × ${formatNaira(item.cartonRate || 0)}` : ''}
                             {(item.cartonQty || 0) > 0 && (item.pieceQty || 0) > 0 ? ' + ' : ''}
-                            {(item.pieceQty || 0) > 0 ? `${item.pieceQty} × ${formatNaira(item.pieceRate || 0)}` : ''}
+                            {(item.pieceQty || 0) > 0 ? `${item.pieceQty} × ${(item.cartonQty || 0) > 0 ? formatPreciseRate(item.pieceRate || 0) : formatNaira(item.pieceRate || 0)}` : ''}
                           </span>
                           <span className="text-xs font-black text-cyan-400">{formatNaira(item.amount)}</span>
                         </div>
@@ -1533,6 +1749,10 @@ export const POSModule: React.FC<POSModuleProps> = ({
                         </div>
                       </div>
                     )}
+                    <LineDiscountEditor
+                      item={item}
+                      onChange={(p, c) => setLineDiscount(idx, p, c)}
+                    />
                   </div>
                 ))
               )}
@@ -1582,27 +1802,85 @@ export const POSModule: React.FC<POSModuleProps> = ({
               )}
             </div>
 
-            {/* v2.0.8 — Cash sale discount */}
-            <div className="p-3 rounded-xl bg-[#0d1117] border border-[#30363d]">
-              <div className="flex items-center justify-between gap-2">
+            {/* v2.1.0 — total-sales percentage / coupon next to the v2.0.8
+                fixed cash discount. Both (and the per-product %) can stack. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="p-3 rounded-xl bg-[#0d1117] border border-amber-700/40 space-y-2">
                 <div>
-                  <label className="block text-[11px] font-black text-slate-300 uppercase">
-                    Cash Sale Discount (optional)
+                  <label className="block text-[11px] font-black text-amber-300 uppercase">
+                    Total Sales % Discount / Coupon
                   </label>
-                  <span className="text-[10px] text-slate-500">Token off the total — transport, delivery, etc.</span>
+                  <span className="text-[10px] text-slate-500">Festive rate taken off the whole bill after product discounts.</span>
                 </div>
-                <div className="w-32">
+                <div className="grid grid-cols-2 gap-2">
                   <NumberInput
-                    min={0}
-                    max={cartSubtotal}
-                    placeholder="0"
-                    value={cashDiscount}
-                    onValueChange={(n) => setCashDiscount(Math.max(0, Math.min(n, cartSubtotal)))}
+                    min={0} max={100} placeholder="0"
+                    value={billDiscountPercent}
+                    onValueChange={(n) => setBillDiscountPercent(clampPercent(n))}
+                    className="w-full px-2 py-1.5 rounded-lg border border-[#30363d] bg-[#161b22] text-amber-300 text-xs font-bold outline-none focus:border-amber-500"
+                  />
+                  <input
+                    type="text"
+                    value={billCouponCode}
+                    onChange={(e) => setBillCouponCode(e.target.value)}
+                    placeholder="Coupon / season"
                     className="w-full px-2 py-1.5 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-xs font-bold outline-none focus:border-amber-500"
                   />
                 </div>
+                <div className={`text-[10px] font-bold ${billDiscountAmt > 0 ? 'text-amber-300' : 'text-slate-500'}`}>
+                  {billDiscountAmt > 0
+                    ? `${discountLabel(billDiscountPercent, billCouponCode)}: − ${formatNaira(billDiscountAmt)} deducted from the bill`
+                    : 'Type a % to see how much will be deducted from the whole bill.'}
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-[#0d1117] border border-[#30363d]">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <label className="block text-[11px] font-black text-slate-300 uppercase">
+                      Cash Sale Discount (optional)
+                    </label>
+                    <span className="text-[10px] text-slate-500">Token off the total — transport, delivery, etc.</span>
+                  </div>
+                  <div className="w-28">
+                    <NumberInput
+                      min={0}
+                      max={cartSubtotal}
+                      placeholder="0"
+                      value={cashDiscount}
+                      onValueChange={(n) => setCashDiscount(Math.max(0, Math.min(n, cartSubtotal)))}
+                      className="w-full px-2 py-1.5 rounded-lg border border-[#30363d] bg-[#161b22] text-white text-xs font-bold outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+                <div className={`mt-2 text-[10px] font-bold ${cashDiscountAmt > 0 ? 'text-amber-300' : 'text-slate-500'}`}>
+                  {cashDiscountAmt > 0 ? `− ${formatNaira(cashDiscountAmt)} deducted after the percentages` : 'No fixed cash discount.'}
+                </div>
               </div>
             </div>
+
+            {/* Live reconciliation of every discount on this sale */}
+            {financials.hasAnyDiscount && (
+              <div className="rounded-xl border border-amber-800/40 bg-amber-950/10 px-3 py-2 space-y-1">
+                {discountSummaryRows(financials).map((row, i) => (
+                  <div
+                    key={`${row.kind}-${i}`}
+                    className={`flex items-center justify-between text-[11px] ${
+                      row.kind === 'net'
+                        ? 'border-t border-amber-800/40 pt-1 font-black text-emerald-400'
+                        : row.negative
+                          ? 'font-bold text-amber-400'
+                          : row.kind === 'saved'
+                            ? 'font-bold text-amber-300'
+                            : 'text-slate-400'
+                    }`}
+                  >
+                    <span>{row.label}</span>
+                    <span>{row.negative ? '− ' : ''}{formatNaira(row.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Payment Mode Selector Tiles */}
             <div>
@@ -1670,13 +1948,13 @@ export const POSModule: React.FC<POSModuleProps> = ({
                   </div>
                   {/* Mini transaction report */}
                   <div className="bg-[#161b22] rounded-lg border border-[#30363d] p-2.5 text-xs space-y-1">
-                    <div className="flex justify-between text-slate-400"><span>Total Bill:</span><span className="font-bold text-white">{formatNaira(cartSubtotal)}</span></div>
+                    <div className="flex justify-between text-slate-400"><span>Total Bill (after discounts):</span><span className="font-bold text-white">{formatNaira(payableTotal)}</span></div>
                     <div className="flex justify-between text-slate-400"><span>Cash:</span><span className="font-bold text-emerald-400">{formatNaira(cashAmount || 0)}</span></div>
                     <div className="flex justify-between text-slate-400"><span>Transfer:</span><span className="font-bold text-cyan-400">{formatNaira(transferAmount || 0)}</span></div>
                     <div className="flex justify-between text-slate-300 border-t border-[#30363d] pt-1"><span>Paid Total:</span><span className="font-black text-white">{formatNaira((cashAmount || 0) + (transferAmount || 0))}</span></div>
-                    <div className={`flex justify-between font-black ${((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal < 0 ? 'text-amber-400' : ((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal > 0 ? 'text-cyan-400' : 'text-slate-400'}`}>
-                      <span>{((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal > 0 ? 'Change / Overpay:' : ((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal < 0 ? 'Balance Due:' : 'Balanced:'}</span>
-                      <span>{formatNaira(Math.abs(((cashAmount || 0) + (transferAmount || 0)) - cartSubtotal))}</span>
+                    <div className={`flex justify-between font-black ${((cashAmount || 0) + (transferAmount || 0)) - payableTotal < 0 ? 'text-amber-400' : ((cashAmount || 0) + (transferAmount || 0)) - payableTotal > 0 ? 'text-cyan-400' : 'text-slate-400'}`}>
+                      <span>{((cashAmount || 0) + (transferAmount || 0)) - payableTotal > 0 ? 'Change / Overpay:' : ((cashAmount || 0) + (transferAmount || 0)) - payableTotal < 0 ? 'Balance Due:' : 'Balanced:'}</span>
+                      <span>{formatNaira(Math.abs(((cashAmount || 0) + (transferAmount || 0)) - payableTotal))}</span>
                     </div>
                     {paymentNote.trim() && <div className="text-[11px] text-amber-300 italic border-t border-[#30363d] pt-1">Note: {paymentNote}</div>}
                   </div>
@@ -1691,9 +1969,10 @@ export const POSModule: React.FC<POSModuleProps> = ({
                 <span className="text-2xl font-black text-emerald-400 tracking-tight">
                   {formatNaira(payableTotal)}
                 </span>
-                {cashDiscountAmt > 0 && (
+                {financials.hasAnyDiscount && (
                   <span className="block text-[10px] text-amber-400 font-bold">
-                    {formatNaira(cartSubtotal)} − {formatNaira(cashDiscountAmt)} discount
+                    {formatNaira(cartSubtotal)} gross − {formatNaira(financials.totalDiscount)} total discount
+                    {discountParts.length > 0 && ` (${discountParts.join(' + ')})`}
                   </span>
                 )}
               </div>
@@ -1750,6 +2029,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
         selectedCustomer={selectedCustomer}
         paymentMethod={paymentMethod}
         advancePayment={advancePayment}
+        financials={financials}
         cashierName={currentUser}
         printerConfig={printerConfig}
         onConfirmCheckout={handleCheckout}
@@ -1767,7 +2047,7 @@ export const POSModule: React.FC<POSModuleProps> = ({
               </div>
               <div>
                 <h2 className="font-black text-sm text-[var(--text-primary)]">Customer Bill — Dataset Preview</h2>
-                <p className="text-xs text-[var(--text-muted)]">{cart.length} items • Total {formatNaira(cartSubtotal)} • Search inventory at top while bill stays visible</p>
+                <p className="text-xs text-[var(--text-muted)]">{cart.length} items • Total {formatNaira(payableTotal)} • Search inventory at top while bill stays visible</p>
               </div>
             </div>
             <button type="button" onClick={() => setIsTableMode(false)} className="px-4 py-2 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-secondary)] font-bold text-xs flex items-center gap-2 hover:bg-[var(--bg-hover)]">
@@ -1909,6 +2189,11 @@ export const POSModule: React.FC<POSModuleProps> = ({
                           {wholesaleFooter(item).map((note, ni) => (
                             <div key={ni} className="text-[9px] leading-tight text-[var(--text-muted)]">{note}</div>
                           ))}
+                          {(item.discountPercent || 0) > 0 && (
+                            <div className="text-[10px] font-black text-amber-500">
+                              {discountLabel(item.discountPercent || 0, item.couponCode)}: − {formatNaira(lineDiscount(item).amount)} → {formatNaira(lineDiscount(item).net)}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5">
@@ -1934,11 +2219,18 @@ export const POSModule: React.FC<POSModuleProps> = ({
                     ))}
                   </tbody>
                   <tfoot>
+                    {financials.hasAnyDiscount && (
+                      <tr className="bg-[var(--bg-app)] text-amber-500 text-[11px] font-bold">
+                        <td colSpan={6} className="py-2 px-4 text-right">
+                          Gross {formatNaira(cartSubtotal)} − total discount {formatNaira(financials.totalDiscount)} ({discountParts.join(' + ')})
+                        </td>
+                      </tr>
+                    )}
                     <tr className="bg-[var(--bg-app)] border-t-2 border-[var(--accent-color)] font-black">
                       <td colSpan={2} className="py-3 px-4 text-right text-[var(--text-secondary)]">TOTAL</td>
                       <td className="py-3 px-4 text-center text-[var(--text-primary)]">{cart.reduce((s,i)=>s+i.quantity,0)}</td>
                       <td className="py-3 px-4 text-right text-[var(--text-muted)]">—</td>
-                      <td className="py-3 px-4 text-right text-[var(--accent-color)] text-base">{formatNaira(cartSubtotal)}</td>
+                      <td className="py-3 px-4 text-right text-[var(--accent-color)] text-base">{formatNaira(payableTotal)}</td>
                       <td></td>
                     </tr>
                   </tfoot>

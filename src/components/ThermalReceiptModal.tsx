@@ -7,18 +7,13 @@ import { formatNaira, playPOSBeep, pickReceiptSavePath, writeBinaryFile, openInD
 import { formatMoney, moneyAscii } from '../utils/currency';
 import { buildSaleDisplay } from '../utils/saleLines';
 import { printReceipt } from '../utils/escpos';
+import { discountSummaryRows, saleFinancials } from '../utils/discounts';
 import { isTauriRuntime } from '../utils/db';
-import {
-  BRANDED_DOCUMENT_NAME,
-  BRANDED_NAME_LINE,
-  BRANDED_NICKNAME_LINE,
-} from '../config/edition';
+import { BRANDED_NAME_LINE, BRAND_EXPANSION } from '../config/edition';
 import { useToast } from './Toast';
 
-/** v2.0.8 — receipt-only branding. The "(Fine boy)" nickname and its own
- * crown-K icon appear ONLY on the printed/exported receipt; everywhere else
- * in the app the name is simply "Kingzzy Akamelu Resources". */
-const RECEIPT_BRAND_NAME = BRANDED_DOCUMENT_NAME;
+/** v2.1.0 — the header comes from Hardware Config, with DIRMS Storebox defaults.
+ * The DIRMS logo is only the fallback when no custom logo is uploaded. */
 const RECEIPT_BRAND_ICON = '/receipt-icon.png';
 
 interface ThermalReceiptModalProps {
@@ -116,17 +111,21 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
     }
   };
 
-  // v2.0.8 — the receipt ALWAYS carries the full
-  // "Kingzzy Akamelu Resources(Fine boy)" identity, regardless of the
-  // configurable app business name.
-  const headerName = RECEIPT_BRAND_NAME;
+  // v2.1.0 — fully customizable receipt details. Business Name (then Store
+  // Name) wins; DIRMS Storebox is only the default.
+  const headerName =
+    (config.businessName || '').trim() ||
+    (config.storeName || '').trim() ||
+    BRANDED_NAME_LINE;
+  const headerTagline = (config.tagline || '').trim() || BRAND_EXPANSION;
   const getEscPosText = () => {
     let text = `================================\n`;
     text += `       ${headerName}\n`;
-    text += `  ${config.tagline}\n`;
+    text += `  ${headerTagline}\n`;
     text += `================================\n`;
-    text += `Address: ${config.address}\n`;
-    text += `Tel: ${config.phone}\n`;
+    if (config.receiptHeaderNote) text += `  ${config.receiptHeaderNote}\n`;
+    if (config.address) text += `Address: ${config.address}\n`;
+    if (config.phone) text += `Tel: ${config.phone}\n`;
     text += `--------------------------------\n`;
     text += `Receipt No: ${sale.receiptNo}\n`;
     text += `Date: ${sale.date}  Time: ${sale.time}\n`;
@@ -143,6 +142,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
     // v2.0.9 — box rows first, loose pieces afterwards under their own
     // heading, with the wholesale-per-piece footnote under every box row.
     const copyLines = buildSaleDisplay(sale.items, { code: sale.currency, ascii: true });
+    const fin = saleFinancials(sale);
     let headingDone = false;
     copyLines.lines.forEach((line) => {
       if (copyLines.hasGroups && line.kind === 'piece' && !headingDone) {
@@ -156,14 +156,14 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
       text += `${qty} ${name} ${rate} ${amt}\n`;
       if (line.kind !== 'plain') text += `   ${line.detail}\n`;
       line.noteLines.forEach((note) => { text += `   ${note}\n`; });
+      line.discountNoteLines.forEach((note) => { text += `   ${note}\n`; });
     });
 
     text += `--------------------------------\n`;
-    if ((sale as any).cashDiscount > 0) {
-      text += `SUBTOTAL:       ${moneyAscii(sale.totalAmount + (sale as any).cashDiscount, sale.currency)}\n`;
-      text += `DISCOUNT:      -${moneyAscii((sale as any).cashDiscount, sale.currency)}\n`;
-    }
-    text += `TOTAL:          ${moneyAscii(sale.totalAmount, sale.currency)}\n`;
+    discountSummaryRows(fin).forEach((row) => {
+      const amount = `${row.negative ? '-' : ''}${moneyAscii(row.amount, sale.currency)}`;
+      text += `${row.label.toUpperCase().padEnd(16)}${amount.padStart(15)}\n`;
+    });
     text += `PAID (ADVANCE): ${moneyAscii(sale.advancePayment, sale.currency)}\n`;
     text += `BALANCE DUE:    ${moneyAscii(sale.balanceDue, sale.currency)}\n`;
     text += `PAYMENT METHOD: ${sale.paymentMethod}\n`;
@@ -269,14 +269,23 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               boxSizing: 'border-box',
             }}
           >
-            {/* Store Header — v2.0.8: Kingzzy "(Fine boy)" receipt identity with its own crown-K icon */}
+            {/* Store Header — v2.1.0: every line comes from Hardware Config */}
             <div className="text-center mb-3 pb-3 border-b-2 border-gray-700">
-              <img src={RECEIPT_BRAND_ICON} alt="Kingzzy Fine boy" className="mx-auto mb-2 object-contain" style={{ maxWidth: config.paperWidth === '58mm' ? 80 : 104, maxHeight: 56 }} />
-              <div className="font-black text-lg tracking-tight text-black leading-tight">{BRANDED_NAME_LINE}</div>
-              <div className="font-black text-base tracking-tight text-black leading-tight mt-0.5">{BRANDED_NICKNAME_LINE}</div>
-              <div className="text-xs text-gray-800 font-bold mt-1">{config.tagline}</div>
-              <div className="text-xs text-gray-700 font-medium mt-1">{config.address}</div>
-              <div className="text-xs text-gray-700 font-medium">Tel: {config.phone}</div>
+              {config.showLogo !== false && (
+                <img
+                  src={config.logoDataUrl || RECEIPT_BRAND_ICON}
+                  alt={headerName}
+                  className="mx-auto mb-2 object-contain"
+                  style={{ maxWidth: config.paperWidth === '58mm' ? 80 : 104, maxHeight: 56 }}
+                />
+              )}
+              <div className="font-black text-lg tracking-tight text-black leading-tight">{headerName}</div>
+              <div className="text-[11px] text-gray-800 font-bold mt-0.5">{headerTagline}</div>
+              {config.receiptHeaderNote && (
+                <div className="text-xs text-gray-800 font-bold mt-1">{config.receiptHeaderNote}</div>
+              )}
+              {config.address && <div className="text-xs text-gray-700 font-medium mt-1">{config.address}</div>}
+              {config.phone && <div className="text-xs text-gray-700 font-medium">Tel: {config.phone}</div>}
             </div>
 
             {/* Transaction Info */}
@@ -346,6 +355,9 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
                             ))}
                           </span>
                         )}
+                        {line.discountNoteLines.map((note, ni) => (
+                          <span key={ni} className="mt-0.5 block text-[9px] font-black leading-tight text-amber-700">{note}</span>
+                        ))}
                       </td>
                       <td className="py-1.5 text-right align-top text-gray-800 font-semibold" style={{ whiteSpace: 'nowrap' }}>{line.rateLabel}</td>
                       <td className="py-1.5 text-right font-black align-top text-black" style={{ whiteSpace: 'nowrap' }}>
@@ -357,22 +369,25 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               </tbody>
             </table>
 
-            {/* Totals */}
+            {/* Totals — v2.1.0: every discount reconciled to the saved total */}
             <div className="border-t-2 border-black pt-2 mt-2 space-y-1.5 text-[13px]">
-              <div className="flex justify-between font-bold text-gray-800">
-                <span>Subtotal:</span>
-                <span>{formatMoney(sale.totalAmount + ((sale as any).cashDiscount || 0), sale.currency)}</span>
-              </div>
-              {(sale as any).cashDiscount > 0 && (
-                <div className="flex justify-between font-black text-amber-700">
-                  <span>Discount:</span>
-                  <span>− {formatMoney((sale as any).cashDiscount, sale.currency)}</span>
+              {discountSummaryRows(saleFinancials(sale)).map((row, i) => (
+                <div
+                  key={`${row.kind}-${i}`}
+                  className={`flex justify-between ${
+                    row.kind === 'net'
+                      ? 'text-xl font-black text-black'
+                      : row.negative
+                        ? 'font-black text-amber-700'
+                        : row.kind === 'saved'
+                          ? 'font-bold text-amber-700'
+                          : 'font-bold text-gray-800'
+                  }`}
+                >
+                  <span>{row.label}:</span>
+                  <span>{row.negative ? '− ' : ''}{formatMoney(row.amount, sale.currency)}</span>
                 </div>
-              )}
-              <div className="flex justify-between text-xl font-black text-black">
-                <span>TOTAL:</span>
-                <span>{formatMoney(sale.totalAmount, sale.currency)}</span>
-              </div>
+              ))}
               <div className="flex justify-between font-black text-gray-900">
                 <span>Paid:</span>
                 <span>{formatMoney(sale.advancePayment, sale.currency)}</span>

@@ -1,6 +1,13 @@
 import React from 'react';
 import { Lock, Phone } from 'lucide-react';
-import { EDITION, gmailComposeUrl, whatsappDmUrl, premiumInquiryText } from '../config/edition';
+import {
+  EDITION,
+  UPGRADE_MESSAGE,
+  UPGRADE_PRICE_LINE,
+  gmailComposeUrl,
+  whatsappDmUrl,
+  premiumInquiryText,
+} from '../config/edition';
 
 interface PremiumLockProps {
   feature: string;
@@ -24,16 +31,13 @@ const openExternal = (url: string) => {
   })();
 };
 
-/**
-  * Legacy upsell gate (unused in the v1.5.1 full build — every module is
-  * unlocked). Kept so no import breaks; renders nothing reachable.
- * Contact icons are icon-only (no email/number text on the buttons).
- */
+/** v2.1.0 open-source gate — the feature never mounts, this panel replaces it. */
 export const PremiumLock: React.FC<PremiumLockProps> = ({ feature, title, whatItDoes, example }) => {
-  const subject = `Kingzzy Akamelu Resources Help — ${feature}`;
+  const subject = `${EDITION.shortName} — Upgrade request: ${feature}`;
   const body =
-    `Hello,\n\nI am using ${EDITION.shortName} v${EDITION.version} (Full) ` +
-    `and want the PREMIUM version to unlock "${feature}". Please assist.\n\nThank you.`;
+    `Hello,\n\nI am using ${EDITION.shortName} v${EDITION.version} (${EDITION.editionLabel}) ` +
+    `and would like ${EDITION.upgradeTarget} to unlock "${feature}". ` +
+    `Please send payment details.\n\nThank you.`;
 
   return (
     <div className="flex items-center justify-center p-6">
@@ -44,25 +48,25 @@ export const PremiumLock: React.FC<PremiumLockProps> = ({ feature, title, whatIt
         </div>
 
         <div className="mt-4 inline-block text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300">
-          Premium feature · Locked
+          Locked in the free / open-source edition
         </div>
 
         <h2 className="mt-3 text-xl font-black text-[var(--text-primary)]">{title}</h2>
 
-        <p className="mt-3 text-sm text-[var(--text-secondary)] leading-relaxed">{whatItDoes}</p>
+        <p className="mt-3 text-sm font-bold text-amber-300 leading-relaxed">{UPGRADE_MESSAGE}</p>
+        <p className="mt-2 text-sm text-[var(--text-secondary)] leading-relaxed">{whatItDoes}</p>
         <p className="mt-2 text-xs text-[var(--text-muted)] leading-relaxed">
           <span className="font-bold text-[var(--text-secondary)]">Example: </span>
           {example}
         </p>
 
         <div className="mt-4 p-3 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-color)] text-xs text-[var(--text-secondary)] leading-relaxed">
-          Your locked information is still saved on this device, but encrypted to the Premium version.
-          When you upgrade, everything locked today appears automatically — nothing is lost.
+          Nothing is lost. Your data stays on this device and is unlocked as soon as you move to the paid edition.
           <span className="block mt-1.5 font-black text-sm text-[var(--text-primary)]">
-            Premium: {EDITION.premiumPrice} (one-time)
+            {UPGRADE_PRICE_LINE}
           </span>
           <span className="block mt-1 font-semibold">
-            Fastest way to get Premium: Call / SMS / WhatsApp {EDITION.supportWhatsAppDisplay}.
+            Fastest way to upgrade: Call / SMS / WhatsApp {EDITION.supportWhatsAppDisplay}.
           </span>
         </div>
 
@@ -101,7 +105,7 @@ export const PremiumLock: React.FC<PremiumLockProps> = ({ feature, title, whatIt
             <img src="/icons/brand-facebook.svg" alt="Facebook" className="w-7 h-7" />
           </button>
         </div>
-<p className="mt-2 text-[11px] text-[var(--text-muted)]">Tap an icon to reach support.</p>
+        <p className="mt-2 text-[11px] text-[var(--text-muted)]">Tap an icon to reach support.</p>
       </div>
     </div>
   );

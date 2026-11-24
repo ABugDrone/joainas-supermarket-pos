@@ -1,5 +1,6 @@
 import { CartItem, PriceTier, Product } from '../types';
 import { getCeilingFor, getFloorFor } from './pricing';
+import { withLineDiscount } from './discounts';
 
 // ============================================================
 // PER-USER WORKSPACE CONTINUITY (v1.4.7)
@@ -22,6 +23,9 @@ export interface WorkspaceCartLine {
   ceilingAtSale?: number;
   floorAtSale?: number;
   allowNegativeStock?: boolean;
+  /** v2.1.0 — product percentage discount / seasonal coupon survives logout. */
+  discountPercent?: number;
+  couponCode?: string;
 }
 
 export interface PosWorkspace {
@@ -31,6 +35,10 @@ export interface PosWorkspace {
   cashAmount?: number;
   transferAmount?: number;
   paymentNote?: string;
+  /** v2.1.0 — bill-level discount state survives logout. */
+  billDiscountPercent?: number;
+  billCouponCode?: string;
+  cashDiscount?: number;
 }
 
 export interface InventoryDraft {
@@ -103,6 +111,8 @@ export function cartToLines(cart: CartItem[]): WorkspaceCartLine[] {
     ceilingAtSale: it.ceilingAtSale,
     floorAtSale: it.floorAtSale,
     allowNegativeStock: it.allowNegativeStock,
+    discountPercent: it.discountPercent,
+    couponCode: it.couponCode,
   }));
 }
 
@@ -141,16 +151,18 @@ export function reconcileCart(
       rate = floor;
       notes.push(`"${prod.name}" price adjusted to current min ${floor.toLocaleString()}.`);
     }
-    items.push({
-      product: prod,
-      quantity: qty,
-      priceType: 'retail',
-      rate,
-      ceilingAtSale: ceiling,
-      floorAtSale: floor,
-      allowNegativeStock: ln.allowNegativeStock,
-      amount: qty * rate,
-    });
+    items.push(
+      withLineDiscount({
+        product: prod,
+        quantity: qty,
+        priceType: 'retail',
+        rate,
+        ceilingAtSale: ceiling,
+        floorAtSale: floor,
+        allowNegativeStock: ln.allowNegativeStock,
+        amount: qty * rate,
+      }, ln.discountPercent || 0, ln.couponCode),
+    );
   }
   // De-dupe identical adjustment notes.
   return { items, notes: Array.from(new Set(notes)) };

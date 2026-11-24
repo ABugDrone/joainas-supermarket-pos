@@ -1,6 +1,6 @@
 import React from 'react';
 import { formatNaira, loadPrinterConfig } from '../utils/storage';
-import { BRANDED_NAME_LINE, BRANDED_NICKNAME_LINE } from '../config/edition';
+import { BRANDED_NAME_LINE, BRAND_EXPANSION } from '../config/edition';
 
 export interface FinancialStatementData {
   fromDate: string;
@@ -70,13 +70,12 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
             e.currentTarget.style.display = 'none';
           }}
         />
-        <h1 className="text-2xl font-black tracking-tight text-black">{BRANDED_NAME_LINE}</h1>
-        <p className="text-lg font-black tracking-tight text-black mt-0.5">{BRANDED_NICKNAME_LINE}</p>
-        {businessName && businessName.trim() !== BRANDED_NAME_LINE && (
-          <p className="text-[11px] font-bold text-gray-800 uppercase tracking-wider mt-1.5">
-            {businessName}
-          </p>
-        )}
+        <h1 className="text-2xl font-black tracking-tight text-black">
+          {businessName || BRANDED_NAME_LINE}
+        </h1>
+        <p className="text-[11px] font-bold text-gray-800 uppercase tracking-wider mt-1">
+          {BRAND_EXPANSION}
+        </p>
         <p className="text-[11px] font-bold text-gray-800 uppercase tracking-wider mt-1">
           Statement of Profit and Loss (Income Statement)
         </p>
@@ -153,7 +152,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
       </div>
 
       <p className="text-[10px] text-gray-600 mt-6">
-        This statement was generated automatically by the Kingzzy Akamelu Resources system from {data.transactionCount} completed receipt(s) within the selected period.
+        This statement was generated automatically by the DIRMS Storebox system from {data.transactionCount} completed receipt(s) within the selected period.
       </p>
 
       {/* Signatures */}
@@ -164,7 +163,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
         </div>
         <div className="text-right">
           <p className="font-bold">Software Developer Verification:</p>
-          <p className="mt-1 font-semibold">Kingzzy Akamelu Resources</p>
+          <p className="mt-1 font-semibold">DIRMS Storebox</p>
           <p>dronebugtechnologies@gmail.com</p>
         </div>
       </div>

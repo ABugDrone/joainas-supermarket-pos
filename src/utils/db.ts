@@ -162,6 +162,12 @@ const SCHEMA_CREATES: string[] = [
     sale_time TEXT NOT NULL,
     cash_discount REAL NOT NULL DEFAULT 0.0,
     payment_mode TEXT NOT NULL DEFAULT 'full',
+    gross_subtotal REAL NOT NULL DEFAULT 0.0,
+    item_discount_total REAL NOT NULL DEFAULT 0.0,
+    bill_discount_percent REAL NOT NULL DEFAULT 0.0,
+    bill_discount_amount REAL NOT NULL DEFAULT 0.0,
+    bill_coupon_code TEXT,
+    total_discount REAL NOT NULL DEFAULT 0.0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS sale_items (
@@ -179,7 +185,11 @@ const SCHEMA_CREATES: string[] = [
     sale_unit_label TEXT,
     carton_rate REAL NOT NULL DEFAULT 0.0,
     piece_rate REAL NOT NULL DEFAULT 0.0,
-    sale_mode TEXT
+    sale_mode TEXT,
+    discount_percent REAL NOT NULL DEFAULT 0.0,
+    coupon_code TEXT,
+    discount_amount REAL NOT NULL DEFAULT 0.0,
+    net_amount REAL NOT NULL DEFAULT 0.0
   )`,
   `CREATE TABLE IF NOT EXISTS debt_entries (
     id TEXT PRIMARY KEY NOT NULL,
@@ -491,6 +501,19 @@ export async function bootstrapSchema(d: Database): Promise<void> {
   await ensureColumn(d, 'sale_items', 'piece_rate', 'ALTER TABLE sale_items ADD COLUMN piece_rate REAL NOT NULL DEFAULT 0.0');
   await ensureColumn(d, 'sale_items', 'sale_mode', 'ALTER TABLE sale_items ADD COLUMN sale_mode TEXT');
 
+  // v2.1.0 — percentage discounts / seasonal coupons. Additive defaults mean
+  // every sale written by an older release stays byte-for-byte equivalent.
+  await ensureColumn(d, 'sales', 'gross_subtotal', 'ALTER TABLE sales ADD COLUMN gross_subtotal REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sales', 'item_discount_total', 'ALTER TABLE sales ADD COLUMN item_discount_total REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sales', 'bill_discount_percent', 'ALTER TABLE sales ADD COLUMN bill_discount_percent REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sales', 'bill_discount_amount', 'ALTER TABLE sales ADD COLUMN bill_discount_amount REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sales', 'bill_coupon_code', 'ALTER TABLE sales ADD COLUMN bill_coupon_code TEXT');
+  await ensureColumn(d, 'sales', 'total_discount', 'ALTER TABLE sales ADD COLUMN total_discount REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sale_items', 'discount_percent', 'ALTER TABLE sale_items ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sale_items', 'coupon_code', 'ALTER TABLE sale_items ADD COLUMN coupon_code TEXT');
+  await ensureColumn(d, 'sale_items', 'discount_amount', 'ALTER TABLE sale_items ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0.0');
+  await ensureColumn(d, 'sale_items', 'net_amount', 'ALTER TABLE sale_items ADD COLUMN net_amount REAL NOT NULL DEFAULT 0.0');
+
   // 4. Indexes (idempotent).
   for (const sql of SCHEMA_INDEXES) {
     try {
@@ -768,6 +791,10 @@ export function mapSale(row: any, productLookup: Map<string, Product>): SaleReco
       cartonRate: it.carton_rate || 0,
       pieceRate: it.piece_rate || 0,
       saleMode: it.sale_mode || undefined,
+      discountPercent: it.discount_percent || 0,
+      couponCode: it.coupon_code || undefined,
+      lineDiscountAmount: it.discount_amount || 0,
+      netAmount: it.net_amount || 0,
     };
   });
 
@@ -795,6 +822,12 @@ export function mapSale(row: any, productLookup: Map<string, Product>): SaleReco
     currency: row.currency || undefined,
     cashDiscount: row.cash_discount || 0,
     paymentMode: row.payment_mode === 'credit' ? 'credit' : 'full',
+    grossSubtotal: row.gross_subtotal || 0,
+    itemDiscountTotal: row.item_discount_total || 0,
+    billDiscountPercent: row.bill_discount_percent || 0,
+    billDiscountAmount: row.bill_discount_amount || 0,
+    billCouponCode: row.bill_coupon_code || undefined,
+    totalDiscount: row.total_discount || 0,
   };
 }
 
@@ -1170,6 +1203,12 @@ const SALE_COLUMNS: ColumnSpec[] = [
   { col: 'currency', value: (s) => s.currency || null },
   { col: 'cash_discount', value: (s) => (s as any).cashDiscount || 0 },
   { col: 'payment_mode', value: (s) => ((s as any).paymentMode === 'credit' ? 'credit' : 'full') },
+  { col: 'gross_subtotal', value: (s) => (s as any).grossSubtotal || (s as any).subtotal || s.totalAmount },
+  { col: 'item_discount_total', value: (s) => (s as any).itemDiscountTotal || 0 },
+  { col: 'bill_discount_percent', value: (s) => (s as any).billDiscountPercent || 0 },
+  { col: 'bill_discount_amount', value: (s) => (s as any).billDiscountAmount || 0 },
+  { col: 'bill_coupon_code', value: (s) => (s as any).billCouponCode || null },
+  { col: 'total_discount', value: (s) => (s as any).totalDiscount || 0 },
 ];
 
 const SALE_ITEM_COLUMNS: ColumnSpec[] = [
@@ -1187,6 +1226,10 @@ const SALE_ITEM_COLUMNS: ColumnSpec[] = [
   { col: 'carton_rate', value: (it) => (it as any).cartonRate || 0 },
   { col: 'piece_rate', value: (it) => (it as any).pieceRate || 0 },
   { col: 'sale_mode', value: (it) => (it as any).saleMode || null },
+  { col: 'discount_percent', value: (it) => (it as any).discountPercent || 0 },
+  { col: 'coupon_code', value: (it) => (it as any).couponCode || null },
+  { col: 'discount_amount', value: (it) => (it as any).lineDiscountAmount || 0 },
+  { col: 'net_amount', value: (it) => (it as any).netAmount || 0 },
 ];
 
 // Build sale-item rows from the in-memory receipt.
@@ -1234,6 +1277,16 @@ export function saleItemRows(sales: SaleRecord[]): Array<Record<string, unknown>
         pieceQty: item.pieceQty || 0,
         piecesPerCarton: item.piecesPerCarton || 0,
         saleUnitLabel: item.saleUnitLabel || null,
+        // v2.0.9 split rates were declared in SALE_ITEM_COLUMNS but never
+        // written here, so reloaded receipts lost their box-first breakdown.
+        cartonRate: item.cartonRate || 0,
+        pieceRate: item.pieceRate || 0,
+        saleMode: item.saleMode || null,
+        // v2.1.0 — per-product percentage discount / coupon.
+        discountPercent: item.discountPercent || 0,
+        couponCode: item.couponCode || null,
+        discountAmount: item.lineDiscountAmount || 0,
+        netAmount: item.netAmount || 0,
       });
     }
   }

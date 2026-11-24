@@ -1,6 +1,6 @@
-# Kingzzy Akamelu Resources v2.0.7 — Installation and Upgrade Guide
+# DIRMS Storebox v2.1.0 — Installation and Upgrade Guide
 
-Kingzzy Akamelu Resources is a Windows desktop POS and inventory application. **v2.0.7 has no license activation step** — there is no `.lic` file, no activation password, and no internet check. After installation, a fresh shop creates its admin account; an existing shop goes straight to login.
+DIRMS Storebox is a Windows desktop POS and inventory application. **v2.1.0 is the free / open-source edition**: there is no license key, no activation password, no internet check, and no login or setup wizard — the app opens straight into the POS with a single local user. DIRMS stands for **DroneBug Inventory & Records Management System**.
 
 ## Requirements
 
@@ -11,12 +11,12 @@ Kingzzy Akamelu Resources is a Windows desktop POS and inventory application. **
 
 ## Fresh installation
 
-1. Run **`Kingzzy Akamelu Resources_2.0.7_x64-setup.exe`**.
+1. Run **`DIRMS Storebox_2.1.0_x64-setup.exe`**.
 2. Accept the Windows prompt and choose **Install**. The installer is per-machine by default.
-3. Launch **Kingzzy Akamelu Resources** from the Start menu or desktop shortcut.
-4. On first launch, create the administrator account (username, password, recovery details). There is **no activation screen**.
-5. Optionally set the backup folder, store currency, business name, logo and thermal printer in **Admin → Database / Hardware**.
-6. Add products in **Inventory** and start selling at **POS**.
+3. Launch **DIRMS Storebox** from the Start menu or desktop shortcut.
+4. On first launch the app opens directly into the POS — no account creation and **no activation screen**.
+5. Set your business name, address, phone, tagline, logo and thermal printer in **Hardware Config → Receipt Printer**. Backups and store currency are in **Admin → SQLite DB & Backups**.
+6. Add products in **Inventory** and start selling at **POS**. For festive sales, type a percentage and optional coupon/season code on any product line and/or in **Total Sales % Discount / Coupon** beside the cash discount; the deducted amount is shown before checkout and on the receipt.
 
 ## Upgrading from v1.x or v2.0.x
 
@@ -25,7 +25,7 @@ Run the new installer directly over the existing installation. **Do not uninstal
 On first launch after the upgrade:
 
 - Existing users, products, categories, customers, sales, receipts, expenditures, audit logs and printer settings are preserved.
-- You land on **Login**, not the setup wizard.
+- You land straight on the **POS**; this edition has no login or setup wizard.
 - A one-time safe migration groups legacy categories under **Products** and converts a legacy single price into a **maximum price**. Explicit price ranges (`min < max`, or a tier floor below its ceiling) are kept.
 - Services and edibles that were explicitly recorded as such keep their kind. Items with no explicit kind are treated as Products.
 - No live stock quantity is rewritten by the migration.
@@ -34,7 +34,7 @@ If the app finds an older JSON backup while the live database has no sales, it r
 
 ## Restoring a legacy backup
 
-1. Open the login screen and use **Restore backup file**, or sign in as admin and open **Admin → Database & Backups**.
+1. Open **Admin → SQLite DB & Backups** and use **Restore backup file**.
 2. Select the old `*backup*.json` file.
 3. The file is validated (including numeric stock quantities), normalized and merged. Existing products are matched by **ID and barcode**; live stock is never overwritten.
 4. Legacy items become Products, legacy categories become Product categories, and old single prices become maximums. Categories named `Services` or `Edibles` are renamed with a `(Legacy)` suffix so they cannot be mistaken for uncounted kinds.
@@ -55,6 +55,12 @@ When a scanned or selected product has no stock:
 - Receipts and financial statements show the shop's business identity from Hardware Config, plus the small DroneBug Technologies developer credit.
 - The app prints raw ESC/POS to the Windows queue; browser print fallback is used only in the web development preview.
 
+## Free / Open Source edition — what is locked
+
+POS, Inventory, Sales, Customers, Expenses, Hardware Config, backups and **receipt customization** are fully usable. The following are locked behind an on-screen upgrade message and cannot be used: **Financial Records (Reports)**, **Analytics**, **Staff Users**, **Categories**, **Audit Trail**, **Security & Recovery**, and every colour theme except **STOREBOX WHITE** (light) and **AMOLED Black** (dark).
+
+To unlock them, get **DIRMS Storebox PRO or a customized version** — **€170 / ₦250,000 + taxes (one-time)**. Contact icons on every locked screen open Gmail, WhatsApp, phone and Facebook.
+
 ## Troubleshooting
 
 - **Installer blocked by SmartScreen** — choose *More info → Run anyway* after verifying the file came from DroneBug Technologies.
@@ -62,8 +68,8 @@ When a scanned or selected product has no stock:
 - **Printer prints garbage or cuts early** — confirm the correct Windows printer and 58 mm/80 mm width; use a certified XP-80C/XP-58 driver from `hardware-drivers/`.
 - **Data looks empty after an update** — do not reinstall or reset. Exit the app, relaunch once (startup sibling-database merge runs), then use **Restore backup file** with the most recent JSON backup. Check `pos-debug.log` in the database folder for the recovery steps.
 - **Clock warning / FLASHALERT** — normal shutdowns and long closings are no longer treated as tampering; forward time simply advances the trusted anchor. A real **backward** clock move raises a persistent FLASHALERT. Non-admin staff can still sign in and sell, and their sales are tagged for review. An ADMIN login (or **Verify with ADMIN password** on the FLASHALERT) clears the alert and re-anchors the clock. Correcting the Windows date/time first is good practice, but it does not silently clear the alert: the FLASHALERT stays until an ADMIN verifies, so the evidence cannot be erased by simply fixing the clock.
-- **Uninstall** — Windows *Apps & features → Kingzzy Akamelu Resources → Uninstall*. This removes the application only; the business database remains in the app-data folder for a later reinstall.
+- **Uninstall** — Windows *Apps & features → DIRMS Storebox → Uninstall*. This removes the application only; the business database remains in the app-data folder for a later reinstall.
 
 ## Distribution contents
 
-`Kingzzy Akamelu Resources_2.0.7_x64-setup.exe` plus the optional `hardware-drivers/` folder (printer drivers, WebView2 runtime, USB-serial drivers). **No license key file is required or distributed with v2.0.7.**
+`DIRMS Storebox_2.1.0_x64-setup.exe` plus the optional `hardware-drivers/` folder (printer drivers, WebView2 runtime, USB-serial drivers). **No license key file is required or distributed with v2.1.0.**

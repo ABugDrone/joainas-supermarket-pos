@@ -40,7 +40,7 @@ import {
   FontFamilyId,
 } from '../utils/theme';
 import { ThemeSelectorModal } from './ThemeSelectorModal';
-import { EDITION } from '../config/edition';
+import { BRAND_EXPANSION, EDITION, UPGRADE_PRICE_LINE } from '../config/edition';
 
 interface DesktopShellProps {
   activeTab: 'pos' | 'inventory' | 'customers' | 'sales' | 'financials' | 'expenses' | 'printer' | 'analytics' | 'admin';
@@ -295,7 +295,9 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
             <div className="flex items-center gap-1">
               <span className="font-extrabold text-sm text-[var(--text-primary)]">{brandName}</span>
             </div>
-            <div className="text-[11px] text-[var(--text-muted)] font-medium -mt-0.5">Inventory Management System</div>
+            <div className="text-[9px] text-[var(--text-muted)] font-medium -mt-0.5 leading-tight max-w-[210px]">
+              {BRAND_EXPANSION}
+            </div>
           </div>
         </div>
 
@@ -311,7 +313,7 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
               <button
                 key={id}
                 onClick={() => setActiveTab(id)}
-                title={isLockedTab ? `${label} (Premium — Locked)` : `${label} (${shortcut})`}
+                title={isLockedTab ? `${label} (Locked — get PRO or a customized version)` : `${label} (${shortcut})`}
                 className={`sidebar-nav-btn group flex items-center gap-3 px-3 lg:px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-150 ${
                   isActive
                     ? `${activeColor} shadow-md`
@@ -364,6 +366,18 @@ export const DesktopShell: React.FC<DesktopShellProps> = ({
           <Palette className="w-5 h-5 shrink-0 text-[var(--text-muted)]" />
           <span className="hidden lg:inline">Display</span>
         </button>
+
+        {/* Free-edition upgrade note */}
+        {EDITION.isOpenSource && (
+          <div className="hidden lg:block mx-3 mb-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <div className="text-[10px] font-black uppercase tracking-wide text-amber-300">
+              Free / Open Source
+            </div>
+            <div className="text-[9px] leading-snug text-[var(--text-muted)]">
+              PRO / customized: {UPGRADE_PRICE_LINE}
+            </div>
+          </div>
+        )}
 
         {/* Logout Button */}
         {!EDITION.isOpenSource && (

@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { Palette, Type, Check, X, Monitor, Lock } from 'lucide-react';
-import { EDITION, gmailComposeUrl, whatsappDmUrl, premiumInquiryText } from '../config/edition';
+import {
+  EDITION,
+  UPGRADE_MESSAGE,
+  UPGRADE_PRICE_LINE,
+  isThemeAvailable,
+  gmailComposeUrl,
+  whatsappDmUrl,
+  premiumInquiryText,
+} from '../config/edition';
 import {
   APP_THEMES,
   ThemeId,
@@ -125,14 +133,15 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({
 
         {/* Content Area */}
         <div className="p-6 max-h-[55vh] overflow-y-auto">
-          {/* Tab 1: Color Themes — all unlocked in Full; dark-only in Kingzzy Akamelu Resources open-source */}
+          {/* Tab 1: Colour themes — light + dark only in the free edition */}
           {activeTab === 'theme' && (
             <div className="space-y-3">
               <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-[var(--text-secondary)]">
                 {EDITION.isOpenSource ? (
                   <>
-                    <span className="font-bold text-emerald-300">Kingzzy Akamelu Resources: </span>
-                    dark theme included. More themes unlock with the Full edition.
+                    <span className="font-bold text-emerald-300">Free / Open Source: </span>
+                    STOREBOX WHITE (light) and AMOLED Black (dark) are included. {UPGRADE_MESSAGE}{' '}
+                    <span className="font-black text-amber-200">{UPGRADE_PRICE_LINE}</span>
                   </>
                 ) : (
                   <>
@@ -144,12 +153,12 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {APP_THEMES.map((theme) => {
                 const isSelected = activeTheme === theme.id;
-                const isLocked = EDITION.isOpenSource && theme.id !== EDITION.defaultThemeId;
+                const isLocked = !isThemeAvailable(theme.id);
                 if (isLocked) {
                   const waUrl = whatsappDmUrl(premiumInquiryText(`Theme: ${theme.name}`));
                   const mailUrl = gmailComposeUrl(
-                    `Kingzzy Akamelu Resources Theme: ${theme.name}`,
-                    `Hello,\n\nI am using ${EDITION.shortName} v${EDITION.version} and need help with the theme "${theme.name}". Please assist.\n\nThank you.`
+                    `${EDITION.shortName} — Upgrade request: Theme ${theme.name}`,
+                    `Hello,\n\nI am using ${EDITION.shortName} v${EDITION.version} (${EDITION.editionLabel}) and would like ${EDITION.upgradeTarget} to unlock the theme "${theme.name}". Please send payment details.\n\nThank you.`
                   );
                   const openUrl = (url: string) => {
                     (async () => {
@@ -173,9 +182,11 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({
                         <span className="font-bold text-sm text-[var(--text-primary)]">{theme.name}</span>
                         <span className="flex items-center gap-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">
                           <Lock className="w-3 h-3" />
-                          Premium
+                          Locked · Free edition
                         </span>
                       </div>
+                      <p className="text-[11px] font-bold text-amber-300">{UPGRADE_MESSAGE}</p>
+                      <p className="text-[10px] font-black text-[var(--text-secondary)]">{UPGRADE_PRICE_LINE}</p>
                       <p className="text-xs text-[var(--text-muted)] line-clamp-2">{theme.description}</p>
                       <div className="flex items-center gap-2">
                         <button
@@ -202,7 +213,7 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({
                         >
                           <img src="/icons/brand-facebook.svg" alt="Facebook" className="w-5 h-5" />
                         </button>
-                        <span className="text-[10px] text-[var(--text-muted)] ml-auto">Tap an icon to upgrade</span>
+                        <span className="text-[10px] text-[var(--text-muted)] ml-auto">Tap an icon to ask about upgrading</span>
                       </div>
                     </div>
                   );
@@ -339,7 +350,7 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({
 
                       <div className="mt-1 p-2.5 bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg">
                         <div className="text-sm font-bold text-[var(--text-primary)]" style={{ fontFamily: familyOpt.familyCss }}>
-                          KINGZZY AKAMELU RESOURCES TERMINAL
+                          DIRMS AKAMELU RESOURCES TERMINAL
                         </div>
                         <div className="text-xs text-[var(--text-muted)] mt-0.5" style={{ fontFamily: familyOpt.familyCss }}>
                             Receipt #RCT-2026-8812 • ₦45,500

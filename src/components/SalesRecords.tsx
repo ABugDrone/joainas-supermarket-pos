@@ -6,6 +6,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { formatMoney } from '../utils/currency';
 import { formatSaleRate, isLegacySale } from '../utils/pricing';
 import { buildSaleDisplay } from '../utils/saleLines';
+import { saleFinancials } from '../utils/discounts';
 import { can } from '../utils/permissions';
 import { useToast } from './Toast';
 import { SaleDetailModal } from './SaleDetailModal';
@@ -313,6 +314,7 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
               ) : (
                 pagedSales.map((sale) => {
                   const display = buildSaleDisplay(sale.items, { code: sale.currency });
+                  const fin = saleFinancials(sale);
                   return (
                   <tr
                     key={sale.id}
@@ -347,6 +349,9 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                             {line.noteLines.map((note, ni) => (
                               <span key={ni} className="block text-[8px] font-medium leading-tight text-slate-500">{note}</span>
                             ))}
+                            {line.discountNoteLines.map((note, ni) => (
+                              <span key={ni} className="block text-[9px] font-bold leading-tight text-amber-400">{note}</span>
+                            ))}
                           </div>
                         ))}
                       </div>
@@ -369,6 +374,12 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
                     </td>
                     <td className="py-3 px-4 text-right font-black text-cyan-400 text-sm">
                       {formatMoney(sale.totalAmount, sale.currency)}
+                      {fin.hasAnyDiscount && (
+                        <span className="block text-[9px] font-bold text-amber-400">
+                          − {formatMoney(fin.totalDiscount, sale.currency)} discount
+                          {fin.billCouponCode ? ` · ${fin.billCouponCode}` : ''}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -437,7 +448,7 @@ export const SalesRecords: React.FC<SalesRecordsProps> = ({
 
         <div className="bg-[#0d1117] p-4 border-t border-[#30363d] flex items-center justify-between">
           <span className="text-xs font-bold text-slate-400">
-            Report Summary (Kingzzy Akamelu Resources Records Engine) — Click any row to preview full details
+            Report Summary (DIRMS Storebox Records Engine) — Click any row to preview full details
           </span>
           <div className="text-lg font-black text-white">
             Total: <span className="text-cyan-400">{formatNaira(totalRevenue)}</span>

@@ -1,5 +1,5 @@
 -- ====================================================================
--- KINGZZY AKAMELU RESOURCES - DESKTOP TAURI (GO + SQLITE) SCHEMA
+-- DIRMS AKAMELU RESOURCES - DESKTOP TAURI (GO + SQLITE) SCHEMA
 -- Database Engine: SQLite 3 (WAL Mode Enabled at runtime by the app)
 -- Full Admin Control: All tables support complete CRUD (Create, Read, Update, Delete)
 -- ====================================================================
@@ -137,6 +137,12 @@ CREATE TABLE IF NOT EXISTS sales (
     sale_time TEXT NOT NULL, -- HH:mm:ss
     cash_discount REAL NOT NULL DEFAULT 0.0, -- v2.0.8
     payment_mode TEXT NOT NULL DEFAULT 'full', -- v2.0.8 full | credit
+    gross_subtotal REAL NOT NULL DEFAULT 0.0, -- v2.1.0 before any discount
+    item_discount_total REAL NOT NULL DEFAULT 0.0, -- v2.1.0 product %
+    bill_discount_percent REAL NOT NULL DEFAULT 0.0, -- v2.1.0 whole-bill %
+    bill_discount_amount REAL NOT NULL DEFAULT 0.0, -- v2.1.0 whole-bill money
+    bill_coupon_code TEXT,                           -- v2.1.0 seasonal coupon
+    total_discount REAL NOT NULL DEFAULT 0.0,        -- v2.1.0 all discounts
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
 );
@@ -165,6 +171,10 @@ CREATE TABLE IF NOT EXISTS sale_items (
     carton_rate REAL NOT NULL DEFAULT 0.0, -- v2.0.8 dual ladder
     piece_rate REAL NOT NULL DEFAULT 0.0,  -- v2.0.8 dual ladder
     sale_mode TEXT,                        -- carton | piece | both
+    discount_percent REAL NOT NULL DEFAULT 0.0, -- v2.1.0 per-product %
+    coupon_code TEXT,                           -- v2.1.0 seasonal coupon
+    discount_amount REAL NOT NULL DEFAULT 0.0,  -- v2.1.0 money deducted
+    net_amount REAL NOT NULL DEFAULT 0.0,       -- v2.1.0 line total after discount
     FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
 );

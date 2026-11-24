@@ -288,17 +288,18 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 ];
 
 export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
-  storeName: '',
-  tagline: 'Inventory Management System',
-  // User-configured only: the business owner sets their own name, address and
-  // phone in Hardware Config -> Receipt Printer. No hardcoded business identity.
+  // v2.1.0 free build: sensible DIRMS Storebox defaults, fully editable in
+  // Hardware Config -> Receipt Printer (name, tagline, address, phone, note,
+  // logo). Receipts and statements render these values, not a fixed nickname.
+  storeName: 'DIRMS Storebox',
+  tagline: 'DroneBug Inventory & Records Management System',
   address: '',
   phone: '',
   receiptHeaderNote: '',
   receiptFooterNote: 'Thank you for your patronage! Please come again.',
   showLogo: true,
   logoDataUrl: undefined,
-  businessName: '',
+  businessName: 'DIRMS Storebox',
   paperWidth: '80mm',
   autoPrintOnSale: true,
   pointRate: 0,
@@ -309,7 +310,7 @@ export const DEVELOPER_INFO: StoreDeveloperInfo = {
   company: 'Dronebug Technologies & Services',
   email: 'dronebugtechnologies@gmail.com',
   phone: '+2347035716349',
-  appVersion: 'v2.0.9 Kingzzy Akamelu Resources (React + Vite + Tauri Engine)',
+  appVersion: 'v2.1.0 DIRMS Storebox Open Source (React + Vite + Tauri Engine)',
 };
 
 export const INITIAL_SALES: SaleRecord[] = [

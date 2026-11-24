@@ -1,5 +1,7 @@
 import { CartItem } from '../types';
 import { formatMoney, moneyAscii, getCurrencySymbol, resolveCurrency } from './currency';
+import { isWholesalePieceRate } from './packPricing';
+import { formatPercent, lineDiscount } from './discounts';
 
 // ===========================================================================
 // v2.0.9 — clean, box-first sale lines for receipts and sales records.
@@ -35,6 +37,11 @@ export interface WholesaleNote {
   wholesalePieceRate: number; // discounted price of ONE piece inside a box
   wholesaleDecimals: number; // decimals needed for the two sides to tie
   boxTotal: number;
+  /** v2.1.0 — loose pieces on this line also use the box-derived rate. */
+  wholesaleOnAllPieces: boolean;
+  extraPieces: number;
+  totalPieces: number;
+  combinedTotal: number;
 }
 
 export interface SaleDisplayLine {
@@ -52,6 +59,21 @@ export interface SaleDisplayLine {
   detail: string; // "2 cartons × ₦50,000.00"
   note?: WholesaleNote;
   noteLines: string[];
+  /**
+   * v2.1.0 — per-product percentage discount. Attached only to the FIRST
+   * display row of that product so a mixed box + loose-piece item does not
+   * print the same deduction twice.
+   */
+  discount?: LineDiscountInfo;
+  discountNoteLines: string[];
+}
+
+export interface LineDiscountInfo {
+  percent: number;
+  couponCode?: string;
+  gross: number;
+  amount: number; // money deducted from the whole product line
+  net: number; // line total after the deduction
 }
 
 export interface SaleDisplay {
@@ -62,8 +84,10 @@ export interface SaleDisplay {
   pieceStartIndex: number;
   /** Compact "2 cartons + 6 pieces" summary for the records Qty column. */
   unitSummary: string;
-  /** Sum of the split row amounts — equals the sale subtotal. */
+  /** Sum of the split row amounts — equals the sale gross subtotal. */
   linesTotal: number;
+  /** v2.1.0 — sum of the per-product percentage deductions. */
+  itemDiscountTotal: number;
 }
 
 export interface SaleDisplayOptions {
@@ -137,9 +161,26 @@ export function formatWholesaleNote(
   const code = opts.code;
   const cross = ascii ? 'x' : '×';
   const rateText = moneyAt(note.wholesalePieceRate, note.wholesaleDecimals, code, ascii);
-  const totalText = money(note.boxTotal, code, ascii);
   const boxRateText = money(note.boxRate, code, ascii);
   const boxes = pluralUnit(note.boxQty, note.boxUnit);
+
+  // v2.1.0 — boxes + loose pieces priced at ONE wholesale rate: both sides
+  // of the double entry show the same combined total (19 pcs = 1 box + 7 pcs).
+  if (note.wholesaleOnAllPieces && note.extraPieces > 0) {
+    const totalText = money(note.combinedTotal, code, ascii);
+    if (ascii) {
+      return [
+        `Wholesale: ${note.totalPieces}pcs ${cross} ${rateText}/pc = ${totalText}`,
+        `Box check: ${boxes} ${cross} ${boxRateText} + ${note.extraPieces}pcs ${cross} ${rateText} = ${totalText}`,
+      ];
+    }
+    return [
+      `Wholesale: ${note.totalPieces} pcs ${cross} ${rateText}/pc = ${totalText}`,
+      `Box check: ${boxes} ${cross} ${boxRateText} + ${note.extraPieces} pcs ${cross} ${rateText} = ${totalText}`,
+    ];
+  }
+
+  const totalText = money(note.boxTotal, code, ascii);
   if (ascii) {
     return [
       `Wholesale: ${note.piecesInBoxes}pcs ${cross} ${rateText}/pc`,
@@ -163,6 +204,10 @@ interface MakeLineArgs {
   rate: number;
   amount: number;
   note?: WholesaleNote;
+  /** v2.1.0 — print a wholesale rate at full precision on the piece row. */
+  rateDecimals?: number;
+  /** v2.1.0 — per-product percentage discount note. */
+  discount?: LineDiscountInfo;
   opts: SaleDisplayOptions;
 }
 
@@ -170,6 +215,20 @@ function makeLine(a: MakeLineArgs): SaleDisplayLine {
   const ascii = !!a.opts.ascii;
   const cross = ascii ? 'x' : '×';
   const qtyLabel = pluralUnit(a.qty, a.unit);
+  const rateText = a.rateDecimals
+    ? moneyAt(a.rate, a.rateDecimals, a.opts.code, ascii)
+    : money(a.rate, a.opts.code, ascii);
+  const discountNoteLines: string[] = a.discount
+    ? [
+        `Discount ${formatPercent(a.discount.percent)}${
+          a.discount.couponCode ? ` (${a.discount.couponCode})` : ''
+        }: -${money(a.discount.amount, a.opts.code, ascii)} ${ascii ? '->' : '→'} ${money(
+          a.discount.net,
+          a.opts.code,
+          ascii,
+        )}`,
+      ]
+    : [];
   return {
     key: a.key,
     kind: a.kind,
@@ -180,11 +239,13 @@ function makeLine(a: MakeLineArgs): SaleDisplayLine {
     qtyLabel,
     rate: a.rate,
     amount: a.amount,
-    rateLabel: plain(a.rate),
+    rateLabel: a.rateDecimals ? grouped(a.rate, a.rateDecimals) : plain(a.rate),
     amountLabel: plain(a.amount),
-    detail: `${qtyLabel} ${cross} ${money(a.rate, a.opts.code, ascii)}`,
+    detail: `${qtyLabel} ${cross} ${rateText}`,
     note: a.note,
     noteLines: a.note ? formatWholesaleNote(a.note, a.opts) : [],
+    discount: a.discount,
+    discountNoteLines,
   };
 }
 
@@ -199,9 +260,29 @@ export function buildSaleDisplay(
   const boxes: SaleDisplayLine[] = [];
   const pieces: SaleDisplayLine[] = [];
   const plains: SaleDisplayLine[] = [];
+  let itemDiscountTotal = 0;
 
   (items || []).forEach((item, idx) => {
     const product = item.product || ({} as CartItem['product']);
+    // v2.1.0 — one percentage discount per PRODUCT, shown once on its first
+    // presentation row even when the item splits into a box + loose-piece row.
+    const ld = lineDiscount(item, idx);
+    itemDiscountTotal += ld.amount;
+    const discountInfo: LineDiscountInfo | undefined = ld.percent > 0
+      ? {
+          percent: ld.percent,
+          couponCode: ld.couponCode,
+          gross: ld.gross,
+          amount: ld.amount,
+          net: ld.net,
+        }
+      : undefined;
+    let attached = false;
+    const takeDiscount = (): LineDiscountInfo | undefined => {
+      if (attached || !discountInfo) return undefined;
+      attached = true;
+      return discountInfo;
+    };
     const name = product.name || 'Item';
     const category = product.category || '';
     const per = Number(item.piecesPerCarton ?? product.piecesPerCarton ?? 0);
@@ -220,6 +301,7 @@ export function buildSaleDisplay(
           qty: Number(item.quantity || 0),
           rate: Number(item.rate || 0),
           amount: Number(item.amount || 0),
+          discount: takeDiscount(),
           opts,
         }),
       );
@@ -234,19 +316,32 @@ export function buildSaleDisplay(
     if (c > 0 && !(boxRate > 0)) boxRate = blended * per;
     if (p > 0 && !(pieceRate > 0)) pieceRate = blended;
 
+    const boxTotal = c * boxRate;
+    const piecesInBoxes = c * per;
+    // v2.1.0 — a mixed sale whose piece rate equals box ÷ pieces prices ALL
+    // pieces at the wholesale rate. Legacy rows with their own higher piece
+    // price keep the v2.0.9 box-only footer.
+    const wholesaleOnAllPieces =
+      c > 0 && p > 0 && per > 0 && isWholesalePieceRate(pieceRate, boxRate, per);
+    const extraPieces = wholesaleOnAllPieces ? p : 0;
+    const totalPieces = piecesInBoxes + extraPieces;
+    const combinedTotal = boxTotal + extraPieces * pieceRate;
+    const decimals = wholesaleDecimals(combinedTotal, totalPieces, opts.code);
+
     if (c > 0) {
-      const boxTotal = c * boxRate;
-      const piecesInBoxes = c * per;
-      const decimals = wholesaleDecimals(boxTotal, piecesInBoxes, opts.code);
       const note: WholesaleNote = {
         boxQty: c,
         boxUnit,
         boxRate,
         piecesPerBox: per,
         piecesInBoxes,
-        wholesalePieceRate: Number((boxTotal / piecesInBoxes).toFixed(decimals)),
+        wholesalePieceRate: Number((combinedTotal / totalPieces).toFixed(decimals)),
         wholesaleDecimals: decimals,
         boxTotal,
+        wholesaleOnAllPieces,
+        extraPieces,
+        totalPieces,
+        combinedTotal,
       };
       boxes.push(
         makeLine({
@@ -259,6 +354,7 @@ export function buildSaleDisplay(
           rate: boxRate,
           amount: boxTotal,
           note,
+          discount: takeDiscount(),
           opts,
         }),
       );
@@ -275,6 +371,8 @@ export function buildSaleDisplay(
           qty: p,
           rate: pieceRate,
           amount: p * pieceRate,
+          rateDecimals: wholesaleOnAllPieces ? decimals : undefined,
+          discount: takeDiscount(),
           opts,
         }),
       );
@@ -302,5 +400,6 @@ export function buildSaleDisplay(
     pieceStartIndex: pieces.length ? boxes.length : -1,
     unitSummary,
     linesTotal: lines.reduce((s, l) => s + l.amount, 0),
+    itemDiscountTotal: Math.round(itemDiscountTotal * 100) / 100,
   };
 }

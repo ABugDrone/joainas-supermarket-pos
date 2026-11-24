@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Kingzzy Akamelu Resources",
-  "mainBinaryName": "Kingzzy Akamelu Resources",
-  "version": "2.0.9",
+  "productName": "DIRMS Storebox",
+  "mainBinaryName": "DIRMS Storebox",
+  "version": "2.1.0",
   "identifier": "com.dronebug.dirms.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "Kingzzy Akamelu Resources",
+        "title": "DIRMS Storebox",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,
@@ -39,9 +39,9 @@
       "icons/icon.ico"
     ],
     "publisher": "Dronebug Technologies and Services",
-    "copyright": "Copyright (c) 2026 Kingzzy Akamelu Resources. Developed by Dronebug Technologies and Services. All Rights Reserved.",
+    "copyright": "Copyright (c) 2026 DIRMS Storebox. Developed by Dronebug Technologies and Services. All Rights Reserved.",
     "category": "Business",
-    "shortDescription": "Kingzzy Akamelu Resources - Inventory Management System (v2.0.9)",
+    "shortDescription": "DIRMS Storebox - Inventory Management System (v2.1.0)",
     "windows": {
       "nsis": {
         "installMode": "perMachine"
