@@ -4,7 +4,7 @@ import { Category, Product, SaleRecord } from '../types';
  * Legacy backup normalization.
  *
  * Prior releases mixed goods, services and edibles in one flat catalogue and
- * treated the single price as a minimum. DIRMS Storebox treats every inventory
+ * treated the single price as a minimum. Alhaji Rabiu Global Entreprises treats every inventory
  * item as a Product, groups categories under the Products root, and treats a
  * legacy single price as a MAXIMUM. An explicit range (min < max, or a tier
  * floor below its ceiling) is preserved because it was deliberate.
@@ -184,7 +184,7 @@ export function normalizeLegacyBackup(payload: BackupPayload): BackupPayload {
   result.sales = sales;
   result.version = CURRENT_APP_VERSION;
   result.appVersion = CURRENT_APP_VERSION;
-  result.appName = 'DIRMS Storebox';
+  result.appName = 'Alhaji Rabiu Global Entreprises';
   return result;
 }
 

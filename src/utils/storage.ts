@@ -459,7 +459,7 @@ function buildAutosaveSnapshot(slim: boolean): AutosaveSnapshot {
     printerConfig: cachePrinterConfig,
     timestamp: Date.now(),
     version: 1,
-    appName: 'DIRMS Storebox',
+    appName: 'Alhaji Rabiu Global Entreprises',
     appVersion: '2.1.0',
   };
 }
@@ -2119,36 +2119,59 @@ export const migrateLegacyReceiptFooter = (): boolean => {
   }
 };
 
-// v2.0.6 Joainas Mart rebrand: existing installs still hold the old brand
-// defaults in SQLite/localStorage. Rewrite ONLY untouched defaults so a
-// business name the owner typed is never overwritten.
+// v2.1.0 Alhaji Rabiu Global Entreprises upgrade: existing Rabiu / Joainas /
+// DIRMS Storebox installs still hold untouched old-brand defaults in SQLite
+// or localStorage. Rewrite ONLY known stock defaults — a business name,
+// address, phone or note the owner typed is never overwritten. Product,
+// customer, sale, user and audit rows are not touched by this migration.
 const LEGACY_BRAND_DEFAULTS = [
   'Rabiu Entreprises',
+  'Joainas Mart',
   'Joainas Supermarket & Coldstore',
+  'Kingzzy Akamelu Resources',
   'DIRMS Store',
   'DIRMS StoreBox PRO',
+  'DIRMS Storebox',
+];
+const LEGACY_ADDRESS_DEFAULTS = [
+  'Rabiu Entreprises.',
+  'Rabiu Entreprises',
+  'Joainas Mart.',
+  'DIRMS Storebox.',
+];
+const LEGACY_PHONE_DEFAULTS = ['', '+2347035716349', '2347035716349'];
+const LEGACY_TAGLINE_DEFAULTS = [
+  'DroneBug Inventory & Records Management System',
+  'Inventory Management System',
+];
+const LEGACY_HEADER_NOTE_DEFAULTS = [
+  'WELCOME TO Rabiu Entreprises',
+  'WELCOME TO Joainas Mart',
+  'WELCOME TO DIRMS Storebox',
 ];
 export const migrateLegacyBusinessBranding = (): boolean => {
   try {
     if (!cachePrinterConfig) return false;
     const next = { ...cachePrinterConfig };
-    const isLegacyName = (value?: string) =>
-      !value || LEGACY_BRAND_DEFAULTS.includes(value.trim());
+    const matches = (value: string | undefined, defaults: readonly string[]) =>
+      !value || defaults.includes(value.trim());
 
-    if (isLegacyName(next.businessName)) next.businessName = INITIAL_PRINTER_CONFIG.businessName;
-    if (isLegacyName(next.storeName)) next.storeName = INITIAL_PRINTER_CONFIG.storeName;
-    if (
-      !next.address ||
-      next.address.trim() === 'Rabiu Entreprises.' ||
-      next.address.trim() === 'Joainas Mart.'
-    ) {
+    if (matches(next.businessName, LEGACY_BRAND_DEFAULTS)) {
+      next.businessName = INITIAL_PRINTER_CONFIG.businessName;
+    }
+    if (matches(next.storeName, LEGACY_BRAND_DEFAULTS)) {
+      next.storeName = INITIAL_PRINTER_CONFIG.storeName;
+    }
+    if (matches(next.address, LEGACY_ADDRESS_DEFAULTS)) {
       next.address = INITIAL_PRINTER_CONFIG.address;
     }
-    if (
-      !next.receiptHeaderNote ||
-      next.receiptHeaderNote.trim() === 'WELCOME TO Rabiu Entreprises' ||
-      next.receiptHeaderNote.trim() === 'WELCOME TO Joainas Mart'
-    ) {
+    if (matches(next.phone, LEGACY_PHONE_DEFAULTS)) {
+      next.phone = INITIAL_PRINTER_CONFIG.phone;
+    }
+    if (matches(next.tagline, LEGACY_TAGLINE_DEFAULTS)) {
+      next.tagline = INITIAL_PRINTER_CONFIG.tagline;
+    }
+    if (matches(next.receiptHeaderNote, LEGACY_HEADER_NOTE_DEFAULTS)) {
       next.receiptHeaderNote = INITIAL_PRINTER_CONFIG.receiptHeaderNote;
     }
 

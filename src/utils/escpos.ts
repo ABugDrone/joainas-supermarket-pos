@@ -125,7 +125,7 @@ export function buildEscPos(
   // Letting the firmware do the centering is the most reliable approach
   // and matches the on-screen preview which uses text-center.
   // v2.1.0 — receipt details are fully customizable in Hardware Config.
-  // Business Name (then Store Name) wins; DIRMS Storebox is the default.
+  // Business Name (then Store Name) wins; Alhaji Rabiu Global Entreprises is the default.
   const headerName =
     (config.businessName || '').trim() ||
     (config.storeName || '').trim() ||

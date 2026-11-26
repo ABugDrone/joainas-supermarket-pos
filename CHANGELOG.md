@@ -1,15 +1,20 @@
-# DIRMS Storebox POS System - Changelog
+# Alhaji Rabiu Global Entreprises POS System - Changelog
 
-## Version 2.1.0 — DIRMS Storebox Open Source (2026-11-24)
+## Version 2.1.0 — Alhaji Rabiu Global Entreprises Full Build (2026-11-26)
 
-### 🏪 Rebrand — DIRMS Storebox
-- Every Kingzzy Akamelu Resources / "(Fine boy)" identity is replaced with **DIRMS Storebox** (DroneBug Inventory & Records Management System) across the app, window title, backups, receipts, financial statements, installer and docs. Icons and logos regenerate from `assets/DIRMS.png`.
-- **Receipt details are customizable**: business name, tagline, address, phone, header note and logo are editable in Hardware Config, defaulting to DIRMS Storebox. The hard-coded nickname line is gone.
-- Free / open-source edition: no license key, no activation, no login or setup gate.
+### 🏪 Rebrand — Alhaji Rabiu Global Entreprises, FKA Rabiu Entreprises
+- Every app, dashboard, window, installer, backup, receipt, financial statement and document identity now reads **Alhaji Rabiu Global Entreprises**. The old name appears only here in release notes and in safe migration logic, never in the app UI.
+- Icons and logos use the existing `assets/Rabiu Entreprises.png` artwork.
+- Receipt defaults are **Head Office: Zone C Block KC Shop KX Shop No. 29 & 30, Palluja Market, Jimeta Yola, Adamawa State.** and **Phone / WhatsApp: +2348030732220**. Business name, tagline, address, phone, header note and logo remain editable in Hardware Config.
+- Developer/support contact remains Dronebug Technologies & Services.
 
-### 🔒 Locked features with upgrade messaging
-- Financial Records (Reports), Analytics, Staff Users, Categories, Audit Trail, Security & Recovery, and all colour themes except **STOREBOX WHITE** (light) and **AMOLED Black** (dark) render an unusable upgrade screen.
-- Locked screens point to **DIRMS Storebox PRO or a customized version**, priced **€170 / ₦250,000 + taxes (one-time)**, with Gmail / WhatsApp / phone / Facebook contact icons.
+### 🔓 Fully unlocked full build
+- No license key, no activation screen, no PRO price and no locked-feature upgrade message.
+- ADMIN/staff setup and sign-in are restored; Financial Records, Analytics, Staff Users, Categories, Audit Trail, Security & Recovery and all seven colour themes are usable.
+
+### 🗄️ Data-preserving upgrade from Rabiu Entreprises
+- The Tauri identifier `com.dronebug.dirms.desktop` and database file `senior_citizen_accessories.db` are unchanged, so installing over the old Rabiu build preserves products, stock, sales, customers, users, expenditures, audit logs and backups.
+- A one-time additive branding migration updates only untouched old stock receipt defaults to the new name/address/phone. Owner-customized values and all business data are left intact.
 
 ### 📦 Box-derived wholesale piece pricing
 - When at least one carton/pack is on a line, loose pieces are no longer priced from the piece ladder: they are priced at **actual box price ÷ pieces per box** (e.g. ₦10,000 ÷ 12 = ₦833.3333). That rate is derived, non-editable and re-derives whenever the box price changes.

@@ -12,7 +12,7 @@ import { isTauriRuntime } from '../utils/db';
 import { BRANDED_NAME_LINE, BRAND_EXPANSION } from '../config/edition';
 import { useToast } from './Toast';
 
-/** v2.1.0 — the header comes from Hardware Config, with DIRMS Storebox defaults.
+/** v2.1.0 — the header comes from Hardware Config, with Alhaji Rabiu Global Entreprises defaults.
  * The DIRMS logo is only the fallback when no custom logo is uploaded. */
 const RECEIPT_BRAND_ICON = '/receipt-icon.png';
 
@@ -112,7 +112,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   };
 
   // v2.1.0 — fully customizable receipt details. Business Name (then Store
-  // Name) wins; DIRMS Storebox is only the default.
+  // Name) wins; Alhaji Rabiu Global Entreprises is only the default.
   const headerName =
     (config.businessName || '').trim() ||
     (config.storeName || '').trim() ||

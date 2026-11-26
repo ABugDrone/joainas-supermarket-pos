@@ -51,10 +51,10 @@ export const HeaderLogo: React.FC<HeaderLogoProps> = ({
           : 'items-center gap-3'
       }`}
     >
-      {/* DIRMS Storebox logo */}
+      {/* Alhaji Rabiu Global Entreprises logo */}
       <img
         src="/logo.png"
-        alt="DIRMS Storebox Logo"
+        alt="Alhaji Rabiu Global Entreprises Logo"
         className={`${scaleClasses} rounded-xl object-contain flex-shrink-0`}
       />
 
@@ -62,7 +62,7 @@ export const HeaderLogo: React.FC<HeaderLogoProps> = ({
       <div className={`flex flex-col ${layout === 'vertical' ? 'items-center text-center' : 'items-start text-left'}`}>
         <div className="flex items-center gap-1.5 leading-none">
           <span className={`tracking-tight font-extrabold text-[var(--text-primary)] ${textClasses}`}>
-            DIRMS Storebox
+            Alhaji Rabiu Global Entreprises
           </span>
         </div>
 

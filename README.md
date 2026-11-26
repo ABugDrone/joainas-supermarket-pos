@@ -1,6 +1,6 @@
-# 🛒 DIRMS Storebox - POS & Inventory Management
+# 🛒 Alhaji Rabiu Global Entreprises - POS & Inventory Management
 
-**DIRMS = DroneBug Inventory & Records Management System.** v2.1.0 is the free / open-source edition: POS, Inventory, Sales, Customers, Expenses, Hardware Config, backups and fully customizable receipts are usable; Financial Records, Analytics, most Admin features and extra themes are locked behind an upgrade message for **DIRMS Storebox PRO or a customized version (€170 / ₦250,000 + taxes)**.
+v2.1.0 is the **fully unlocked custom build** for **Alhaji Rabiu Global Entreprises** (formerly Rabiu Entreprises). POS, Inventory, Sales, Customers, Expenses, Hardware Config, backups, receipts, Financial Records, Analytics, all Admin tools and all colour themes are enabled. There is no license key, no activation and no upgrade screen. It uses the unchanged app identifier and database file from the earlier Rabiu build, so installing it over the old version preserves stocks, sales, customers, users and audit history.
 
 A modern, full-featured **Point of Sale (POS) and Inventory Management System** built specifically for supermarkets and coldstores. This desktop application combines the power of **React**, **TypeScript**, and **Tauri** to deliver a fast, secure, and user-friendly business management solution.
 
@@ -188,7 +188,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🏢 About
 
 **Developed by**: Dronebug Technologies & Services  
-**For**: DIRMS Storebox  
+**For**: Alhaji Rabiu Global Entreprises  
+**Head Office**: Zone C Block KC Shop KX Shop No. 29 & 30, Palluja Market, Jimeta Yola, Adamawa State.  
+**Phone / WhatsApp**: +2348030732220  
 **Purpose**: Modern retail management solution
 
 ## 📞 Support

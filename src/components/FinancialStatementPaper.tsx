@@ -152,7 +152,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
       </div>
 
       <p className="text-[10px] text-gray-600 mt-6">
-        This statement was generated automatically by the DIRMS Storebox system from {data.transactionCount} completed receipt(s) within the selected period.
+        This statement was generated automatically by the Alhaji Rabiu Global Entreprises system from {data.transactionCount} completed receipt(s) within the selected period.
       </p>
 
       {/* Signatures */}
@@ -163,7 +163,7 @@ export const FinancialStatementPaper: React.FC<FinancialStatementPaperProps> = (
         </div>
         <div className="text-right">
           <p className="font-bold">Software Developer Verification:</p>
-          <p className="mt-1 font-semibold">DIRMS Storebox</p>
+          <p className="mt-1 font-semibold">Alhaji Rabiu Global Entreprises</p>
           <p>dronebugtechnologies@gmail.com</p>
         </div>
       </div>

@@ -1,6 +1,6 @@
-# DIRMS Storebox — ADMIN Password Recovery Guide (v2.1.0)
+# Alhaji Rabiu Global Entreprises — ADMIN Password Recovery Guide (v2.1.0)
 
-> **Note for v2.1.0 (free / open-source edition):** this build has no login, no staff accounts and a locked **Security & Recovery** tab, so the ADMIN recovery flow below is **not available**. It applies to DIRMS Storebox PRO and customized versions. To unlock it, get **DIRMS Storebox PRO or a customized version** — **€170 / ₦250,000 + taxes (one-time)**.
+> **Note for v2.1.0 (full custom build):** ADMIN/staff login, the **Security & Recovery** tab and the recovery flow below are all enabled. Existing Rabiu Entreprises installs keep their saved accounts; a fresh install creates the first ADMIN in the setup wizard.
 
 This guide covers the **ADMIN** account only. Staff passwords can be reset by an ADMIN in **Admin → Staff** without this flow.
 

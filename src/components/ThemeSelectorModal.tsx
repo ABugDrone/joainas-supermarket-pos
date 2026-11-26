@@ -145,7 +145,7 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <span className="font-bold text-emerald-300">PRO Full: </span>
+                    <span className="font-bold text-emerald-300">Full Build: </span>
                     all themes are unlocked. Pick any colour — your choice is saved on this device.
                   </>
                 )}

@@ -288,18 +288,18 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 ];
 
 export const INITIAL_PRINTER_CONFIG: ThermalPrinterConfig = {
-  // v2.1.0 free build: sensible DIRMS Storebox defaults, fully editable in
-  // Hardware Config -> Receipt Printer (name, tagline, address, phone, note,
-  // logo). Receipts and statements render these values, not a fixed nickname.
-  storeName: 'DIRMS Storebox',
-  tagline: 'DroneBug Inventory & Records Management System',
-  address: '',
-  phone: '',
-  receiptHeaderNote: '',
+  // v2.1.0 full custom build: Alhaji Rabiu Global Entreprises business
+  // defaults, still fully editable in Hardware Config -> Receipt Printer.
+  // Receipts and statements render these values, not a fixed nickname.
+  storeName: 'Alhaji Rabiu Global Entreprises',
+  tagline: 'Inventory Management System',
+  address: 'Head Office: Zone C Block KC Shop KX Shop No. 29 & 30, Palluja Market, Jimeta Yola, Adamawa State.',
+  phone: '+2348030732220',
+  receiptHeaderNote: 'WELCOME TO Alhaji Rabiu Global Entreprises',
   receiptFooterNote: 'Thank you for your patronage! Please come again.',
   showLogo: true,
   logoDataUrl: undefined,
-  businessName: 'DIRMS Storebox',
+  businessName: 'Alhaji Rabiu Global Entreprises',
   paperWidth: '80mm',
   autoPrintOnSale: true,
   pointRate: 0,
@@ -310,7 +310,7 @@ export const DEVELOPER_INFO: StoreDeveloperInfo = {
   company: 'Dronebug Technologies & Services',
   email: 'dronebugtechnologies@gmail.com',
   phone: '+2347035716349',
-  appVersion: 'v2.1.0 DIRMS Storebox Open Source (React + Vite + Tauri Engine)',
+  appVersion: 'v2.1.0 Alhaji Rabiu Global Entreprises Full Build (React + Vite + Tauri Engine)',
 };
 
 export const INITIAL_SALES: SaleRecord[] = [

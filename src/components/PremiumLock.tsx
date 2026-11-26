@@ -48,7 +48,7 @@ export const PremiumLock: React.FC<PremiumLockProps> = ({ feature, title, whatIt
         </div>
 
         <div className="mt-4 inline-block text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300">
-          Locked in the free / open-source edition
+          Feature unavailable
         </div>
 
         <h2 className="mt-3 text-xl font-black text-[var(--text-primary)]">{title}</h2>

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DIRMS Storebox",
-  "mainBinaryName": "DIRMS Storebox",
+  "productName": "Alhaji Rabiu Global Entreprises",
+  "mainBinaryName": "Alhaji Rabiu Global Entreprises",
   "version": "2.1.0",
   "identifier": "com.dronebug.dirms.desktop",
   "build": {
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "DIRMS Storebox",
+        "title": "Alhaji Rabiu Global Entreprises",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,
@@ -39,9 +39,9 @@
       "icons/icon.ico"
     ],
     "publisher": "Dronebug Technologies and Services",
-    "copyright": "Copyright (c) 2026 DIRMS Storebox. Developed by Dronebug Technologies and Services. All Rights Reserved.",
+    "copyright": "Copyright (c) 2026 Alhaji Rabiu Global Entreprises. Developed by Dronebug Technologies and Services. All Rights Reserved.",
     "category": "Business",
-    "shortDescription": "DIRMS Storebox - Inventory Management System (v2.1.0)",
+    "shortDescription": "Alhaji Rabiu Global Entreprises - Inventory Management System (v2.1.0)",
     "windows": {
       "nsis": {
         "installMode": "perMachine"

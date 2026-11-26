@@ -325,7 +325,7 @@ export function toPdfBytes(table: DataTable, subtitle?: string): Uint8Array {
   const pageWidth = doc.internal.pageSize.getWidth();
 
   doc.setFontSize(14);
-  doc.text(`DIRMS Storebox — ${table.title}`, 40, 40);
+  doc.text(`Alhaji Rabiu Global Entreprises — ${table.title}`, 40, 40);
   doc.setFontSize(9);
   doc.setTextColor(90);
   doc.text(
